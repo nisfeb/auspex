@@ -1,88 +1,74 @@
 # urmail — design
 
-Date: 2026-09-07
-Status: approved, ready for implementation planning
+Date: 2026-09-07, rewritten 2026-09-08
+Status: current. This describes the shipping build — a grubbery nexus — and
+nothing else. Where it states a limit or a cost, that limit is in the code.
+
+urmail was first built as a Gall agent. That build is gone; see `## History`
+at the end for what it was and where it lives now. Nothing in this document
+describes it.
 
 ## What this is
 
 An Urbit-native mail application. It gives you the UX of email — an inbox,
-threads, compose, reply, forward — without SMTP, IMAP, MIME, or any of the
-machinery that makes email what it is.
+threads, compose, reply, forward, attachments — without SMTP, IMAP, MIME, or
+any of the machinery that makes email what it is.
 
-It does not bridge to internet email. Both ends run `%urmail`.
+It does not bridge to internet email. Both ends run urmail.
+
+It ships as a **grubbery nexus**: an overlay distributed into the `%grubbery`
+desk, the same way lattice is, owning a subtree of grubbery's ball and serving
+its own HTTP surface under `/apps/urmail`.
 
 ## Why it is not a chat app
 
-The unit of the system is a **signed chain**: an append-only list of messages,
+The unit of the system is a **signed chain**: a root-to-leaf path of messages,
 each one signed by the ship that wrote it. A chain is self-contained and
 portable. You can hand it to a ship that was never part of the conversation and
 that ship can verify, on its own, who wrote every message in it.
 
 Forwarding is therefore not quoting. Forwarding transfers evidence.
 
-## Data model
+---
 
-The chain is the mark. One file, `mar/urmail/chain.hoon`, is the entire wire
-format and the entire portable artifact.
+# The signed chain
 
-```hoon
-+$  msg-id  @uv                       ::  (sham unsigned)
-::
-+$  unsigned
-  $:  from=ship
-      life=@ud                        ::  key life the signature was made under
-      to=(set ship)
-      subj=@t
-      body=@t
-      sent=@da
-      prev=(unit msg-id)              ::  parent message in this chain
-  ==
-::
-+$  msg    [=unsigned sig=@ux]
-+$  chain  (list msg)                 ::  root first, append only
-```
+## What a chain is
 
-`msg-id` is `(sham unsigned)`. It covers every field a signature covers, so an
-id and a signature agree by construction.
+**A chain is a root-to-leaf path, not a whole thread.** `prev` makes a thread
+branch — two people replying to one message are siblings, and mail threads
+branch constantly — so a thread is a tree and a chain is one path through it:
+the conversation leading to a message, which is exactly what a recipient needs
+to verify that message and exactly what `prev` already describes.
 
-`life` travels with the message because signatures must outlive key rotation. A
-message signed under life 3 stays verifiable after the sender rotates to life 4,
-because the verifier looks up the key for the life the message names.
-
-`prev` is what makes a flat list a chain. A reply points at the message it
-answers; a forward points into the chain it carries.
-
-### Marks
-
-- `mar/urmail/chain.hoon` — `+grab` from `%noun` and `%json`, `+grow` to
-  `%json`, `+noun`.
-- `mar/urmail/action.hoon` — the poke the frontend sends.
-
-The JSON forms exist so the web UI can read chains without a second
-representation. The noun form is what crosses Ames.
+A path is a valid chain on its own: every `prev` in it resolves inside it, it
+contains the unique `prev=~` root, so a recipient files it under the same
+thread id and every message in it still verifies independently.
 
 ## Signing
 
 Userspace can sign with the ship's real networking key. Confirmed against
-`pkg/arvo/sys/vane/jael.hoon` in the arvo source.
+`pkg/arvo/sys/vane/jael.hoon` in the arvo source, and exercised live on `~wex`
+and `~feb`.
 
 ```hoon
 ::  our private key ring for a given life
-=/  ring  .^(ring %j /(scot %p our.bowl)/vein/(scot %da now.bowl)/(scot %ud life))
+=/  ring  .^(ring %j /(scot %p our)/vein/(scot %da now)/(scot %ud life))
 =/  cor   (nol:nu:cric:crypto ring)
 =/  sig   (sigh:as:cor (shaf %urmail (sham unsigned)))
 ```
 
-The `%vein` scry is gated on the requesting ship being `our`, which a local Gall
-agent always is.
+The `%vein` scry is gated on the requesting ship being `our`, which the nexus
+always is.
 
 ### Domain separation is mandatory
 
 The signature is over `(shaf %urmail (sham unsigned))`, never over raw message
-bytes. The ship's networking key also signs Ames packets and attestations. A
-signature produced over attacker-chosen bytes with that key is a forgery
-primitive if the byte space overlaps. The `%urmail` tag makes the preimage space
-disjoint from every other use of the key.
+bytes — `+digest` in `lib/urmail-chain.hoon`. The ship's networking key also
+signs Ames packets and attestations. A signature produced over attacker-chosen
+bytes with that key is a forgery primitive if the byte space overlaps. The
+`%urmail` salt makes the preimage space disjoint from every other use of the
+key.
 
 This is not optional and it is not a performance question.
 
@@ -91,7 +77,7 @@ This is not optional and it is not a performance question.
 ```hoon
 =/  pub  .^(  (unit [crypto-suite=@ud =pass])
               %j
-              /(scot %p our.bowl)/puby/(scot %da now.bowl)/(scot %p from)/(scot %ud life)
+              /(scot %p our)/puby/(scot %da now)/(scot %p from)/(scot %ud life)
           ==)
 ?~  pub  %unverified
 ?:  (safe:as:(com:nu:cric:crypto pass.u.pub) sig (shaf %urmail (sham unsigned)))
@@ -100,12 +86,8 @@ This is not optional and it is not a performance question.
 ```
 
 `%puby` is the unitized public-key scry. It returns `~` for a ship absent from
-the local Azimuth snapshot rather than blocking. A blocking scry inside a Gall
-agent stalls the agent, so the unitized variant is the only safe choice here.
-Do not reach for `%deed`.
-
-The product type follows `keys=(map life [crypto-suite=@ud =pass])` in `+point`
-(`sys/lull.hoon`). It is read off the source and has not been run.
+the local Azimuth snapshot rather than blocking, and a blocking scry inside a
+fiber stalls the fiber. Do not reach for `%deed`.
 
 ### Two constraints the jael source imposes
 
@@ -115,39 +97,48 @@ returns `~`, which blocks. Nothing may scry jael with a stored or hardcoded
 date, and no test can scry jael at all, since a test arm has no bowl.
 
 Therefore the crypto splits in two: **pure gates** that take keys as arguments
-and do all the signing, verifying, and digesting, and **thin scry wrappers**
-that only the agent calls, with a live `now`. Everything worth testing lives on
-the pure side.
+and do all the signing, verifying and digesting, and **thin wrappers** that
+only the nexus calls, with a live `now`. Everything worth testing lives on the
+pure side, in `lib/urmail-chain.hoon`, which scries nothing. This split is what
+made the port to a nexus cheap, and it is the same discipline the overlay
+import rule enforces below.
 
 **Jael's `%puby` has no fake-ship branch.** `%deed` special-cases fake ships by
 deriving a keypair from the `@p` — `(pit:nu:cric:crypto 512 who %b ~)` — but
 `%puby` reads `pos.zim` directly and returns `~` for any ship the fake ship has
 no Azimuth snapshot of, which on a fake ship is essentially every ship. Left
-alone, every message in development would read `%unverified` and the dev loop
-would never exercise verification.
+alone, every message in development would read `%unverified`.
 
 The key lookup therefore checks `.^(? %j /(scot %p our)/fake/(scot %da now))`
-first and, on a fake ship, derives the peer's key the same way `%deed` does.
-This mirrors jael's own behavior rather than inventing a development mode.
+first and, on a fake ship, derives the peer's key the same way `%deed` does
+(`+fake-pass`). This mirrors jael's own behavior rather than inventing a
+development mode, and it makes the strongest test cheap: on a fake ship every
+ship's keypair is derivable from its `@p`, so a test can forge a genuine
+signature as a third ship, put it in a chain and verify it — the third-party
+forward case, with no network and no second ship.
 
-It also makes the strongest test cheap: on a fake ship every ship's keypair is
-derivable from its `@p`, so a test can forge a genuine signature as
-`~sampel-palnet`, put it in a chain, and verify it — the third-party forward
-case, with no network and no second ship.
+## Verification labels, it does not reject
 
-### Verification labels, it does not reject
-
-Every message carries one of three verdicts:
+Every stored copy carries one of three verdicts:
 
 - `%verified` — signature checks against the sender's registered key.
-- `%unverified` — no key available for that ship. Moons and comets land here.
+- `%unverified` — no key available for that ship. Moons and comets land here,
+  and so does a message whose `life` names a life we do not hold.
 - `%forged` — a key was available and the signature failed against it.
+
+A ship/life pair missing from the key map is `%unverified`, **never**
+`%forged`: absence of a key is not a finding about a signature.
 
 `%forged` messages are stored and displayed as forged. They are evidence, and
 deleting evidence is the wrong instinct. They are never counted as unread and
-never sort into the normal inbox flow.
+never sort into the normal inbox flow. The verdict is rendered **per message,
+never per thread**: a thread holding one unverified message is not an
+unverified thread.
 
-### The moon and comet gap
+The verdict is keyed on `[id sig]`, not on the id — see the anti-shadowing rule
+under `+merge`, `+prune` and the storage layout.
+
+## The moon and comet gap
 
 Third parties cannot verify moons or comets, and this is a property of Azimuth,
 not a gap in this design.
@@ -156,533 +147,334 @@ not a gap in this design.
 comets only when the comet is asking about itself. So mail from
 `~mister-botter-dozzod-nisfeb` verifies for `~nisfeb` and for nobody else.
 
-v1 labels these `%unverified` and moves on. Signing still happens with whatever
-key the ship holds, so the signatures are already sitting in the chain the day
-either fix lands:
+**The cost is real and it is not small.** An entire class of sender — every
+moon and every comet — reads `%unverified` on every other ship, forever, under
+this build. `+prune` ranks `%unverified` above `%forged` for exactly this
+reason: an unranked fill would let forged copies evict the one genuine copy of
+a moon's message, leaving a user holding only forgeries of a message that was
+never forged.
+
+Signing still happens with whatever key the ship holds, so the signatures are
+already sitting in the chain the day either fix lands:
 
 - Comets are self-signing addresses — the `@p` is a hash of the key — so a
   comet's signature is verifiable with no lookup at all, given the code to
   derive it.
 - Moons need their parent's attestation to travel inside the chain.
 
-Neither changes the mark. Both are strictly additive.
-
-## Agent state
-
-```hoon
-+$  thread
-  $:  =chain
-      participants=(set ship)         ::  union of from and to across the chain
-      last=@da                        ::  sent of the newest message
-  ==
-::
-+$  state-0
-  $:  %0
-      threads=(map thread-id thread)  ::  thread-id is the root msg-id
-      inbox=(list thread-id)          ::  newest first
-      read=(set msg-id)
-  ==
-```
-
-A thread is identified by the `msg-id` of its root. Two ships holding the same
-conversation agree on the thread id without coordinating, because the root
-message is byte-identical for both.
-
-`inbox` is a maintained ordering rather than a sort at read time. It is the
-only thing the inbox view needs and it is cheap to keep correct on insert.
-
-## Wire protocol
-
-One poke covers composing, replying, and forwarding:
-
-```hoon
-[%send to=(set ship) subj=@t body=@t prev=(unit msg-id)]
-```
-
-- **Compose** — `prev` is `~`. A new chain begins.
-- **Reply** — `prev` points at a message in a chain you hold. `to` is usually
-  the existing participants.
-- **Forward** — `prev` points at a message in a chain you hold. `to` is someone
-  new. There is no separate forward path; a forward is a reply addressed
-  elsewhere, and the chain it carries is the payload.
-
-`prev` names a message, not a thread, and that is sufficient: `msg-id` is a hash
-over the message's full contents, so it identifies exactly one message and
-therefore exactly one chain. The agent resolves `prev` to its containing thread
-by lookup. A `prev` the agent does not hold is rejected.
-
-On `%send` the agent builds the `unsigned`, signs it, appends to the local
-thread, and pokes each recipient's `%urmail` with:
-
-```hoon
-[%urmail-chain =chain]
-```
-
-The **whole chain** ships, not just the new message. That is the entire point of
-the design. A recipient added at message forty receives messages one through
-forty, each independently verifiable.
-
-### Receiving
-
-On `%deliver` the agent:
-
-1. Verifies every message in the chain and records a verdict per message.
-2. Finds the root `msg-id` and merges into `threads` under that key.
-3. Deduplicates by `msg-id`. Receiving the same chain twice is a no-op.
-4. Reorders `inbox` if the thread's `last` advanced.
-
-`src.bowl` is deliberately **not** required to be a participant. Anyone may hand
-you a chain. The signatures are the authority, not the courier. This is what
-makes chains portable, and it is the property that separates this from every
-chat app.
-
-There are no subscriptions between ships. Delivery is one poke per recipient.
-Ames handles retry and ordering.
-
-### Trust boundary
-
-`%deliver` is the only externally reachable poke and it accepts input from any
-ship on the network. It must:
-
-- Verify every signature before storing anything.
-- Cap chain length and body size on the **incoming** chain, and reject rather
-  than truncate. A malformed or oversized input is not partially trustworthy.
-
-  This rule governs input validation only. It must **not** be applied to
-  state-capacity pruning of the merged result, where the excess may come
-  entirely from previously stored attacker junk while the incoming chain is
-  wholly legitimate. Rejecting there is a censorship primitive: an attacker who
-  lands a few forged copies of a message first makes every later legitimate
-  poke exceed the bound and be rejected forever, which reinstates at the state
-  layer exactly the shadowing `+merge` exists to prevent. Merged-state bounds
-  shed the excess instead, and never shed a `%verified` copy — anti-shadowing
-  enforced where the verdicts are known.
-
-  One merged-state bound still rejects rather than sheds: the cap on distinct
-  message ids per thread. Shedding there is genuinely harder, because dropping
-  a non-root id orphans the `prev` pointers of later messages. The cost of that
-  exemption is real and is not hidden: anyone who knows a thread's root content
-  can poke enough distinct junk messages — **no signatures required**, since
-  forged messages are stored and counted — to pin the thread at the cap, after
-  which every legitimate message is rejected. One poke, no crypto, permanent
-  per-thread censorship. The fix is to shed distinct ids too, preferring
-  `%verified`, and it is deferred rather than justified.
-- Never let an incoming chain overwrite messages already held under the same
-  `msg-id`, since identical ids imply identical bytes and a conflict means an
-  attack.
-
-Storage is unbounded by design in v1 — see Deliberate limits.
-
-## Frontend
-
-React, TypeScript, Vite, Tailwind. Three panes, Gmail's layout: thread list,
-thread view, compose.
-
-**The four bullets below describe the GALL surface and are superseded by
-`# v3`'s `## The web surface`.** The layout, the panes and the rule under
-them still hold; the transport does not. There is no scry, no channel poke
-and no agent update path on the nexus.
-
-- `GET /x/inbox` — thread ids, subjects, participants, unread flags, `last`.
-- `GET /x/thread/<id>` — a full chain with per-message verdicts.
-- SSE on the agent's update path for live inbox changes.
-- Sends go through `/~/channel` as `%urmail-action` pokes.
-
-Verification state is rendered per message, not per thread. A thread with one
-`%unverified` message in it is not an unverified thread.
-
-## Testing
-
-Desk tests, covering the logic that can actually be wrong:
-
-1. Sign then verify round-trips for our own ship.
-2. A forward preserves every prior signature — verify the whole carried chain
-   after a forward, not just the new message.
-3. A tampered body fails verification. Mutate `body` in a stored `msg` and
-   confirm the verdict flips to `%forged`.
-4. A tampered `life` fails verification.
-5. Double delivery of the same chain leaves state unchanged.
-6. A chain arriving from a non-participant ship is accepted and verifies.
-
-Tests 2, 3, and 6 are the ones that matter. They are the three claims the design
-makes that a chat app cannot make.
-
-## Development
-
-Fake `~zod` at `/home/sneagan/software/zod`. The loop is mount the desk,
-`command cp -f` the sources onto the mounted path, commit. Committing an
-installed desk reloads the agent.
-
-Never `~ricsul-bilwyt`. That ship is the memory store.
-
-Fake ships derive deterministic keys, so signing and verification are
-self-consistent on `~zod` and the dev loop exercises the real crypto path.
-
-## Deliberate limits
-
-**Every send ships the full chain.** A two-hundred message thread costs two
-hundred messages of bytes on every reply. Acceptable for text. The upgrade, when
-it is needed, is a `have=(set msg-id)` handshake so the sender transmits only
-the difference. Not v1.
-
-**Storage is unbounded.** Nothing prunes, nothing expires, and a hostile ship
-can grow your state by poking you chains. v1 caps individual chain and body size
-and otherwise accepts this. Rate limiting per source ship is the next step if it
-becomes real.
-
-**No delivery receipts.** A send that Ames cannot deliver fails silently from
-the UI's point of view.
-
-## Out of scope for v1
-
-Labels, archive, search, attachments, drafts, contacts, filters, spam handling,
-Thunderbird integration, and any bridge to internet email.
-
-Thunderbird in particular is explicitly not designed for. If it happens it is an
-adapter written against whatever API exists then.
+Neither changes the format. Both are strictly additive.
 
 ---
 
-# v2 — the mail client around the provenance layer
+# The frozen format
 
-v1 proved the hard part: signed chains, portable provenance, per-message
-verdicts. What it did not do is behave like a mail client. This section
-specifies eleven additions. None of them may weaken the v1 guarantees, and
-two of them touch signed data and therefore get the same care as the crypto.
+`unsigned` is **closed**. Nothing may be added to it, because a signature
+covers a shape and rewriting the shape produces messages every peer reads as
+forged.
 
-## The rule that governs all of it
+```hoon
++$  msg-id  @uv                       ::  (sham unsigned)
+::
++$  unsigned
+  $:  from=ship
+      life=@ud
+      to=(set ship)
+      subj=@t
+      body=@t
+      body-mime=@t
+      sent=@da
+      prev=(unit msg-id)
+      attachments=(list attachment)
+  ==
+::
++$  msg    [=unsigned sig=@ux]
++$  chain  (list msg)
+```
 
-**Nothing here changes what is signed except attachments, and attachments are
-signed.** `unsigned` gains one field, `attachments`, carrying metadata and a
-content hash. Everything else — labels, archive state, read state, drafts,
-filters — is *local* state about a message, never part of it. Two ships can
-disagree about whether a thread is archived; they can never disagree about
-who signed it.
+Nine fields, and each is there for a reason:
 
-## Attachments
+- **`from`** — who signed it. The key looked up for verification.
+- **`life`** — the key life the signature was made under. It travels because
+  signatures must outlive key rotation: a message signed under life 3 stays
+  verifiable after the sender rotates to life 4, because the verifier looks up
+  the key for the life the message names. One ship therefore has several live
+  keys, which is why the key map is keyed `[ship life]`.
+- **`to`** — the visible recipients. Signed, so a relay cannot rewrite the
+  audience a message claimed. BCC is deliberately *not* here; see below.
+- **`subj`**, **`body`** — the message.
+- **`body-mime`** — how to read `body`. Empty means `text/plain`, so a sender
+  that does not care writes nothing and a reader that does not care ignores it.
+  It is signed because the rendering instruction is part of the message: one
+  that says "render me as HTML" and one that says "render me as plain text" are
+  different messages, and an intermediary must not be able to change which one
+  you read. This is the same argument that puts the attachment hash inside the
+  signature.
+- **`sent`** — the author's clock. Display and ordering only: an attacker
+  controls it, so nothing about identity or filing may derive from it.
+- **`prev`** — the parent message. This is what makes a flat list a chain and
+  a thread a tree. A reply points at the message it answers; a forward points
+  into the path it carries. `prev` names a *message*, not a thread, and that is
+  sufficient: `msg-id` is a hash over the message's full contents, so it
+  identifies exactly one message and therefore exactly one thread.
+- **`attachments`** — metadata and a content hash, never bytes. Inside
+  `unsigned`, so swapping a file breaks the signature.
 
-The chain travels whole on every send, so bytes must not live in the chain.
+`msg-id` is `(sham unsigned)`. It covers every field a signature covers, so an
+id and a signature agree by construction.
+
+## The attachment
 
 ```hoon
 +$  attachment
   $:  name=@t          ::  original filename
       size=@ud         ::  bytes
       mime=@t          ::  content type
-      hash=@uv         ::  (sham octs), not (sham contents): hashing the
-                       ::  octs binds the declared size into the address, so
-                       ::  two files differing only in leading zero bytes
-                       ::  cannot share one, and a lie about `size` is a lie
-                       ::  about the address
+      hash=@uv         ::  (sham octs) over the contents
   ==
 ```
 
-`attachments=(list attachment)` goes **inside `unsigned`**, so it is covered by
-the signature and by `msg-id`. Swapping a file breaks the signature. The bytes
-live in a separate store:
+`hash` is over `octs`, not over the bare atom. An atom loses leading zero
+bytes, so two files differing only in leading zeros would share an address;
+`octs` carries the length, so they do not. It also binds `size` into the
+address: a lie about the size is a lie about the content address.
 
-```hoon
-blobs=(map @uv @)    ::  hash to contents
-```
+The chain grows by ~100 bytes per attachment whatever the file weighs.
 
-- Sending stores the bytes locally, puts the hash in the message, signs, ships
-  the chain as before. The chain grows by ~100 bytes per attachment regardless
-  of file size.
-- Receiving stores the chain immediately. Bytes are **not** pushed.
-- Opening a message with an attachment the ship lacks pokes the sender with
-  `[%want-blob hash=@uv]`; they answer with `[%blob hash=@uv data=@]`.
-- **A received blob is accepted only if `(sham data)` equals the hash it was
-  requested under.** A ship that answers with different bytes is ignored. This
-  is the same discipline as message verification: the hash is the authority,
-  not the sender.
-- `max-blob` caps a single attachment. `max-blobs` caps total blob storage;
-  when full, the oldest unreferenced blobs are evicted. Blobs are a cache —
-  losing one loses a file, never a message or a signature.
-- A blob request is answerable by **anyone holding the bytes**, not only the
-  author, exactly as chains are forwardable by anyone. The hash makes the
-  courier irrelevant.
+## body-mime, name and mime are hostile input
 
-**These last two points contradict each other, and the contradiction is the
-design, not an oversight.** A fetcher republishes what it accepted, so once any
-ship has fetched a public blob the bytes are world-reachable from that ship
-forever and the author has no signal and no recourse. Restriction is therefore
-**withdrawal of our own copy, not access control**, and it means something only
-before anyone has opened the attachment. Anything that presents it as
-revocable permission is lying to the user. The same reasoning that makes a
-chain portable makes a blob unrecallable; that is the trade this design took
-deliberately when it chose the hash as the authority.
+All three are **attacker-supplied and arrive pre-signed**. A signature proves
+the author *chose* a value, never that it is safe, and a recipient cannot
+repair a signed field without destroying the signature that makes the message
+evidence. So they are refused at the boundary — length-capped and control-byte
+free (`+text-ok`) — rather than escaped by whichever consumer remembers to.
+`mime` in particular is headed for a `Content-Type`, where a CR or LF is a
+header-injection primitive.
 
-## Labels, and folders as views over them
+At the render boundary the rule is stricter still: match `body-mime` against a
+fixed allow-list, fall back to plain text for anything else, and never pass the
+value into a header. The shipping client renders every body as plain text and
+says so when the message asked for something else.
 
-Labels are local, per-thread, and never travel:
+## Decided: BCC needs no signed field
 
-```hoon
-labels=(map thread-id (set @tas))
-```
+The chain proves **authorship, not delivery**. Who handed you a chain is
+answered by Ames and by nothing in the message — which is precisely why a
+forwarded chain works at all. BCC is therefore a delivery concern, and putting
+it in the signature would be answering the wrong question.
 
-A **folder** is not a separate concept. The sidebar shows views:
+- The sender delivers the chain to the blind-copied ships as well. Nothing in
+  the chain names them; `to` lists only the visible recipients.
+- The sender's own ship records who it BCC'd as **local state** (`meta`'s
+  `bcc`, keyed by message id), so its Sent view is accurate. That record never
+  travels.
+- A BCC'd recipient receives the same canonical chain as everyone else — same
+  bytes, same `msg-id`, same thread — and sees the visible recipients, which is
+  what BCC means.
+- Replying reveals them, because their reply is signed and lists its own `to`.
+  That is BCC's behavior everywhere.
 
-| View | Definition |
-|---|---|
-| Inbox | not archived, and we are a participant |
-| Sent | any message in the thread is authored by us |
-| Archived | in `archived` |
-| Drafts | from `drafts` |
-| `<label>` | has that label |
+**The one consequence that needed code:** the Inbox view is threads we
+participate in, and a BCC'd recipient is in neither `from` nor `to`. Their mail
+would be invisible. So `meta` carries a local `direct=?`, set when a chain
+arrives through a delivery poke, and Inbox is *participant **or** direct*.
 
-That is Gmail's model and it avoids a second taxonomy that would inevitably
-disagree with the first.
+A BCC'd recipient cannot prove the message was addressed to them. Neither can
+anyone a chain was forwarded to, and the system already treats that as normal.
 
-## Archive
+**Rejected, deliberately:** signing the BCC set, and signing a hashed
+commitment to it. A signed list is not BCC. A hashed commitment leaks that a
+BCC exists and is testable against any guessed ship, so it would offer privacy
+it cannot deliver — the same class of overstatement as calling blob restriction
+access control.
 
-```hoon
-archived=(set thread-id)
-```
+Reply-to, expiry and multi-parent were considered and rejected on the same
+terms: each is either local, or answerable from `prev`, or not worth a break.
 
-Archiving removes a thread from the Inbox view only. It is not deletion, it
-does not touch the chain, and a new message arriving in an archived thread
-**un-archives it** — otherwise mail silently disappears.
+## The two breaks, and why an old message is refused
 
-## Read and unread
+`unsigned` broke twice before it was frozen:
 
-`read` already exists. v2 adds the inverse action so a user can mark a thread
-unread again. Forged messages continue never to count toward unread.
+1. **`%0` → `%1`**: `attachments` added.
+2. **`%1` → `%2`**: `body-mime` added.
 
-## Drafts
+A stored copy is `[%2 =msg =verdict]`. Versions 0 and 1 are **refused, not
+migrated**, in `+read-stored`, and there is no branch for them.
 
-```hoon
-+$  draft  [id=@uv to=(set ship) subj=@t body=@t prev=(unit msg-id) at=@da]
-drafts=(map @uv draft)
-```
+A signed message cannot be migrated. `msg-id` and the signature both cover the
+shape, so rewriting an old message into the new shape produces a message whose
+signature no longer matches its own contents, which every peer then reads as
+`%forged`. **Turning genuine mail into apparent forgeries is worse than
+refusing it.** The version is bumped rather than reused precisely so a `%1`
+grub is refused as cleanly as a `%0` one instead of clamming into the new shape
+by accident.
 
-Drafts are local and unsigned — a draft is not a message and must never be
-mistaken for one. Sending a draft signs it at that moment and deletes the
-draft. The UI saves on a debounce and on close.
+Three consequences for a ship carrying old mail, none of them hidden:
 
-## Filters
+- Old messages render `unreadable`. A refused grub is dropped before
+  verification, so it is never labelled, never counted toward unread, and never
+  `%forged`. A thread reports how many copies this build could not read, so a
+  thread that renders short says why.
+- **Ghost threads.** A thread whose every message is an old grub still has a
+  directory, still appears in `/mail/idx`, and still counts against
+  `max-threads`.
+- **Old grubs cannot be culled by the writer.** `+sync-slots` builds its cull
+  list from what the reader returned, and it returned nothing for them.
+  `%delete-thread` is the only way out.
 
-```hoon
-+$  rule
-  $:  id=@uv
-      from=(unit ship)      ::  match sender
-      subject=(unit @t)     ::  substring match
-      add=(set @tas)        ::  labels to apply
-      archive=?             ::  skip the inbox
-  ==
-rules=(list rule)
-```
-
-Applied in `+receive` **after verification**, never before — a filter must not
-be able to suppress a `%forged` message, since that would let an attacker who
-learns your rules hide evidence. Filters may add labels and archive; they may
-not delete, and they may not mark read.
-
-## Search
-
-Substring match over subject, body and sender across stored threads, computed
-on demand. No index in v1: state is capped at `max-threads`, and a linear scan
-over that is acceptable and honest. Search covers `%forged` messages too and
-labels them in results — hiding them would be the same mistake as filtering
-them.
-
-## Pagination
-
-`/x/inbox` takes an offset and a limit. The agent returns a page plus a total,
-so the UI can render controls without fetching everything. Views other than
-Inbox paginate identically.
-
-## Recipient validation
-
-`@p` parsing happens in the UI before the poke, so a typo is caught at the
-keystroke rather than surfacing as a mark-parse failure with no explanation.
-The agent keeps its own validation — the UI is a convenience, not the boundary.
-
-## What v2 still does not do
-
-Rich text, threading collapse, keyboard shortcuts, contacts, spam
-classification, delivery receipts, and any bridge to internet email.
+The contrast with local state is the whole point of keeping local state out of
+`unsigned`: `$meta` and `$stored-blob` are versioned too, and their version 0
+**upgrades in place**, because nothing in them is covered by a signature, so
+supplying a default misrepresents nothing.
 
 ---
 
-# v3 — urmail as a grubbery nexus
-
-v1 and v2 assume a Gall agent. This section replaces that assumption. urmail
-becomes a **grubbery nexus** distributed as an overlay into the `%grubbery`
-desk, the same way lattice is. The signed-chain guarantees do not change; where
-they are stated above, they still bind.
-
-## Why the tree, and what it replaces
-
-v2 specified labels as `(map thread-id (set @tas))`, archive as a `(set
-thread-id)`, drafts as a `(map @uv draft)`, and a bespoke `%want-blob` /
-`%blob` poke protocol for attachments. Every one of those is a tree hand-rolled
-inside a map, or a platform feature reinvented.
-
-Lattice's own header states the principle: *"pub and know are the SAME kind of
-grub. They differ only in permission... The public/private split is a weir
-concern, not a schema split."* The same holds here. A label is not a field on a
-thread; it is where the thread is. An attachment is not a payload; it is a
-grub with a weir on it.
+# The nexus
 
 ## The tree
 
 ```
-/main.sig                       the write fiber; serialises every mutation
-/mail/thread/<tid>/msg/<slot>   one signed message per grub (noun marc)
-                                slot is (sham [id sig]), never positional:
-                                position would break the [id sig] key that
-                                keeps a forged copy from shadowing a real one
-/mail/thread/<tid>/meta         local state: read, archived, labels
-/mail/blob/<hash>               attachment bytes, weir-gated
-/mail/draft/<id>                unsigned drafts
-/mail/rule/<id>                 filters
-/mail/idx                       derived: inbox order, search terms
-/beacon/rev                     the change beacon; nested, never at the root
-/app/index.html                 the built client: one shell, css inlined
-/app/app.js                     and one script
-/ui/main.sig                    binds /apps/urmail
-/ui/requests/<id>               one ephemeral fiber per HTTP request
+/main.sig                                 the writer; serialises every mutation
+/mail/thread/<tid>/msg/<id>/<id>/…/<slot> one signed copy per grub
+/mail/thread/<tid>/meta                   local state: read, archived, labels,
+                                          direct, bcc
+/mail/blob/<hash>                         attachment bytes
+/mail/blobvis                             per-blob visibility
+/mail/idx                                 derived: inbox order, newest first
+/fetch/<id>                               one ephemeral fiber per blob fetch
+/tr/last                                  the last writer outcome, as json
+/app/index.html                           the built client: one shell,
+/app/app.js                               css inlined, and one script
+/ui/main.sig                              binds /apps/urmail
+/ui/requests/<id>                         one ephemeral fiber per HTTP request
+/beacon/rev                               the change beacon; nested, never at
+                                          the nexus root
 ```
 
-Views are walks over this tree, not stored sets: Inbox is `meta` without
-`archived`, Sent is threads containing a message we authored, a label is the
-threads whose `meta` carries it. Pagination is a bounded tree listing. Search
-is a sweep, the same honest linear scan v2 specified.
+**A message's path is its ancestry.** Each message id is a directory and its
+replies are subdirectories keyed by their own ids, so two branches are two
+sibling directories and reading a chain is walking one path rather than sorting
+a set and chasing pointers through it. This is lattice's fixed-leaf trick — a
+node that is both an entry and a parent — with a leaf per copy rather than one.
 
-## The web surface
+**`<slot>` is `(sham [id sig])`, never a position.** A position would have to be
+renumbered on every insert (a chain is ordered by `sent`, and mail arrives out
+of order) and, worse, would make the storage key something other than
+`[id sig]`. Deriving the name from `[id sig]` makes the anti-shadowing key and
+the storage key the same thing by construction: two copies of one message
+differing in signature are two grubs with two verdicts at one node, neither can
+overwrite the other, a redelivery of a chain we already hold is a no-op, and
+`+prune` sheds a copy by culling exactly one grub.
 
-This section replaces `/ui/views/*.html`. Earlier drafts of the tree above
-listed server-rendered pages, which is lattice's other serving mode; urmail
-takes the first of the two routes the release plan's Gate 3 sets out and
-serves the existing React client as grubs. That client already renders
-per-message verdict badges with `%forged` visually alarming, an honest
-copy count rather than a misleading message count, editable reply recipients
-with the blast radius stated above the Send button, and forward. Each of
-those took a review round. Rebuilding them as server-rendered views to be
-idiomatic would discard reviewed work to gain nothing the user can see.
+Files and subdirectories are separate maps in a ball, so a node carries both its
+copies and its replies with no collision possible.
 
-The client is two grubs, laid down by `+on-load` and served under the app's
-own route: a shell with its CSS inlined and one script. Assets carried in
-cords wedge every request fiber, which is why lattice ships one document plus
-one script and why this does too. The build refuses to emit a third file.
+Views are walks over this tree, not stored sets. Inbox is `meta` without
+`archived`; Sent is threads containing a message we authored; a label is the
+threads whose `meta` carries it; pagination is a bounded tree listing; search is
+a sweep.
 
-Every route is owner-gated — urmail has no unauthenticated surface at all, no
-clearweb view and no public form — and every response, errors included, is
-JSON, so the client has one shape to parse.
+## The writer, and the change beacon
 
-| Method | Route | |
-|---|---|---|
-| GET | `/apps/urmail` | the shell |
-| GET | `/apps/urmail/app.js` | the script |
-| GET | `/apps/urmail/api/whoami` | our own `@p` |
-| GET | `/apps/urmail/api/inbox` | the listing |
-| GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
-| POST | `/apps/urmail/api/send` | compose, reply and forward |
-| POST | `/apps/urmail/api/read` | mark one message read |
-| POST | `/apps/urmail/api/delete-thread` | remove a thread from this ship |
+`/main.sig` is a single long-lived fiber that serialises every mutation — the
+shape lattice uses to avoid index races: rise, then loop on `take-poke`, apply,
+bump, recurse. **Nothing else mutates the tree.** Reads happen on their own
+ephemeral fibers and never touch it.
 
-A read peeks the tree from its own request fiber. A write pokes the writer and
-answers `ok`; nothing but the writer touches the tree. That split is what the
-per-request fibers are for: a send fans out to every recipient with a deadline
-each, and a render or a round trip placed on the writer would queue every
-other mutation on the ship behind it.
+`/main.sig` is granted a **poke road** to the `public` usergroup, so any ship
+may hand us a chain. `src` is deliberately not checked against the participants
+on delivery: the signatures are the authority, not the courier. The grant is a
+road, not a mark, so a peer that can deliver a chain can also address the local
+action marc at the writer — the writer's source check on `%urmail-action` and
+`%urmail-blob-in` is what makes that harmless.
 
-`whoami` exists because the reply composer drops us from its own default
-recipient list, and the client is no longer configured with a ship name — it
-is served by the ship it talks to and asks that ship who it is. The old
-`VITE_SHIP` default was silent: aimed at one ship and authenticating as
-another, with nothing obviously wrong until every call failed.
+**THE WRITER MUST NOT CRASH.** `+rise-wait` restarts a failed process by
+*consuming the next poke without processing it*, so a crash on bad input eats
+the next legitimate message. Every rejection is a branch that returns cleanly
+with a `~|` label, never a `?>` or a `!!`. The one arm that can crash on hostile
+input, `+thread-key`, is called under `mule`. Refusals are written to
+`/tr/last`, because fiber prints go to the raw console and are invisible to
+every tool that can reach the ship.
 
-**Live updates are the beacon, not polling.** `/beacon/rev` is one small grub
-the writer bumps after each applied action, and grubbery's keep-SSE endpoint
-streams it. An open client refetches the listing and whatever thread it is
-showing. The beacon says *that* the tree changed, not which thread changed,
-so one event costs one thread refetch rather than one per thread. Polling was
-the fallback and is not needed: the platform already has the stream, and a
-poll interval short enough to feel live would be a request every second or
-two against a serialized pier.
+The writer bumps `/beacon/rev` after each applied action, and open readers
+stream it. Three rules, each bought with a bug:
 
-`count` on a listing row is **stored copies, not distinct messages**, and the
-client labels it that way. Up to `max-copies` copies of one message that
-differ in signature are kept deliberately — one genuine, the rest forged — so
-a forged copy cannot shadow a real one. A thread showing four may be one
-message and three forgeries. Calling that a message count would be a lie told
-by the safety mechanism.
+- **The beacon must be nested.** Grubbery's keep-SSE does not stream a grub at
+  the nexus root, and a beacon that never streams is a UI that looks live and
+  is not.
+- **A read-mark must not bump it.** Lattice learned this with page history: a
+  reload storm produced by nothing a reader could see. Here it is worse than a
+  storm — an open reader answers a bump by refetching the thread it is showing,
+  and that refetch marks the thread read again. A loop, not a burst.
+- **A poke that changed nothing must not bump it.** `+apply` answers whether the
+  tree actually changed, and that answer gates the bump. Delivery is public, so
+  a bump on a refusal or on a redelivery of a chain we already hold would be
+  free remote amplification: one bump costs every open client a full inbox
+  listing plus a thread refetch.
 
-Verification is rendered **per message, never per thread**, on both surfaces.
-A listing row draws its sender and subject from the newest non-`%forged` copy
-and carries that copy's verdict, so provenance is visible before the thread is
-opened; the row also flags separately whether the thread holds a forged copy
-at all.
+`%send` bumps from **inside** `+do-send`, before its fan-out, and then answers
+"unchanged" so the loop does not bump twice. Bumping after the fan-out made one
+unreachable recipient delay every open tab by up to `send-timeout` (~s20) each,
+for a change that had already landed locally.
 
-## Attachments over mesa
+## Marcs
 
-`/mail/blob/<hash>` holds the bytes. The message carries only `name`, `size`,
-`mime` and `hash`, inside `unsigned`, therefore signed.
+Every path ships a marc. Persisted, under `mar/urmail/`: `msg`, `meta`, `idx`,
+`blob`, `blobvis`, `fetchreq`, `blob-in`. Wire, at the top level of `gub/mar/`:
+`urmail-chain` (a whole signed chain, poked by any ship) and `urmail-action`
+(the local action). A wire marc must be top-level, because a blot with a path
+prefix is unreachable from the two surfaces a peer actually uses — the
+`%grub-cmd` agent surface flattens a blot to its bare name, and a dojo poke
+names a bare mark. The `urmail-` prefix keeps a top-level file in a shared tree
+from shadowing grubbery's own.
 
-The fetch is **keen**, not a poke protocol. Per the mesa work already done on
-lattice, the keen is the kernel scry farm and is the *only permissionless
-channel* — peeks and keeps are both weir-gated, and a cross-ship peek between
-un-granted peers hangs rather than failing. That asymmetry is exactly what
-urmail wants:
+**Every marc is `|_ n=*` with `++ grab ++ noun *` — wire marcs included.** Two
+different hazards, one rule.
 
-- **Blobs the author has made public** are keenable by anyone holding the hash,
-  which matches "the hash is the authority, the courier is irrelevant." Any
-  ship holding the bytes can serve them; the hash proves them.
-- **Blobs the author has restricted** are weir-gated, granting named ships. This
-  is per-attachment permission, which v2 had no answer for at all.
+*Persisted* grubs: a marc written `|_ x=type:lib` re-validates every stored grub
+against the live type on read, so changing the type booms every persisted grub
+and readers fall to bunt defaults. For mail that is data loss. The shape check
+lives in the nexus as a `;;` ladder under `mule`, newest shape first.
 
-A blob whose contents do not hash to the path it was fetched from is discarded
-without comment. Blobs remain a cache: losing one loses a file, never a message
-and never a signature.
+*Wire* payloads: this originally went the other way. The two delivery marcs were
+**typed**, so a malformed chain would fail validation at the boundary rather
+than reach the writer as an unchecked noun. That was sound reasoning about the
+wrong risk, and it was **reversed** after the branching slice measured what it
+actually did.
+
+Grubbery validates a poke in `+hydrate`, **before any nexus code runs**. A
+validation failure there fails the writer *process*, and `+rise-wait` restarts a
+failed process by consuming the next poke without processing it. So a typed wire
+marc never rejected a bad chain: it destroyed the **next good one**, silently,
+with no crash visible and nothing written anywhere. `/main.sig` is granted to
+the `public` usergroup by design, so any ship on the network could do that for
+the price of one malformed noun, and repeating it was a denial of delivery
+against a mail application.
+
+**Validation you cannot catch is not validation, it is a fuse.** The clam lives
+in `+apply` under `mule` with a `~|` label, where a malformed payload is refused
+the way every other cap is refused — a branch that returns cleanly, with the
+writer still standing and the next poke still its own. Do not restore a typed
+wire marc for the argument that first justified it.
+
+Dropping the type also drops the marc's import of the chain lib, which stops
+every stored grub revalidating each time that lib changes.
 
 ## Constraints this platform imposes
 
-These are not style notes. Each has cost real debugging time on lattice and is
-silent at the point of failure.
+Not style notes. Each cost real debugging time and is silent at the point of
+failure.
 
 1. **Every blot needs a marc.** A poke to a blot with no marc parks its dart
-   silently and hangs the poking fiber forever, printing nothing. Every path
-   above ships a marc under `mar/urmail/`.
-2. **Every marc is a noun passthrough — wire marcs included.** Two different
-   hazards, one rule.
-
-   *Persisted* grubs: a marc written as `|_ x=type:lib` re-validates every
-   stored grub against the live type on read, so changing the type booms every
-   persisted grub and readers fall to bunt defaults. Message grubs carry a
-   version and the reader upgrades in place.
-
-   *Wire* payloads: this originally went the other way. The two delivery marcs
-   were **typed**, so that a malformed chain failed validation at the boundary
-   rather than reaching the writer as an unchecked noun. That was sound
-   reasoning about the wrong risk, and it was **reversed** after the branching
-   slice measured what it actually did.
-
-   Grubbery validates a poke in `+hydrate`, **before any nexus code runs**. A
-   validation failure there fails the writer *process*, and `+rise-wait`
-   restarts a failed process by **consuming the next poke without processing
-   it**. So a typed wire marc never rejected a bad chain: it destroyed the
-   **next good one**, silently, with no crash visible and nothing written
-   anywhere. `/main.sig` is granted to the `public` usergroup by design, so
-   any ship on the network could do that for the price of one malformed noun,
-   and repeating it was a denial of delivery against a mail application.
-
-   **Validation you cannot catch is not validation, it is a fuse.** Every marc
-   is `|_ n=*` with `++ grab ++ noun *`, and the clam lives in `+apply` under
-   `mule` with a `~|` label, where a malformed payload is refused the way every
-   other cap is refused — a branch that returns cleanly, with the writer still
-   standing and the next poke still its own. Do not restore a typed wire marc
-   for the argument that first justified it; the boundary check is real and is
-   not worth what it costs.
-
-   Dropping the type also drops the marc's import of the chain lib, which
-   stops every stored grub revalidating each time that lib changes.
-3. **Every persistent path needs a covering `%fall` row in `on-load`.** `spin`
+   silently and hangs the poking fiber forever, printing nothing.
+2. **Every marc is a noun passthrough**, per the rule above.
+3. **Every persistent path needs a covering `%fall` row in `+on-load`.** `spin`
    rebuilds the bole from scratch and drops anything uncovered. An uncovered
-   path is lost mail.
+   path is lost mail. `/mail` takes a `%fall %|` so the whole dynamic subtree
+   survives; `/app` takes `%over` so a redeploy actually replaces the client
+   rather than leaving every ship on the build it first loaded.
 4. **Long-lived fibers use absolute roads.** A depth-relative road called from
-   the wrong depth climbs past the nexus root and crashes the fiber; crashed
-   sig fibers respawn, so one bad road becomes an infinite crash loop at 100%
-   CPU.
+   the wrong depth climbs past the nexus root and crashes the fiber; crashed sig
+   fibers respawn, so one bad road becomes an infinite crash loop at 100% CPU.
 5. **No `$` with arguments inside a `;<` continuation** — it cannot find the
    trap. Recurse by arm name.
 6. **Deploys bounce.** Pushing source recompiles the nexus but does not respawn
@@ -695,14 +487,17 @@ silent at the point of failure.
 ## Installing the nexus
 
 A nexus cannot install itself: a directory's neck is fixed at creation and no
-runtime surface can set one. Two paths, and both are needed:
+runtime surface can set one — grubbery's HTTP `PUT /dir` and `sur/grub`'s
+`%make-dir` both lay `[~ ~ %.n ~]`. Two paths, and both are needed:
 
 - **The durable one** is a covering row in grubbery's own `lib/root.hoon`:
   `[%fall %| /apps/'urmail.urmail_app' [`[`[/urmail %app] ~ %.n ~] ~]]`.
-  Lattice's row sits three lines above it and this is the established pattern
-  for an overlay distribution. That file is outside this repo, so a grubbery
-  pull reverts it — a cost urmail shares with lattice, and the thing the parked
-  code-in-the-ball plan exists to remove.
+  Lattice's row sits beside it and this is the established pattern for an
+  overlay distribution. That file is outside this repo, so **a grubbery pull
+  reverts it** — a cost urmail shares with lattice. `sync-overlay.sh`
+  deliberately does not write it (an overlay that silently edits its host's
+  sources is how the `obelisk-ast` clobber happened); it greps for the row and
+  prints the line to add. The check is the mitigation, not a fix.
 - **The fresh-ship bootstrap** is `create_folder {path:'/apps',
   name:'urmail.urmail_app', nexus:'/urmail/app'}` over the grubbery MCP. Both
   arguments are load-bearing and each is wrong in a different way: a `nexus` of
@@ -716,26 +511,9 @@ runtime surface can set one. Two paths, and both are needed:
 Editing the source afterwards does **not** re-seed a wrong-neck node; reload
 gates on neck-match. A bad install has to be removed and redone.
 
-## The writer, and the change beacon
-
-`/main.sig` is a single long-lived fiber that serialises every mutation, the
-shape lattice uses to avoid index races: rise, then loop on `take-poke`, apply,
-bump, recurse. Every write goes through it. Nothing else mutates the tree.
-
-After each applied action the writer bumps a change beacon so open readers live-
-reload. The beacon must be NESTED (`/beacon/rev`, not `/rev`): grubbery's
-keep-SSE does not stream a grub at the nexus root, and a beacon that never
-streams is a UI that looks live and is not.
-
-**Marking a message read must not bump it.** Lattice learned this with
-page history: every view recorded a visit, every visit bumped the beacon, and
-every open reader reloaded — a reload storm produced by nothing a reader could
-see. Read state is not content. In urmail the beacon bumps for new mail, sends,
-deletes, label and archive changes; never for read-marks.
-
-It is worse here than a storm. An open reader answers a bump by refetching
-the thread it is showing, and that refetch marks the thread read again. A
-beacon that moved on a read-mark would be a loop, not a burst.
+`%register`'s overlap pruning is safe against lattice: `is-prefix` between
+`/apps/urmail.urmail_app` and `/apps/lattice.lattice_app` is false in both
+directions, so registering urmail cannot evict lattice's registration.
 
 ## Which overlay libs may import, and what it costs
 
@@ -745,182 +523,575 @@ desk side does not understand it — so a lib's imports decide where it can be
 built:
 
 - **Import-free libs build in both**, and are therefore the only ones
-  `-test /=grubbery=/tests/lib/... ~` can reach. Lattice's own libs are mostly
-  import-free for exactly this reason.
+  `-test /=grubbery=/tests/lib/… ~` can reach.
 - **Libs using `/<` build only from the nexus.** They are still copied to the
   desk `/lib` but never built there, so nothing complains. They cannot be unit
   tested.
 
 The rule that follows: **anything worth testing goes in an import-free lib, and
-the nexus glue may import freely.** That is the same discipline that kept the
-v1 core free of scries and made this port cheap — logic in testable pure files,
-platform coupling in a thin layer above it. Keep it.
-
-`lib/urmail-chain.hoon` is import-free and carries all 31 tests. It stays that
-way.
-
-## What ports unchanged
-
-`lib/urmail.hoon` and `sur/urmail.hoon` have no Gall dependency — 944 lines
-including the 31 tests, carrying every reviewed property: signing, verification,
-`[id sig]` anti-shadowing, `+merge`, `+prune`, `+thread-key`, `+freeze`, the
-caps. They become `lib/urmail-chain.hoon` and friends under the overlay's
-`lib/`, tested exactly as before with `-test /=grubbery=/tests/lib/... ~`.
+the nexus glue may import freely.** `lib/urmail-chain.hoon` and
+`lib/urmail-web.hoon` are both import-free and carry all 71 tests between them.
+They stay that way. Types live in the same core as the logic rather than in a
+`sur/`, because an overlay has no `sur/`.
 
 `gub/lib` is shared with grubbery's own libraries, so every file takes an
 `urmail-` prefix to avoid shadowing.
 
-What is rewritten is `app/urmail.hoon` — 382 lines of Gall — as a nexus.
+---
 
-## What this does not change
+# Attachments
 
-The signed chain, the three verdicts, verification before storage, forged
-messages kept as evidence, the caps, and every guarantee stated in the v1
-sections above. A grubbery port that weakened any of those would be a
-regression, not a migration.
+The chain travels whole on every send, so bytes must not live in the chain. The
+message carries `name`, `size`, `mime` and `hash` inside `unsigned`, therefore
+signed; the bytes live at `/mail/blob/<hash>` and are published into gall's
+remote-scry farm at `/urmail/blob/<hash>`.
 
+- Sending stores the bytes locally, puts the hash in the message, signs, ships
+  the path as before. Bytes are stored and published **before** the chain goes
+  out: a recipient that fetches the instant the chain lands must find the blob
+  bound, and a keen at an unbound spur *parks* rather than failing.
+- Receiving stores the chain immediately. **Bytes are not pushed.**
+- A ship that wants an attachment it lacks fetches it with a `%keen`.
+- **A blob whose contents do not hash to the address it was fetched under is
+  discarded without comment.** The hash is the authority, not the sender.
+- Blobs are a cache. Losing one loses a file, never a message and never a
+  signature.
+
+## The fetch is a keen, not a poke protocol
+
+Per the mesa work done on lattice, the keen is the kernel scry farm and is the
+*only permissionless channel* — peeks and keeps are both weir-gated, and a
+cross-ship peek between un-granted peers hangs rather than failing. That
+asymmetry is exactly what urmail wants: any ship holding the bytes can serve
+them, and the hash proves them.
+
+Two details the namespace forces:
+
+- The keen path must mirror `+blob-spur` exactly or every read misses forever,
+  and it is built by cons because it contains **the empty segment**, which a
+  path literal cannot spell and nobody notices is missing: `/g/x/<case>/<agent>/
+  ''/1/urmail/blob/<hash>`, where `<agent>` is `%grubbery` — the yoke, not the
+  nexus.
+- There is **no revision segment**. A blob's bytes are fixed by its name, so a
+  content-addressed spur binds at case 1 and a re-grow of the same bytes leaves
+  it bound and correct. That is why this fetch needs no rev-discovery channel,
+  and rev-discovery is the weir-gated part.
+
+The fetch runs on **its own ephemeral fiber** under `/fetch/<id>`, never on the
+writer: a keen is a network round trip, and a fetch on the writer would queue
+every send, every inbound chain and every read-mark behind it. Ephemeral is not
+incidental either — a timed-out keen leaves a late response and a stray `%veto`
+behind, and a long-lived fiber that `%skip`s those piles them into its skip
+queue to be re-offered on every later take. That debris lands on a process about
+to be culled instead of on the ship's single serialisation point for mail.
+
+`+max-case-probe` (3) exists for the one operation that burns a case: a restrict
+culls the spur, and gall parks the culled case as a high-water mark, so a blob
+restricted and later re-published answers at case 2 permanently. Probing a few
+cases up is the fetcher's whole defence, and it costs one timeout per miss, paid
+only by a blob that has actually been restricted.
+
+**Publishing an already-public blob is gated, and the gate is load-bearing.**
+`+grow` assigns `las+1` on a non-empty fan, so an idempotent-*looking* "make
+public" pushes the binding one case higher every press. Three presses put it
+past `+max-case-probe` and the attachment is unfetchable by every peer, forever,
+with no error — the fetcher just reports a miss. Cases only go up, so there is
+no recovery. Nothing may `%grow` a spur it has not first established is unbound.
+
+## Restriction is withdrawal, not access control
+
+`%public` is the default: a chain is forwardable to anyone by construction, and
+an attachment only the original recipients could read would make every forward
+carry an unreadable file. `%restricted` withdraws the blob from our farm and
+records the named ships so a weir grant can serve them a peek instead.
+
+**A fetcher republishes what it accepted**, because it is now one of the ships
+holding the bytes. So the first successful fetch creates a second, independent,
+un-revocable source. **Restriction is therefore withdrawal of our own copy, not
+access control, and it means something only before anyone has opened the
+attachment.** Anything that presents it as revocable permission is lying to the
+user. The same reasoning that makes a chain portable makes a blob unrecallable;
+that is the trade this design took deliberately when it chose the hash as the
+authority.
+
+**The grant half is not complete, and the reason is a platform limit.** A nexus
+cannot create a usergroup: the registry action carries `%register`,
+`%deregister`, `%how` and `%gc` and no group-lifecycle op, `%how` refuses
+outright for a group with no `who.ships` grub, and laying that grub by hand
+means a `+make` under `/sys/ames/usergroups` — where every `make` variant turns
+a `%veto` into a failure that crashes the writer, which is the one thing the
+writer must never do. So the grant is attempted and skipped **loudly**: a
+restricted blob with no group is *withdrawn but ungranted*, and the trace says
+so. Creating the group is out-of-band today.
+
+## The caps
+
+```
+max-blob        262.144      bytes in one attachment
+max-attach      16           attachments per message
+max-name        256          bytes of filename
+max-mime        128          bytes of content type
+max-blobs       1.000        blobs this ship will store
+max-blob-bytes  33.554.432   bytes the blob store will hold
+```
+
+`max-blob` is 256K rather than something round and large because a blob is
+answered over remote scry, which fragments the response into Ames packets, and a
+multi-megabyte keen is a lot of packets for a fetch with no partial-progress
+story. Raise it when the fetch has one.
+
+`max-blobs` alone is not a storage bound — a thousand quarter-megabyte blobs is
+256MB — so `max-blob-bytes` bounds the weight independently, and eviction takes
+both at once because a store can be under the count and over the bytes or the
+reverse.
+
+Eviction sheds the **oldest unreferenced** blobs: a blob referenced by any stored
+message is never evicted however old, and `%delete-thread` culls messages
+without culling their blobs, so unreferenced blobs genuinely accumulate. Ties on
+arrival time fall back to the hash, so the order is total and two runs shed the
+same blob. When the store cannot be made to fit, the send is **refused** rather
+than partially evicted for nothing.
+
+Neither bound can be weaponised: bytes only ever enter through a **local**
+action, never through a delivered chain, which carries metadata alone. What a
+delivered chain *can* do is bounded separately — `+fits-attachments` caps the
+count per message and checks each claimed `size` against `max-blob`, because an
+attachment claiming a gigabyte is a claim we would never honour and rejecting it
+at the boundary is cheaper than discovering it at fetch time.
 
 ---
 
-# The format freeze
+# Threads branch, and the tree says so
 
-Two changes, then `unsigned` is closed. Nothing may be added to it after this
-without breaking every message in existence, because a signature covers a shape
-and rewriting the shape produces messages every peer reads as forged.
+## What a forward ships
 
-## Added: a mime type for the body
+`+do-send` ships `+path-chain`: the path from the thread root to the message
+being replied to or forwarded, and nothing else.
+
+Shipping the whole thread instead was a **leak**, not an inelegance. Two
+participants have a side exchange on one branch; one of them forwards a message
+on a different branch onward; the third party receives the side exchange —
+signed, permanent, attributable, and nobody asked for it.
+
+**Every copy at each node travels**, not one per node. Choosing which of two
+copies of one message to forward would be exactly the shadowing `+merge` exists
+to prevent, decided by the forwarder.
+
+`+with-root` covers the one case a path alone breaks: an **orphan** branch,
+whose walk never reaches a `prev=~` message. A chain with no root is refused by
+`+thread-key` at the far end, so the send would look successful here and be
+dropped there. The root is a message every participant already holds and is what
+the thread's identity is derived from, so adding it discloses nothing.
+
+## Merge, prune, and identity
+
+**`+merge` dedupes on `[id sig]`, never on the id.** Two copies can share an id
+and carry different signatures — one genuine, one forged. Deduping on the id
+alone would let whichever arrived first shadow the other, which on a forwarded
+chain lets a malicious forwarder frame a third party as a forger. Both copies
+are kept; verification labels them; the reader decides what to show.
+
+**`+prune` sheds, it does not reject.** The per-id copy bound is enforced by
+shedding in strict verdict order — `%verified` first, then `%unverified`, then
+`%forged`. Rejecting the merged result would be a censorship primitive: an
+attacker who lands `max-copies` forged copies of a chain's genuine root at a
+ship that has never seen the thread mints that thread under the genuine
+content-derived id, holding it full of junk; when the real chain arrives the
+count is over the bound, a reject would nack it, and because every send ships
+the whole path, every subsequent message in that thread would be rejected
+forever, for the cost of a few junk-signed messages.
+
+That is the general rule: **input validation rejects; merged-state capacity
+sheds.** Rejecting on merged state punishes a legitimate poke for excess that
+may be entirely attacker junk already on disk.
+
+**`+thread-key` derives identity from content, never from order or `sent`.** An
+attacker controls both, so either would let one poke duplicate a conversation or
+migrate an established thread onto a new id. An established thread's identity is
+immutable once set; a first-contact chain is anchored on the message with
+`prev=~`, and the root is deduped by id rather than counted by message, so a
+relay forwarding the genuine root alongside a tampered copy does not get a
+legitimate first contact rejected.
+
+**`+freeze`** folds new verdicts into the stored ones, definitive labels first.
+`%unverified` freezes only against another `%unverified`: it is not a finding
+about the signature, only that the key was absent from our snapshot at that
+instant, and a later poke may arrive after we have fetched the key. `%verified`
+and `%forged` are definitive for a fixed `[id sig]` and can never disagree.
+
+## Depth is not off the read path
+
+A message is stored under its ancestry, so its road carries one ~34-byte segment
+per ancestor, and the nexus rebuilds those keys on every peek of the mail tree —
+which is every send, every read-mark, every delivery and every inbox listing.
+Cost is quadratic in depth. `max-chain` alone would let one hostile linear chain
+pin a thread at depth 1.000 permanently: measured, 200 messages at depth 200
+already cost ~1.8x the same 200 at depth 2, and 1.000 extrapolates to minutes of
+writer time per read, forever, until the thread is deleted.
+
+`max-depth` is 64 — far above any real conversation and far below where the
+quadratic bites. It is checked on a single poke *and* on the merged result, since
+two chains each inside the cap can compose past it.
+
+**The cost, stated plainly:** a thread genuinely deeper than 64 accepts no
+further messages, exactly as the distinct-id cap already behaves and for the
+same reason.
+
+## The input caps
+
+```
+max-chain    1.000     distinct messages per chain
+max-body     100.000   bytes per body
+max-subj     1.000     bytes per subject
+max-to       100       recipients per message
+max-copies   4         copies (same id, distinct sig) per message
+max-threads  10.000    distinct threads this ship will hold
+max-depth    64        ancestors from root to leaf
+```
+
+Incoming chains are **rejected, never truncated**: a chain that violates a limit
+is not partially trustworthy, and trimming a signed field would forge. An
+*existing* thread always accepts a new message — only a brand-new thread id is
+capped — because a reply must never be refused because some unrelated thread
+filled the store.
+
+The same bounds are enforced at compose time, from the same lib arms, because
+every send ships the path it replies into: one oversized compose would poison a
+thread permanently, with every later message on that path rejected by every
+recipient, silently. Failing at compose is the only point where a human can
+still do something about it. And a send the ship refuses must say so — the web
+route checks the request-only caps itself and answers 400, because answering
+`ok` while the writer discarded the message is a composed message destroyed with
+no draft to recover it.
+
+---
+
+# The web surface
+
+Every route is owner-gated. urmail has no unauthenticated surface at all — no
+clearweb view, no public form, no unauthenticated asset — and every response,
+errors included, is JSON, so the client has one shape to parse. Eyre's
+authentication flag carries the shell and the script; every API route compares
+the source ship as well, because a surface that mutates the tree resting on one
+flag from one vane is thinner than it needs to be. `our` is not in hand — it
+costs a bowl round trip, ~0.2s per request — which is why the two asset routes,
+where there is nothing to mutate, keep the flag alone.
+
+| Method | Route | |
+|---|---|---|
+| GET | `/apps/urmail` | the shell |
+| GET | `/apps/urmail/app.js` | the script |
+| GET | `/apps/urmail/api/whoami` | our own `@p` |
+| GET | `/apps/urmail/api/inbox` | the listing |
+| GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
+| POST | `/apps/urmail/api/send` | compose, reply and forward |
+| POST | `/apps/urmail/api/read` | mark a set of messages read |
+| POST | `/apps/urmail/api/delete-thread` | remove a thread from this ship |
+
+A trailing slash is a trailing empty knot and is stripped, because a bookmark is
+exactly where one comes from.
+
+**A read peeks the tree from its own request fiber. A write pokes the writer and
+answers.** That split is what the per-request fibers are for: a send fans out to
+every recipient with a deadline each, and a render or a round trip placed on the
+writer would queue every other mutation on the ship behind it.
+
+The client is **two grubs**, laid down by `+on-load` and served under the app's
+own route: a shell with its CSS inlined and one script. Assets carried in cords
+wedge every request fiber, which is why lattice ships one document plus one
+script and why this does too — the build refuses to emit a third file. They are
+served `no-cache`: the two grubs are replaced wholesale by a reload, and a cached
+shell pointing at a script that no longer matches it is a blank page with nothing
+in the console.
+
+`whoami` exists because the reply composer drops us from its own default
+recipient list, and the client is no longer configured with a ship name — it is
+served by the ship it talks to and asks that ship who it is. The old `VITE_SHIP`
+default was silent: aimed at one ship and authenticating as another, with nothing
+obviously wrong until every call failed.
+
+**Live updates are the beacon, not polling.** The client streams
+`/grubbery/api/keep/apps/urmail.urmail_app/beacon/rev` and, on a change, refetches
+the listing and whatever thread it is showing. The beacon says *that* the tree
+changed, not which thread changed, so one event costs one thread refetch rather
+than one per thread. Polling was the fallback and is not needed: a poll interval
+short enough to feel live would be a request every second or two against a
+serialized pier, where a single request already costs a fiber.
+
+**`count` on a listing row is stored copies, not distinct messages**, and the
+client labels it that way. Up to `max-copies` copies of one message that differ
+in signature are kept deliberately — one genuine, the rest forged — so a forged
+copy cannot shadow a real one. A thread showing four may be one message and three
+forgeries. Calling that a message count would be a lie told by the safety
+mechanism.
+
+A listing row draws its sender and subject from the newest non-`%forged` copy and
+carries that copy's verdict, so provenance is visible before the thread is
+opened; the row also flags separately whether the thread holds a forged copy at
+all, and how many copies this build cannot read.
+
+`%read` takes a **set**. Opening a thread marks every unread message in it at
+once, and one id per poke meant one writer event and one full mailbox scan per
+message — forty messages, forty serialised scans, to record something no peer
+will ever see. Ids naming nothing are skipped rather than refused: a set is a
+client reporting what it just rendered, and a thread deleted in another tab
+between render and poke would otherwise fail the whole batch.
+
+**The client has no attachment control.** A message that carries a file renders
+with no sign of it, and no route exposes the blob actions the writer already
+implements (`%fetch-blob`, `%restrict-blob`, `%publish-blob`, and files on
+`%send`). That is a gap in the surface, not in the nexus.
+
+---
+
+# Local versus signed
+
+**Nothing local is ever signed, and nothing signed is ever local.**
+
+| Signed, travels | Local, never travels |
+|---|---|
+| `from`, `life`, `to`, `subj`, `body`, `body-mime`, `sent`, `prev`, `attachments` | read marks, archive, labels, `direct`, the BCC record, blob visibility, blob arrival time, inbox order, the verdict |
+
+Two ships can disagree about every column on the right; they can never disagree
+about who signed what. That is what makes `unsigned` freezable at all — every
+mail-client feature that follows is a decision about the right-hand column.
+
+The verdict is local by necessity: it is *our* reading of a signature against
+*our* Azimuth snapshot at one instant. It rides with the copy it labels rather
+than in a side map, because a verdict names one signed copy.
+
+---
+
+# Deliberate limits, with their costs
+
+**Every send ships the full path.** A two-hundred-message path costs two hundred
+messages of bytes on every reply. Acceptable for text. The upgrade, when needed,
+is a `have=(set msg-id)` handshake so the sender transmits only the difference.
+
+**Storage is unbounded within the caps.** Nothing expires, and a hostile ship can
+grow your state by poking you chains up to `max-threads` × `max-chain` ×
+`max-copies`. Rate limiting per source ship is the next step if it becomes real.
+`%delete-thread` exists because every capacity limit here is otherwise permanent
+and unrecoverable.
+
+**The distinct-id cap rejects rather than sheds, and that is a censorship
+vector.** Shedding a non-root id would orphan the `prev` pointers of later
+messages, which is genuinely harder, so the cap on distinct message ids per
+thread refuses. The cost, not hidden: anyone who knows a thread's root content
+can poke enough distinct junk messages — **no signatures required**, since forged
+messages are stored and counted — to pin the thread at the cap, after which every
+legitimate message is rejected. One poke, no crypto, permanent per-thread
+censorship. The fix is to shed distinct ids too, preferring `%verified`, and it is
+deferred rather than justified.
+
+**Moons and comets are unverifiable to third parties.** See above. An entire
+class of sender reads `%unverified` forever under this build.
+
+**Restriction is withdrawal, not revocation.** See above. If the UI ever presents
+it as permission, users will trust it for something it cannot do.
+
+**Writes queue behind the writer, including its fan-out.** A poke returns when
+the writer takes it, so a send issued while the writer is fanning out to an
+unreachable ship waits — ~8s observed, and up to `send-timeout` (~s20) per
+unreachable recipient. Reads never touch the writer, so the UI stays usable, but
+this is the first thing that will look like a hang to a user. It is the
+architecture, not a defect.
+
+**Reads are O(total stored messages).** `+thread-key`'s scan walks every stored
+message with a `sham` per message, on the only externally reachable poke; the
+inbox listing is one deep peek of `/mail/thread` walked twice. Bounded by
+`max-threads` × `max-chain`, but large. The upgrade path is the same in both
+cases: an index grub — a `(map [msg-id @ux] thread-id)` for the first, a summary
+row per thread for the second. This is a performance concern, not an authenticity
+one.
+
+**A chain touching two existing threads conflates them.** `+thread-key` picks
+whichever comes first in map-traversal order. The upgrade path is to reject
+chains whose keys match more than one thread rather than silently picking one.
+Availability and correctness of filing, not authenticity — a wrongly-filed
+message is exactly as verified or forged as it was.
+
+**No delivery receipts.** A send Ames cannot deliver fails silently from the
+UI's point of view. This is about *remote* delivery only: a send the local ship
+itself refuses answers 400.
+
+**The `root.hoon` row is outside version control.** A grubbery pull reverts the
+install. `sync-overlay.sh` checks and prints; it does not write.
+
+**A restricted blob may be ungranted.** See the platform limit above.
+
+---
+
+# Testing
+
+71 tests, in two import-free overlay libs, run with
+`-test /=grubbery=/tests/lib/urmail-chain ~` and
+`-test /=grubbery=/tests/lib/urmail-web ~`:
+
+- **`tests/lib/urmail-chain.hoon` — 56 tests.** Signing and verification
+  round-trips, tamper detection on every signed field including `life` and
+  `body-mime`, the three verdicts, `[id sig]` anti-shadowing through `+merge`,
+  `+prune`'s verdict ordering and its refusal to shed a `%verified` copy,
+  `+thread-key`'s identity rules, `+freeze`, the caps, the attachment
+  predicates, blob eviction, and the tree arms — `+ancestors` on orphans and
+  cycles, `+path-chain`, `+with-root`, and the path algebra the storage layer
+  uses.
+- **`tests/lib/urmail-web.hoon` — 15 tests.** The JSON request decoders: the one
+  part of the HTTP path no Hoon type has checked, most of them on what a
+  malformed body does.
+
+The tests that matter most are the ones a chat app cannot pass: a forward
+preserves every prior signature; a tampered body flips to `%forged`; a chain
+arriving from a non-participant is accepted and verifies; a forged copy does not
+shadow a genuine one; a sibling branch does not travel.
+
+Anything requiring a bowl — every jael scry — is untestable by construction and
+is verified live instead. See `docs/verification.md`.
+
+# Development
+
+Two fake ships, `~wex` (pier `/home/sneagan/software/wex`, HTTP 8081) and `~feb`
+(`/home/sneagan/software/feb`, 8080). Both run the overlay synced from this repo
+into their own `%grubbery` desk.
+
+The loop is `scripts/sync-overlay.sh <pier>/grubbery`, `|commit %grubbery`, then
+`|suspend %grubbery` and `|revive %grubbery` — the bounce is not optional
+(constraint 6). Never hotfix a single file through the mount (constraint 7).
+
+Never `~ricsul-bilwyt`. That ship is the memory store.
+
+Fake ships derive deterministic keys, so signing and verification are
+self-consistent and the dev loop exercises the real crypto path — including
+third-party verification, since any fake ship's key is derivable from its `@p`.
+
+---
+
+# Specified but unbuilt
+
+These are designs, not descriptions. Nothing below exists on the nexus. The
+decisions stand — each was argued once and none of them needs redeciding — but
+every one is a view or a `meta` field, not a change to anything signed.
+
+**None of them may weaken a guarantee above.** In particular none may hide a
+`%forged` message, and none may touch `unsigned`.
+
+## Labels, and folders as views over them
+
+Labels are local, per-thread, and never travel — `meta` already carries a
+`labels=(set @tas)`. A **folder** is not a separate concept. The sidebar shows
+views:
+
+| View | Definition |
+|---|---|
+| Inbox | not archived, and we are a participant **or** the chain arrived direct |
+| Sent | any message in the thread is authored by us |
+| Archived | `meta`'s `archived` |
+| Drafts | from `/mail/draft/` |
+| `<label>` | `meta` carries that label |
+
+That is Gmail's model and it avoids a second taxonomy that would inevitably
+disagree with the first.
+
+## Archive
+
+`meta`'s `archived` flag, which already exists and already defaults to `%.n`
+explicitly — a bare `?` bunts to `%.y`, so every thread would be born archived
+and the inbox would show nothing.
+
+Archiving removes a thread from the Inbox view only. It is not deletion, it does
+not touch the chain, and a new message arriving in an archived thread
+**un-archives it** — otherwise mail silently disappears.
+
+## Mark unread
+
+The inverse of the existing read action, over the same `meta` set. Forged
+messages continue never to count toward unread.
+
+## Sent
+
+A walk: threads containing a message we authored. The BCC record in `meta` is
+what makes this view accurate about who a message actually went to.
+
+## Drafts
 
 ```hoon
-+$  unsigned
-  $:  from=ship
-      life=@ud
-      to=(set ship)
-      subj=@t
-      body=@t
-      body-mime=@t      ::  'text/plain', 'text/markdown', ...
-      sent=@da
-      prev=(unit msg-id)
-      attachments=(list attachment)
++$  draft  [id=@uv to=(set ship) subj=@t body=@t prev=(unit msg-id) at=@da]
+```
+
+One grub per draft at `/mail/draft/<id>`. Drafts are local and unsigned — a draft
+is not a message and must never be renderable as one. Sending a draft signs it at
+that moment and deletes the draft. The UI saves on a debounce and on close.
+
+## Filters
+
+```hoon
++$  rule
+  $:  id=@uv
+      from=(unit ship)      ::  match sender
+      subject=(unit @t)     ::  substring match
+      add=(set @tas)        ::  labels to apply
+      archive=?             ::  skip the inbox
   ==
 ```
 
-`body` stays `@t`; `body-mime` says how to read it. Empty means `text/plain`,
-so a sender that does not care writes nothing and a reader that does not care
-ignores it.
+One grub per rule at `/mail/rule/<id>`, applied on delivery **after
+verification**, never before — a filter must not be able to suppress a `%forged`
+message, since that would let an attacker who learns your rules hide evidence.
+Filters may add labels and archive; they may not delete, and they may not mark
+read.
 
-It is signed because the rendering instruction is part of the message: a
-message that says "render me as HTML" and one that says "render me as plain
-text" are different messages, and an intermediary must not be able to change
-which one you read. This is the same argument that puts the attachment hash
-inside the signature.
+## Search
 
-**Treat `body-mime` as hostile input at the render boundary.** It arrives
-pre-signed inside a delivered chain, so a signature proves the author chose it,
-not that it is safe. The UI renders a fixed allow-list and falls back to plain
-text for anything else; it never passes the value through to a header or a
-`Content-Type`.
+Substring match over subject, body and sender across stored threads, computed on
+demand. No index: state is capped, and a linear sweep over that is acceptable and
+honest — it is the same sweep the inbox listing already pays. Search covers
+`%forged` messages too and labels them in results; hiding them would be the same
+mistake as filtering them.
 
-## Decided: BCC needs no signed field
+## Pagination
 
-The chain proves **authorship, not delivery**. Who handed you a chain is
-answered by Ames and by nothing in the message — which is precisely why a
-forwarded chain works at all. BCC is therefore a delivery concern, and putting
-it in the signature would be answering the wrong question.
+The listing takes an offset and a limit and returns a page plus a total, so the
+UI can render controls without fetching everything. On this tree that is a
+bounded listing rather than a slice of a materialised list. Views other than
+Inbox paginate identically.
 
-- The sender delivers the chain to the BCC'd ships as well. Nothing in the
-  chain names them; `to` lists only the visible recipients and is signed as
-  before.
-- The sender's own ship records who it BCC'd as **local state**, so its Sent
-  view is accurate. That record never travels.
-- A BCC'd recipient receives the same canonical chain as everyone else — same
-  bytes, same `msg-id`, same thread — and sees the visible recipients, which is
-  what BCC means.
-- Replying reveals them, because their reply is signed and lists its own `to`.
-  That is BCC's behavior everywhere.
+## Recipient validation
 
-**The one consequence that needs code:** the Inbox view is defined as threads
-we participate in, and a BCC'd recipient is in neither `from` nor `to`. Their
-mail would be invisible. So `meta` gains a local `direct=?`, set when a chain
-arrives through a delivery poke, and Inbox becomes *participant **or** direct*.
+`@p` parsing in the UI before the poke, so a typo is caught at the keystroke
+rather than surfacing as a refusal with no explanation. The nexus keeps its own
+validation — the UI is a convenience, not the boundary.
 
-A BCC'd recipient cannot prove the message was addressed to them. Neither can
-anyone a chain was forwarded to, and the system already treats that as normal.
+## What none of this does
 
-**Rejected, deliberately:** signing the BCC set, and signing a hashed
-commitment to it. A signed list is not BCC. A hashed commitment leaks that a
-BCC exists and is testable against any guessed ship, so it would offer privacy
-it cannot deliver — the same class of overstatement as calling blob restriction
-access control.
+Rich text, threading collapse, keyboard shortcuts, contacts, spam
+classification, delivery receipts, Thunderbird integration, and any bridge to
+internet email.
 
-## Closed
-
-After these land, `unsigned` is frozen: `from`, `life`, `to`, `subj`, `body`,
-`body-mime`, `sent`, `prev`, `attachments`. Reply-to, expiry and multi-parent
-were considered and rejected. Everything else a mail client needs — labels,
-folders, archive, read state, drafts, filters, BCC records — is local, and two
-ships may disagree about all of it while still agreeing exactly on who signed
-what.
-
+Thunderbird in particular is explicitly not designed for. If it happens it is an
+adapter written against whatever API exists then.
 
 ---
 
-# Threads branch, and the tree should say so
+# History
 
-`prev` has always made a thread a **tree**: two people replying to the same
-message are siblings, and email threads branch constantly. The implementation
-does not reflect that. Messages are stored flat under `msg/<slot>`, `chain` is
-a sorted list, and `+chain-of` merges every slot in a thread into one sequence.
+urmail was first built as a **Gall agent** on its own `%urmail` desk: a
+`sur/urmail.hoon`, a `lib/urmail.hoon`, a 382-line `app/urmail.hoon`, three
+urmail marks and 37 library tests. It established everything this document still
+claims — signing with the ship key, the three verdicts, `[id sig]`
+anti-shadowing, `+merge`, `+prune`, `+thread-key`, `+freeze`, the caps — and it
+was the reference the nexus was ported against, arm by arm.
 
-This is not only a missed use of the platform. It is a leak.
+It carried the **seven-field** `unsigned`, two format breaks behind the frozen
+shape, so it shares no message with the shipping product: a chain from that
+build reaches the nexus as a `%0` grub and is refused. Its 37 tests were a
+strict subset of the overlay's 71. Keeping a working implementation of an
+incompatible protocol in the tree was a liability, not a reference, so `desk/`,
+its `deploy.sh` and the Gall implementation plan under `docs/superpowers/plans/`
+were **removed in `a0d82ca`**. The last commit carrying them is **`db44982`**;
+`git log -- desk` finds the whole history and `git show db44982:desk/app/urmail.hoon`
+the agent itself.
 
-## What a chain is
-
-**A chain is a root-to-leaf path, not a whole thread.** That is what the
-original design meant by "a portable communication chain": the conversation
-leading to a message, which is exactly what a recipient needs to verify it and
-exactly what `prev` already describes.
-
-`+do-send` ships `+chain-of`, which is every message in the thread. So
-forwarding a message on one branch delivers the sibling branches too. If two
-participants have a side exchange and one of them forwards a different branch
-onward, the third party receives the side exchange. Nobody asked for that and
-the signatures make it permanent and attributable.
-
-Forwarding must ship **the path from the thread root to the forwarded
-message**, and nothing else. That path is a valid chain on its own: every
-`prev` in it resolves inside it, it contains the unique `prev=~` root, so
-`+thread-key` still files it correctly and every message still verifies
-independently. Smaller, correct, and it stops leaking.
-
-## Storage
-
-Store the branching, do not recompute it. Lattice already solved the shape
-problem this creates — a node that is both a message and a parent — with a
-fixed leaf under each key directory, so that `/a` and `/a/b` can both be
-entries.
-
-The same trick applies: each message id is a directory, its signed copies live
-under a fixed leaf inside it, and its replies are subdirectories keyed by their
-own ids. Then the path to a message *is* its ancestry, branches are sibling
-directories, and reading a chain is walking one path rather than sorting a set
-and chasing pointers through it.
-
-The exact layout is the implementer's call against the platform — depth costs
-something, and a flatter layout with a parent-to-children index is a legitimate
-alternative if deep paths prove expensive. What is not optional:
-
-- **Copies stay separated by signature.** Two copies of one message differing
-  in signature are distinct and both survive; the `[id sig]` anti-shadowing key
-  is untouched by this change and must remain so.
-- **`+prune` is unaffected** — it sheds copies of one message, which live at one
-  node.
-- **Thread identity is unchanged**: the root's id, derived from content.
-- Sibling order matters for display, never for identity. Two ships must still
-  derive the same thread id from the same messages.
-
-## The freeze holds
-
-**This changes no signed field.** `prev` already carries the entire branching
-structure; the tree is a better representation of information the format
-already has. Storage layout, what a forward transmits, and the shape of
-`+merge` are all local decisions. `unsigned` stays closed.
+The port itself, and the arguments it settled, are recorded in the slice reports
+under `.superpowers/sdd/2026-09-07-urmail/` — which is **gitignored**, so those
+reports live on this machine and nowhere else. `docs/verification.md` carries
+what they proved.
