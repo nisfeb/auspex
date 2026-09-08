@@ -68,38 +68,58 @@
   ^-  (set [who=ship life=@ud])
   (~(gas in *(set [ship @ud])) (turn c |=(m=msg:sur [from.unsigned.m life.unsigned.m])))
 ::
-::  +merge: union two chains, deduplicating by msg-id and ordering by sent.
+::  +merge: union two chains, deduplicating and ordering by sent.
 ::
-::    Identical ids imply identical bytes, so on a collision the message we
-::    already hold wins and the incoming copy is dropped. Receiving the same
-::    chain twice is a no-op.
+::    A message is a duplicate only when its contents AND its signature
+::    match. +id covers `unsigned` alone, so two msgs can share an id and
+::    carry different signatures - one genuine, one forged. Deduping on the
+::    id alone would let whichever arrived first shadow the other, which on
+::    a forwarded chain lets a malicious forwarder frame a third party as a
+::    forger. Both copies are kept here; +verify-chain labels them and the
+::    agent decides what to show.
 ::
 ++  merge
   |=  [old=chain:sur new=chain:sur]
   ^-  chain:sur
-  =/  seen  (~(gas in *(set msg-id:sur)) (turn old |=(m=msg:sur (id unsigned.m))))
-  =/  added
-    %+  skim  new
-    |=(m=msg:sur !(~(has in seen) (id unsigned.m)))
+  =/  key  |=(m=msg:sur [(id unsigned.m) sig.m])
+  =/  seen  (~(gas in *(set [msg-id:sur @ux])) (turn old key))
+  ::  fold rather than skim: `new` must be deduped against itself too,
+  ::  since a peer-supplied chain may repeat a message and `old` is empty
+  ::  on first contact.
+  =/  added=chain:sur
+    =|  acc=chain:sur
+    |-  ^-  chain:sur
+    ?~  new  (flop acc)
+    ?:  (~(has in seen) (key i.new))
+      $(new t.new)
+    $(new t.new, seen (~(put in seen) (key i.new)), acc [i.new acc])
   %+  sort  (weld old added)
   |=  [a=msg:sur b=msg:sur]
-  ?:  =(sent.unsigned.a sent.unsigned.b)
+  ?.  =(sent.unsigned.a sent.unsigned.b)
+    (lth sent.unsigned.a sent.unsigned.b)
+  ?.  =((id unsigned.a) (id unsigned.b))
     (lth (id unsigned.a) (id unsigned.b))
-  (lth sent.unsigned.a sent.unsigned.b)
+  (lth sig.a sig.b)
 ::
 ::  +verify-chain: a verdict per message.
 ::
+::    Keys arrive as a map keyed on [ship life], not just ship: life travels
+::    with the message precisely so a signature stays verifiable after the
+::    sender rotates, which means one ship can have multiple live keys. A
+::    ship/life pair missing from the map is %unverified, never %forged -
+::    that is true whether the key is missing because we never fetched that
+::    life, or because a tampered life field pointed at a life we don't hold.
 ::    Keys arrive as a map so this stays pure. The agent builds the map by
-::    scrying jael once per distinct signer before calling in.
+::    scrying jael once per distinct [ship life] before calling in.
 ::
 ++  verify-chain
-  |=  [keys=(map ship (unit pass)) c=chain:sur]
+  |=  [keys=(map [ship @ud] (unit pass)) c=chain:sur]
   ^-  (list [msg-id:sur verdict:sur])
   %+  turn  c
   |=  m=msg:sur
   ^-  [msg-id:sur verdict:sur]
   :-  (id unsigned.m)
-  =/  k  (~(get by keys) from.unsigned.m)
+  =/  k  (~(get by keys) [from.unsigned.m life.unsigned.m])
   ?~  k  %unverified
   ?~  u.k  %unverified
   ?:  (verify-with u.u.k sig.m (digest unsigned.m))

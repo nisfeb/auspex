@@ -10,12 +10,14 @@
   =/  u=unsigned:sur  [who 1 to subj body sent prev]
   [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
 ::
+::  +forge hardcodes life 1, so the map is keyed on [w 1] for every ship
+::  passed in.
 ++  all-keys
   |=  who=(list ship)
-  ^-  (map ship (unit pass))
+  ^-  (map [ship @ud] (unit pass))
   %-  malt
   %+  turn  who
-  |=(w=ship [w `(fake-pass:urmail w)])
+  |=(w=ship [[w 1] `(fake-pass:urmail w)])
 ::
 ::  a signature made with a ship's key verifies against that ship's key
 ++  test-sign-verify-roundtrip
