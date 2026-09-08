@@ -245,7 +245,18 @@ Ames handles retry and ordering.
 ship on the network. It must:
 
 - Verify every signature before storing anything.
-- Cap chain length and body size, and reject rather than truncate.
+- Cap chain length and body size on the **incoming** chain, and reject rather
+  than truncate. A malformed or oversized input is not partially trustworthy.
+
+  This rule governs input validation only. It must **not** be applied to
+  state-capacity pruning of the merged result, where the excess may come
+  entirely from previously stored attacker junk while the incoming chain is
+  wholly legitimate. Rejecting there is a censorship primitive: an attacker who
+  lands a few forged copies of a message first makes every later legitimate
+  poke exceed the bound and be rejected forever, which reinstates at the state
+  layer exactly the shadowing `+merge` exists to prevent. Merged-state bounds
+  shed the excess instead, and never shed a `%verified` copy — anti-shadowing
+  enforced where the verdicts are known.
 - Never let an incoming chain overwrite messages already held under the same
   `msg-id`, since identical ids imply identical bytes and a conflict means an
   attack.
