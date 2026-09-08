@@ -801,6 +801,198 @@
   ?.  =(1 ~(wyt in root-ids))  ~|(%urmail-no-unique-root !!)
   (snag 0 ~(tap in root-ids))
 ::
+::  ── the thread as a tree ────────────────────────────────────────────
+::
+::  `prev` has always made a thread a TREE. Two people replying to the
+::  same message are siblings, and mail threads branch constantly. The
+::  arms below read that structure out of the field the format already
+::  carries, so NOTHING SIGNED CHANGES: `prev` is the branching, and
+::  everything here is a different way of looking at it.
+::
+::  Two things depend on them. Forwarding ships a ROOT-TO-LEAF PATH
+::  rather than a whole thread, which is what stops a forward leaking
+::  the sibling branch a third party never asked for; and the nexus
+::  stores a message under its ancestry, so a message's path IS its
+::  ancestry and two branches are two sibling directories.
+::
+::  +prev-map: every distinct message id in a chain, to its `prev`.
+::
+::    Keyed by id and NOT by [id sig], on purpose. `prev` sits inside
+::    `unsigned` and msg-id is (sham unsigned), so every copy of one id
+::    carries the same `prev` by construction. Two copies differing in
+::    signature are ONE NODE of the tree carrying two grubs, which is
+::    the [id sig] anti-shadowing key expressed as shape rather than
+::    weakened by it.
+::
+++  prev-map
+  |=  c=chain
+  ^-  (map msg-id (unit msg-id))
+  %-  ~(gas by *(map msg-id (unit msg-id)))
+  (turn c |=(m=msg [(id unsigned.m) prev.unsigned.m]))
+::
+::  +ancestors: the id path from a forest root down to `i`, inclusive.
+::
+::    Walks `prev` upward and comes back root-first. Three ways to stop,
+::    and each one is a root of the forest this chain describes:
+::
+::      prev=~             the thread root. The ordinary case, and the
+::                         only one a well-formed chain reaches.
+::      prev unresolvable  an ORPHAN: a message whose parent is not in
+::                         this chain. Only hostile input makes one - a
+::                         forwarded path is complete by construction,
+::                         and +prune never sheds the last copy of an id
+::                         - and it is PLACED rather than dropped,
+::                         because refusing to store a message is worse
+::                         than filing it shallow. An orphan that is
+::                         later joined to its parent simply moves.
+::      the bound          a cycle. `prev` is a hash of the parent's
+::                         contents, so a cycle needs a hash preimage
+::                         loop; but this runs on attacker-supplied
+::                         input inside the WRITER, which must never
+::                         hang, and the guard costs one comparison.
+::                         No acyclic path can be longer than the number
+::                         of distinct ids.
+::
+++  ancestors
+  |=  [ps=(map msg-id (unit msg-id)) i=msg-id]
+  ^-  (list msg-id)
+  =|  acc=(list msg-id)
+  =/  cur=msg-id  i
+  =/  bound=@ud   ~(wyt by ps)
+  |-  ^-  (list msg-id)
+  ?:  =(0 bound)  [cur acc]
+  =/  p=(unit (unit msg-id))  (~(get by ps) cur)
+  ?~  p  [cur acc]
+  ?~  u.p  [cur acc]
+  ?.  (~(has by ps) u.u.p)  [cur acc]
+  $(cur u.u.p, acc [cur acc], bound (dec bound))
+::
+::  +place-of: where one message sits in the forest a chain describes.
+::
+++  place-of
+  |=  [c=chain i=msg-id]
+  ^-  (list msg-id)
+  (ancestors (prev-map c) i)
+::
+::  +ancestor-map: +place-of for every id at once, which is what the
+::  storage layer needs when it lays a whole merged chain down.
+::
+++  ancestor-map
+  |=  c=chain
+  ^-  (map msg-id (list msg-id))
+  =/  ps  (prev-map c)
+  %-  ~(gas by *(map msg-id (list msg-id)))
+  %+  turn  ~(tap by ps)
+  |=([i=msg-id *] [i (ancestors ps i)])
+::
+::  +path-chain: THE CHAIN A FORWARD SHIPS. Root to the named message,
+::  and nothing else.
+::
+::    A chain is a root-to-leaf PATH, not a whole thread. That is what
+::    "a portable communication chain" meant all along: the conversation
+::    leading to a message, which is exactly what a recipient needs to
+::    verify it and exactly what `prev` already describes.
+::
+::    Shipping the whole thread instead was a LEAK, not an
+::    inelegance. Two participants have a side exchange on one branch;
+::    one of them forwards a message on a different branch onward; the
+::    third party receives the side exchange, signed, permanent and
+::    attributable, having asked for none of it.
+::
+::    The result is a valid chain on its own: every `prev` in it
+::    resolves inside it, and it holds the unique prev=~ root, so
+::    +thread-key files it under the same thread id and every message
+::    still verifies independently.
+::
+::    EVERY COPY at each node travels, not one per node. Choosing which
+::    of two copies of one message to forward would be exactly the
+::    shadowing +merge exists to prevent, decided by the forwarder.
+::
+++  path-chain
+  |=  [c=chain i=msg-id]
+  ^-  chain
+  =/  keep=(set msg-id)  (~(gas in *(set msg-id)) (ancestors (prev-map c) i))
+  (merge ~ (skim c |=(m=msg (~(has in keep) (id unsigned.m)))))
+::
+::  +with-root: a path that never reaches the thread root, plus the root.
+::
+::    A well-formed path ends at prev=~ and this is a no-op. It fires
+::    only for an ORPHAN branch (see +ancestors), where shipping the
+::    path alone would hand the recipient a chain with no prev=~ message
+::    at all - which +thread-key refuses outright, so the send would
+::    look successful here and be dropped at the far end. The root is a
+::    message every participant in the thread already holds, and it is
+::    what the thread's identity is derived from, so adding it discloses
+::    nothing and is what makes the chain filable.
+::
+++  with-root
+  |=  [c=chain p=chain]
+  ^-  chain
+  ?:  (lien p |=(m=msg ?=(~ prev.unsigned.m)))  p
+  (merge p (skim c |=(m=msg ?=(~ prev.unsigned.m))))
+::
+::  ── the forest, as storage paths ────────────────────────────────────
+::
+::  Pure path algebra, kept here rather than in the nexus so the layout
+::  logic is reachable by -test. The nexus stores a copy at
+::  <ancestry as directories>/<slot>, so these arms turn an ancestry
+::  into directories and answer the three questions a sync has to ask:
+::  which directories a set of copies needs, which of the ones on disk
+::  are no longer wanted, and whether a copy is already covered by a
+::  directory about to be culled.
+::
+++  id-path
+  |=  is=(list msg-id)
+  ^-  path
+  (turn is |=(i=msg-id `@ta`(scot %uv i)))
+::
+::  +prefixes: every non-empty prefix of a path, SHORTEST FIRST.
+::
+::    The order is load-bearing: a directory cannot be made before its
+::    parent exists.
+::
+++  prefixes
+  |=  p=path
+  ^-  (list path)
+  =|  acc=(list path)
+  =/  cur=path  ~
+  |-  ^-  (list path)
+  ?~  p  (flop acc)
+  =.  cur  (snoc cur i.p)
+  $(p t.p, acc [cur acc])
+::
+::  +node-dirs: every directory a set of copy paths needs.
+::
+::    A copy path is <ancestry>/<slot>, so the directories are the
+::    prefixes of everything but its last element. A path of length one
+::    is a PRE-TREE grub stored flat under msg/ and needs no directory
+::    at all, which is how the migration recognises one.
+::
+++  node-dirs
+  |=  ps=(list path)
+  ^-  (set path)
+  %-  ~(gas in *(set path))
+  (zing (turn ps |=(p=path (prefixes (snip p)))))
+::
+::  +minimal-dirs: the shallowest directories of a set to cull.
+::
+::    Culling a directory takes its whole subtree, so culling a child
+::    after its parent is at best wasted and at worst a cull of a road
+::    that no longer exists.
+::
+++  minimal-dirs
+  |=  ds=(set path)
+  ^-  (list path)
+  (skim ~(tap in ds) |=(p=path !(~(has in ds) (snip p))))
+::
+::  +under-any: does this path sit inside one of these directories?
+::
+++  under-any
+  |=  [p=path ds=(set path)]
+  ^-  ?
+  (lien ~(tap in ds) |=(d=path =(d (scag (lent d) p))))
+::
+::
 ::  +freeze: fold new verdicts into the stored map, definitively-labeled
 ::  entries first.
 ::

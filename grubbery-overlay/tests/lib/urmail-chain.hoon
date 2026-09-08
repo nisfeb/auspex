@@ -681,4 +681,194 @@
       !>  `path`[%g %x %'2' %grubbery %$ %'1' %urmail %blob '0v1.23456' ~]
       !>  (blob-keen-path:urmail %grubbery h 2)
   ==
+::
+::  ── the thread as a tree ────────────────────────────────────────────
+::
+::  +branch: the canonical branching thread these tests are written
+::  against. R is the root; A and B are two replies to R, so they are
+::  SIBLINGS; A2 answers A. The two branches are R-A-A2 and R-B, and the
+::  point of everything below is that one of them travels without the
+::  other.
+::
+++  branch
+  |=  ~
+  ^-  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]
+  =/  r   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'root' ~2026.1.1 ~)
+  =/  ri  (id:urmail unsigned.r)
+  =/  a   (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'subj' 'side one' ~2026.1.2 `ri)
+  =/  ai  (id:urmail unsigned.a)
+  =/  a2  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'side two' ~2026.1.3 `ai)
+  =/  b   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'other branch' ~2026.1.4 `ri)
+  [r a a2 b]
+::
+::  a message's ancestry is the ids from the root down to it, inclusive.
+++  test-ancestors-are-root-first
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  ps  (prev-map:urmail ~[r a a2 b])
+  ;:  weld
+    %+  expect-eq
+      !>  ~[(id:urmail unsigned.r)]
+      !>  (ancestors:urmail ps (id:urmail unsigned.r))
+    %+  expect-eq
+      !>  ~[(id:urmail unsigned.r) (id:urmail unsigned.a) (id:urmail unsigned.a2)]
+      !>  (ancestors:urmail ps (id:urmail unsigned.a2))
+    ::  B is a SIBLING of A, so A is nowhere in its ancestry.
+    %+  expect-eq
+      !>  ~[(id:urmail unsigned.r) (id:urmail unsigned.b)]
+      !>  (ancestors:urmail ps (id:urmail unsigned.b))
+  ==
+::
+::  the copies of one message share a `prev`, so they share a NODE: two
+::  copies differing only in signature never split the tree, which is the
+::  [id sig] anti-shadowing key surviving the layout change.
+++  test-prev-map-is-keyed-by-id-not-signature
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  fake=msg:sur  r(sig 0xdead.beef)
+  =/  ps  (prev-map:urmail ~[r fake a])
+  ;:  weld
+    (expect-eq !>(2) !>(~(wyt by ps)))
+    %+  expect-eq
+      !>  ~[(id:urmail unsigned.r)]
+      !>  (ancestors:urmail ps (id:urmail unsigned.r))
+  ==
+::
+::  THE LEAK, CLOSED. Forwarding B ships the path root-to-B; the sibling
+::  branch, and everything under it, does not travel.
+++  test-path-chain-omits-the-sibling-branch
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
+  =/  p=chain:sur  (path-chain:urmail c (id:urmail unsigned.b))
+  ;:  weld
+    (expect-eq !>(~[r b]) !>(p))
+    ::  stated again as the property, because the list above is the thing
+    ::  under test: neither message of the side exchange travels.
+    (expect !>(!(lien p |=(m=msg:sur =(unsigned.m unsigned.a)))))
+    (expect !>(!(lien p |=(m=msg:sur =(unsigned.m unsigned.a2)))))
+  ==
+::
+::  and the deep branch travels whole when IT is what was forwarded.
+++  test-path-chain-carries-the-whole-path
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
+  %+  expect-eq
+    !>  ~[r a a2]
+    !>  (path-chain:urmail c (id:urmail unsigned.a2))
+::
+::  a forwarded path is a VALID CHAIN on its own: it holds the unique
+::  prev=~ root, every prev in it resolves inside it, and +thread-key
+::  files it under the thread the whole thread would have been filed
+::  under. Without those three a forward would look sent here and be
+::  refused at the far end.
+++  test-path-chain-is-a-fileable-chain
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
+  =/  p=chain:sur  (path-chain:urmail c (id:urmail unsigned.b))
+  =/  ids  (~(gas in *(set msg-id:sur)) (turn p |=(m=msg:sur (id:urmail unsigned.m))))
+  =/  closed=?
+    %+  levy  p
+    |=(m=msg:sur ?~(prev.unsigned.m & (~(has in ids) u.prev.unsigned.m)))
+  ;:  weld
+    (expect-eq !>(1) !>((lent (skim p |=(m=msg:sur ?=(~ prev.unsigned.m))))))
+    (expect !>(closed))
+    %+  expect-eq
+      !>  (thread-key:urmail ~ c)
+      !>  (thread-key:urmail ~ p)
+  ==
+::
+::  every copy at a node on the path travels, not one chosen copy.
+::  Choosing would be exactly the shadowing +merge exists to prevent,
+::  made by the forwarder rather than by an attacker.
+++  test-path-chain-keeps-both-copies-of-a-node
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  fake=msg:sur  r(sig 0xdead.beef)
+  =/  c=chain:sur   (merge:urmail ~ ~[r fake b])
+  =/  p=chain:sur   (path-chain:urmail c (id:urmail unsigned.b))
+  ;:  weld
+    (expect-eq !>(3) !>((lent p)))
+    (expect !>((lien p |=(m=msg:sur =(sig.m sig.r)))))
+    (expect !>((lien p |=(m=msg:sur =(sig.m 0xdead.beef)))))
+  ==
+::
+::  an ORPHAN - a message whose prev names nothing in the chain - is
+::  PLACED, as a root of its own, rather than dropped. Only hostile input
+::  makes one, and refusing to store a message is worse than filing it
+::  shallow.
+++  test-orphan-is-its-own-root
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  lost
+    (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'subj' 'orphan' ~2026.1.9 `0vdead)
+  =/  ps  (prev-map:urmail ~[r lost])
+  %+  expect-eq
+    !>  ~[(id:urmail unsigned.lost)]
+    !>  (ancestors:urmail ps (id:urmail unsigned.lost))
+::
+::  a prev cycle TERMINATES. It needs a hash preimage loop and so cannot
+::  really happen, but +ancestors runs on attacker-supplied input inside
+::  the writer, which must never hang.
+++  test-ancestors-survives-a-cycle
+  =/  ps=(map msg-id:sur (unit msg-id:sur))
+    (malt ~[[0v1 `0v2] [0v2 `0v3] [0v3 `0v1]])
+  (expect !>((lte (lent (ancestors:urmail ps 0v1)) 4)))
+::
+::  +with-root fires only for an orphan path. A well-formed path already
+::  holds the root and comes back untouched; a rootless one gets the
+::  thread's root, without which the recipient's +thread-key refuses the
+::  whole chain.
+++  test-with-root-only-adds-when-the-root-is-missing
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
+  =/  good  (path-chain:urmail c (id:urmail unsigned.b))
+  ;:  weld
+    (expect-eq !>(good) !>((with-root:urmail c good)))
+    (expect-eq !>(~[r a]) !>((with-root:urmail c ~[a])))
+  ==
+::
+::  ── the forest, as storage paths ────────────────────────────────────
+::
+::  a message's storage path IS its ancestry, so two branches are two
+::  sibling directories under the message they both answer.
+++  test-ancestor-map-places-siblings-side-by-side
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  =/  am  (ancestor-map:urmail (merge:urmail ~ ~[r a a2 b]))
+  =/  ri  `@ta`(scot %uv (id:urmail unsigned.r))
+  =/  ai  `@ta`(scot %uv (id:urmail unsigned.a))
+  ;:  weld
+    %+  expect-eq
+      !>  `path`~[ri ai `@ta`(scot %uv (id:urmail unsigned.a2))]
+      !>  (id-path:urmail (~(got by am) (id:urmail unsigned.a2)))
+    %+  expect-eq
+      !>  `path`~[ri `@ta`(scot %uv (id:urmail unsigned.b))]
+      !>  (id-path:urmail (~(got by am) (id:urmail unsigned.b)))
+  ==
+::
+::  directories are made shallowest first: a directory needs its parent.
+++  test-prefixes-are-shortest-first
+  %+  expect-eq
+    !>  ~[/a /a/b /a/b/c]
+    !>  (prefixes:urmail /a/b/c)
+::
+::  a copy path is <ancestry>/<slot>, so its directories are the prefixes
+::  of everything but the slot. A ONE-SEGMENT path needs no directory at
+::  all: it is a pre-tree grub stored flat under msg/, which is exactly
+::  how the migration recognises one.
+++  test-node-dirs-drops-the-slot-and-keeps-the-ancestry
+  ;:  weld
+    (expect-eq !>((sy ~[/a /a/b])) !>((node-dirs:urmail ~[/a/b/slot])))
+    (expect-eq !>(*(set path)) !>((node-dirs:urmail ~[/flat-slot])))
+    ::  two branches under one node share that node's directory
+    %+  expect-eq
+      !>  (sy ~[/r /r/a /r/b])
+      !>  (node-dirs:urmail ~[/r/a/s1 /r/b/s2])
+  ==
+::
+::  culling a directory takes its subtree, so only the shallowest stale
+::  directories are culled and nothing already inside one is culled
+::  again.
+++  test-minimal-dirs-and-under-any
+  =/  ds  (sy ~[/r /r/a /r/a/b])
+  ;:  weld
+    (expect-eq !>(~[/r]) !>((minimal-dirs:urmail ds)))
+    (expect !>((under-any:urmail /r/a/b/slot ds)))
+    (expect !>(!(under-any:urmail /other/slot ds)))
+  ==
 --
