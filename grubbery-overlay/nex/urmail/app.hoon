@@ -77,7 +77,10 @@
 ::    /beacon/rev                  the change beacon. Open readers keep-SSE
 ::                                 this one small grub and refetch when it
 ::                                 moves. Bumped on every mutation EXCEPT a
-::                                 read-mark - see +read-mark.
+::                                 read-mark, and bumped from inside
+::                                 +do-send rather than after it so a
+::                                 local reader never waits on a remote
+::                                 ship - see +self-bumped.
 ::    /tr/last                     the last writer outcome, as json. Fiber
 ::                                 prints go to the raw console and are
 ::                                 invisible to every tool that can reach
@@ -191,11 +194,10 @@
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ;<  ~  bind:m  (apply root from sage)
-        ::  bump the change beacon so open readers refetch. NOT for a
-        ::  read-mark: see +read-mark for why that one is excluded and
-        ::  what it would cost here.
+        ::  bump the change beacon so open readers refetch. Two actions
+        ::  are excluded and for opposite reasons - see +self-bumped.
         ;<  ~  bind:m
-          ?:  (read-mark sage)  (pure:m ~)
+          ?:  (self-bumped sage)  (pure:m ~)
           (bump-beacon root)
         $
       ::  /fetch/*: one EPHEMERAL fiber per blob fetch. It keens, pokes
@@ -808,6 +810,14 @@
   ;<  ~  bind:m  (record-bcc root rid (id:uc u) bcc)
   ;<  ~  bind:m  (touch-idx root rid)
   ;<  ~  bind:m  (note root 'send' & (scot %uv rid))
+  ::  BUMP BEFORE THE FAN-OUT. Everything local has landed by here, and
+  ::  the fan-out carries a send-timeout deadline PER RECIPIENT: bumping
+  ::  after it made one unreachable ship delay every open tab on this
+  ::  ship by up to twenty seconds each, for a change already committed.
+  ::  A local reader must never wait on a remote ship. The writer's loop
+  ::  skips its own bump for a %send precisely so this one is the only
+  ::  one - see +self-bumped.
+  ;<  ~  bind:m  (bump-beacon root)
   ::  ship the PATH to every recipient, visible and blind alike. A ship
   ::  added at message forty receives the forty on this path, each
   ::  independently verifiable, and nothing off it.
@@ -1753,23 +1763,33 @@
 ::
 ++  srv  ~(. http-res:io [%| 1 %& ~ %'main.sig'])
 ::
-::  +read-mark: is this poke a read-mark?
+::  +self-bumped: must the writer's loop NOT bump the beacon for this?
 ::
-::    The one mutation that must not bump the change beacon. Lattice
-::    learned this with page history: every view recorded a visit, every
-::    visit bumped the beacon, and every open reader reloaded - a storm
-::    produced by nothing a reader could see. It is sharper here than it
-::    was there. Opening a thread marks SEVERAL messages read at once,
-::    and an open reader answers a beacon bump by refetching the thread
-::    it is showing, which marks it read again. That is not a storm, it
-::    is a loop. Read state is not content.
+::    Two actions, for opposite reasons.
 ::
-++  read-mark
+::    %read must never bump AT ALL. Lattice learned this with page
+::    history: every view recorded a visit, every visit bumped the
+::    beacon, and every open reader reloaded - a storm produced by
+::    nothing a reader could see. It is sharper here. Opening a thread
+::    marks SEVERAL messages read at once, and an open reader answers a
+::    bump by refetching the thread it is showing, which marks it read
+::    again. That is not a storm, it is a loop. Read state is not
+::    content.
+::
+::    %send has ALREADY bumped, from inside +do-send, before its
+::    fan-out. The loop's bump comes after +apply returns, and +apply
+::    returns only once the chain has been offered to every recipient
+::    with a send-timeout deadline each - so the loop's bump is the late
+::    one and do-send's is the true one. Skipping it here keeps a send
+::    to exactly one bump; letting both fire would cost every open
+::    reader a second, pointless refetch of a thread it already has.
+::
+++  self-bumped
   |=  =sage:tarball
   ^-  ?
   ?.  =([/ %urmail-action] p.sage)  |
   =/  res  (mule |.(!<(action:uc q.sage)))
-  ?:(?=(%| -.res) | ?=(%read -.p.res))
+  ?:(?=(%| -.res) | ?=(?(%read %send) -.p.res))
 ::
 ::  +bump-beacon: move the beacon so open readers refetch.
 ::
