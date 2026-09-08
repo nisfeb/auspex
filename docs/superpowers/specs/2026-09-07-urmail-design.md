@@ -363,7 +363,11 @@ The chain travels whole on every send, so bytes must not live in the chain.
   $:  name=@t          ::  original filename
       size=@ud         ::  bytes
       mime=@t          ::  content type
-      hash=@uv         ::  (sham contents)
+      hash=@uv         ::  (sham octs), not (sham contents): hashing the
+                       ::  octs binds the declared size into the address, so
+                       ::  two files differing only in leading zero bytes
+                       ::  cannot share one, and a lie about `size` is a lie
+                       ::  about the address
   ==
 ```
 
@@ -391,6 +395,16 @@ blobs=(map @uv @)    ::  hash to contents
 - A blob request is answerable by **anyone holding the bytes**, not only the
   author, exactly as chains are forwardable by anyone. The hash makes the
   courier irrelevant.
+
+**These last two points contradict each other, and the contradiction is the
+design, not an oversight.** A fetcher republishes what it accepted, so once any
+ship has fetched a public blob the bytes are world-reachable from that ship
+forever and the author has no signal and no recourse. Restriction is therefore
+**withdrawal of our own copy, not access control**, and it means something only
+before anyone has opened the attachment. Anything that presents it as
+revocable permission is lying to the user. The same reasoning that makes a
+chain portable makes a blob unrecallable; that is the trade this design took
+deliberately when it chose the hash as the authority.
 
 ## Labels, and folders as views over them
 
