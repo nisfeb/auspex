@@ -820,6 +820,18 @@
   ;<  have=(unit octs)  bind:m  (read-blob root h)
   ?~  have  (reject root 'no such blob')
   ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
+  ::  GATED, and this gate is load-bearing rather than tidy. Publishing
+  ::  an already-public blob would %grow an already-bound spur, and
+  ::  +grow:of-farm assigns las+1 on a non-empty fan, so an
+  ::  idempotent-LOOKING "make public" pushes the binding one case
+  ::  higher every time it is pressed. Three presses put it past
+  ::  +max-case-probe and the attachment is unfetchable by every peer,
+  ::  forever, with no error - the fetcher just reports a miss. Cases
+  ::  only ever go up, so there is no recovery. Nothing may %grow a spur
+  ::  it has not first established is unbound.
+  =/  cur=blob-vis:uc  (~(gut by vis.ix) h [%public ~])
+  ?.  ?=(%restricted -.cur)
+    (note root 'publish-blob' & 'already public')
   ;<  ~  bind:m
     %^  put-file  (vis-rail root)  [/urmail %blobvis]
     ix(vis (~(del by vis.ix) h))
