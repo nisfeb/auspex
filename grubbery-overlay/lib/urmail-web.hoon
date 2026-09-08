@@ -95,6 +95,106 @@
 ::
 ::  +de-uv-field: one named @uv out of an object.
 ::
+::
+::  ── the mail-client requests ────────────────────────────────────────
+::
+::  Stdlib tuples, not $action:urmail-chain: this lib is IMPORT-FREE so
+::  -test can reach it, and an overlay lib that imported the chain lib
+::  could only be built from the nexus. The nexus assembles the action
+::  from these fields, which costs one line per route and keeps the
+::  parsing where a test can see it.
+::
+::  Labels arrive as ordinary strings and are NOT decoded as @tas here.
+::  dejs has no term decoder that refuses a bad one cleanly, and a cord
+::  holding a space or a capital sits in a (set @tas) perfectly happily
+::  and then crashes `scot %tas` on a request fiber - an HTTP connection
+::  that never answers. The nexus checks +label-ok before it stores.
+::
++$  label-req  [thread-id=@uv label=@t add=?]
++$  draft-req  [id=@uv to=(set @p) subj=@t body=@t prev=(unit @uv)]
++$  rule-req   [id=@uv from=(unit @p) subject=(unit @t) add=(list @t) archive=?]
+::
+++  de-label
+  |=  jon=json
+  ^-  (unit label-req)
+  =/  res
+    %-  mule
+    |.
+    ^-  label-req
+    %.  jon
+    %-  ot:dejs:format
+    :~  ['thread-id' (se:dejs:format %uv)]
+        label+so:dejs:format
+        add+bo:dejs:format
+    ==
+  ?:(?=(%| -.res) ~ `p.res)
+::
+++  de-archive
+  |=  jon=json
+  ^-  (unit [@uv ?])
+  =/  res
+    %-  mule
+    |.
+    ^-  [@uv ?]
+    %.  jon
+    (ot:dejs:format ~[['thread-id' (se:dejs:format %uv)] archived+bo:dejs:format])
+  ?:(?=(%| -.res) ~ `p.res)
+::
+::  +de-draft: the save-draft body.
+::
+::    `id` is REQUIRED and comes from the client. A draft id is local,
+::    means nothing on any other ship and never appears in a signature,
+::    so minting it in the browser is what lets the write path stay a
+::    fire-and-forget poke: the route answers when the writer takes the
+::    poke, so a server-minted id could never be told to the client that
+::    needs it to save the same draft again.
+::
+++  de-draft
+  |=  jon=json
+  ^-  (unit draft-req)
+  =/  res
+    %-  mule
+    |.
+    ^-  draft-req
+    %.  jon
+    %-  ot:dejs:format
+    :~  id+(se:dejs:format %uv)
+        to+(as:dejs:format (se:dejs:format %p))
+        subj+so:dejs:format
+        body+so:dejs:format
+        prev+(mu:dejs:format (se:dejs:format %uv))
+    ==
+  ?:(?=(%| -.res) ~ `p.res)
+::
+::  +de-rule: the save-rule body. `from` and `subject` are both optional
+::  and the nexus refuses a rule that sets neither - a rule with no
+::  condition matches every delivered chain.
+::
+++  de-rule
+  |=  jon=json
+  ^-  (unit rule-req)
+  =/  res
+    %-  mule
+    |.
+    ^-  rule-req
+    %.  jon
+    %-  ot:dejs:format
+    :~  id+(se:dejs:format %uv)
+        from+(mu:dejs:format (se:dejs:format %p))
+        subject+(mu:dejs:format so:dejs:format)
+        add+(ar:dejs:format so:dejs:format)
+        archive+bo:dejs:format
+    ==
+  ?:(?=(%| -.res) ~ `p.res)
+::
+::  +de-id: {"id": "0v..."} -> the id. Shared by delete-draft,
+::  send-draft and delete-rule, which differ only in what they act on.
+::
+++  de-id
+  |=  jon=json
+  ^-  (unit @uv)
+  (de-uv-field jon %id)
+::
 ++  de-uv-field
   |=  [jon=json key=@t]
   ^-  (unit @uv)

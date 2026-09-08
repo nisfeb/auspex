@@ -110,6 +110,9 @@
 ::  writes exactly these two files and fails if it would emit a third.
 /<  uih  ui-app/index.html
 /<  uij  ui-app/app.js
+::  the launcher tile's icon, served at /apps/urmail/icon.svg and
+::  pulled by the tiles nexus through /grubbery/tiles/icon/urmail.
+/<  uicon  icon.svg
 =<  ^-  nexus:nexus
     |%
     ++  on-load
@@ -120,6 +123,28 @@
       ::  path here is lost mail.
       %+  spin:loader  ball
       :~  (manifest:loader 0)
+          ::  tile.json: THE LAUNCHER LISTS ONLY APPS THAT CARRY ONE.
+          ::  Without it urmail is installed, running and serving, and
+          ::  invisible from the grubbery home screen - which reads as
+          ::  "not installed" to everyone but the person who typed the
+          ::  route by hand. %over, not %fall, so a redeploy replaces
+          ::  the tile rather than leaving every ship on whatever it
+          ::  first loaded, exactly as /app does below.
+          ::
+          ::  `image` names the app SLUG - the name before the first dot
+          ::  in /apps/urmail.urmail_app - not the folder, and the tiles
+          ::  nexus resolves it against the icon.svg grub laid beside
+          ::  this row.
+          :^  %over  %&  [/ %'tile.json']
+          :-  [/ %json]
+          %-  pairs:enjs:format
+          :~  title+s+'Mail'
+              info+s+'Signed mail, verified end to end'
+              color+s+'#2563eb'
+              image+s+'/grubbery/tiles/icon/urmail'
+              href+s+'/apps/urmail'
+          ==
+          [%over %& [/ %'icon.svg'] [[/ %mime] uicon]]
           ::  the writer. %fall, so an existing live process is kept.
           [%fall %& [/ %'main.sig'] [[/ %sig] ~]]
           ::  /mail: %fall %| copies the WHOLE existing subtree, which is
@@ -147,6 +172,17 @@
           ::  deliberately not a field beside the bytes: changing who may
           ::  read a quarter-megabyte file must not rewrite the file.
           [%fall %& [/mail %blobvis] [[/urmail %blobvis] *blob-index:uc]]
+          ::  /mail/draft and /mail/rule: NEW PERSISTENT PATHS, and an
+          ::  uncovered persistent path is lost data - spin rebuilds the
+          ::  bole from scratch and drops whatever no row names. The
+          ::  %fall %| on /mail above already copies the subtree; these
+          ::  two rows are what CREATE the directories on a first load,
+          ::  since the writer only ever writes leaves into them.
+          ::
+          ::  A lost draft is a message the user wrote and never sent,
+          ::  and a lost rule is a filter that silently stops filtering.
+          [%fall %| /mail/draft empty-dir:loader]
+          [%fall %| /mail/rule empty-dir:loader]
           ::  /fetch: one grub per in-flight blob fetch, each grub the
           ::  state of its own fiber. Covered like every other
           ::  persistent path - spin drops what it does not cover - and
@@ -243,6 +279,11 @@
 ++  blob-dir    |=(root=path ^-(path (weld root /mail/blob)))
 ++  blob-rail   |=([root=path h=@uv] ^-(road:tarball [%& %& (blob-dir root) (scot %uv h)]))
 ++  vis-rail    |=(root=path ^-(road:tarball [%& %& (mail-dir root) %blobvis]))
+++  draft-dir   |=(root=path ^-(path (weld root /mail/draft)))
+++  rule-dir    |=(root=path ^-(path (weld root /mail/rule)))
+++  draft-rail  |=([root=path i=@uv] ^-(road:tarball [%& %& (draft-dir root) (scot %uv i)]))
+++  rule-rail   |=([root=path i=@uv] ^-(road:tarball [%& %& (rule-dir root) (scot %uv i)]))
+++  meta-rail   |=([root=path t=thread-id:uc] ^-(road:tarball [%& %& (tdir root t) %meta]))
 ::  +slot: the grub name of one SIGNED COPY.
 ::
 ::    (sham [id sig]), not a positional index. The spec writes this leaf as
@@ -377,6 +418,63 @@
   =/  r0  (mule |.(;;(meta-0:uc n)))
   ?:  ?=(%| -.r0)  (pure:m *meta:uc)
   (pure:m [%1 read.p.r0 archived.p.r0 labels.p.r0 | ~])
+::
+::  +read-drafts / +read-rules: the two new persisted subtrees.
+::
+::    One deep peek each, and the shape ladder is here rather than in the
+::    marc for the reason every other ladder here is: a typed marc
+::    re-validates every stored grub against the live type on read, so
+::    moving the type booms what is on disk. A grub that does not clam is
+::    DROPPED from the list, never crashed on - these run on the writer
+::    and on request fibers, and neither may fail on one bad grub.
+::
+++  read-drafts
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,(list draft:uc))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (draft-dir root)] ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  (pure:m (collect-drafts ball.vw))
+::
+++  collect-drafts
+  |=  b=ball:tarball
+  ^-  (list draft:uc)
+  ?~  fil.b  ~
+  %+  murn  ~(val by contents.u.fil.b)
+  |=  c=[=sang:tarball gain=? bang=(unit tang)]
+  ^-  (unit draft:uc)
+  ?:  (is-boom:tarball sang.c)  ~
+  =/  res  (mule |.(;;(draft:uc (sang-noun:tarball sang.c))))
+  ?:(?=(%| -.res) ~ `p.res)
+::
+++  read-draft
+  |=  [root=path i=@uv]
+  =/  m  (fiber:fiber:nexus ,(unit draft:uc))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (draft-rail root i) ~)
+  ?.  ?=([%file *] vw)  (pure:m ~)
+  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
+  =/  res  (mule |.(;;(draft:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%| -.res) ~ `p.res))
+::
+++  read-rules
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,(list rule:uc))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (rule-dir root)] ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  (pure:m (collect-rules ball.vw))
+::
+++  collect-rules
+  |=  b=ball:tarball
+  ^-  (list rule:uc)
+  ?~  fil.b  ~
+  %+  murn  ~(val by contents.u.fil.b)
+  |=  c=[=sang:tarball gain=? bang=(unit tang)]
+  ^-  (unit rule:uc)
+  ?:  (is-boom:tarball sang.c)  ~
+  =/  res  (mule |.(;;(rule:uc (sang-noun:tarball sang.c))))
+  ?:(?=(%| -.res) ~ `p.res)
 ::
 ++  read-idx
   |=  root=path
@@ -805,12 +903,36 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?-  -.a
-    %send           (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
+    ::  +do-send answers WHETHER IT SENT, not whether to bump: it bumps
+    ::  the beacon itself, from before its fan-out, so a local reader
+    ::  never waits on a remote ship. The answer is discarded here and
+    ::  used by %send-draft, which must not delete a draft whose send
+    ::  the writer refused.
+      %send
+    ;<  *  bind:m
+      (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
+    (pure:m |)
+  ::
     %read           (do-read root ids.a)
     %delete-thread  (do-delete root thread-id.a)
     %fetch-blob     (do-fetch-blob root hash.a from.a)
     %restrict-blob  (do-restrict root hash.a ships.a)
     %publish-blob   (do-publish root hash.a)
+  ::  the mail-client layer. EVERY ONE OF THESE ANSWERS %.n, and that is
+  ::  not an oversight. The beacon tells OTHER open readers that content
+  ::  moved; a label, an archive, an unread mark, a draft and a rule are
+  ::  local state on a thread nobody else can see. Bumping for them would
+  ::  cost every open tab a full inbox listing plus a thread refetch for
+  ::  a change it cannot observe - the read-mark storm again, and the tab
+  ::  that made the change refetches on its own anyway.
+    %label          (do-label root thread-id.a label.a add.a)
+    %archive        (do-archive root thread-id.a archived.a)
+    %unread         (do-unread root ids.a)
+    %save-draft     (do-save-draft root draft.a)
+    %delete-draft   (do-delete-draft root id.a)
+    %send-draft     (do-send-draft root id.a)
+    %save-rule      (do-save-rule root rule.a)
+    %delete-rule    (do-delete-rule root id.a)
   ==
 ::
 ::  +do-send: compose, reply and forward are all this.
@@ -832,6 +954,8 @@
 ::    a thread permanently: every later message on that path rejected by
 ::    every recipient, silently, forever. Failing at compose time is the
 ::    only point where a human can still do something about it.
+::::    ANSWERS WHETHER IT SENT. Not whether to bump: this arm bumps the
+::    beacon itself, from inside, before the fan-out. See the end.
 ::
 ++  do-send
   |=  $:  root=path
@@ -938,7 +1062,7 @@
   ::  actually on disk.
   =/  place=(list msg-id:uc)  (place-of:uc (merge:uc full ~[mg]) (id:uc u))
   ;<  ~  bind:m  (write-msg root rid place mg %verified)
-  ;<  ~  bind:m  (mark-read root rid (sy ~[(id:uc u)]))
+  ;<  ~  bind:m  (mark-read root rid (sy ~[(id:uc u)]) &)
   ::  record who we blind-copied, LOCALLY, so our own Sent view is
   ::  accurate. This never travels and is not part of any signature.
   ;<  ~  bind:m  (record-bcc root rid (id:uc u) bcc)
@@ -956,10 +1080,17 @@
   ::  added at message forty receives the forty on this path, each
   ::  independently verifiable, and nothing off it.
   ;<  ~  bind:m  (fan-out root new ~(tap in (~(del in (~(uni in to) bcc)) our)))
-  ::  %.n: the beacon is already moved, above. The writer's loop must
-  ::  not move it a second time, which would cost every open reader a
-  ::  pointless refetch of a thread it already has.
-  (pure:m |)
+  ::  %.y MEANS "IT SENT", NOT "BUMP THE BEACON". The beacon is already
+  ::  moved, above, and +act discards this answer precisely so the
+  ::  writer's loop does not move it a second time.
+  ::
+  ::  The answer exists for %send-draft, which must not delete a draft
+  ::  whose send this arm refused. Every +reject above returns %.n, so a
+  ::  refused send is distinguishable from a completed one by the one
+  ::  caller that has to be able to tell - and a composed message
+  ::  survives its own rejection instead of being deleted at the moment
+  ::  the ship declines to carry it.
+  (pure:m &)
 ::
 ::  +do-read: mark a SET of messages read, in one pass.
 ::
@@ -983,33 +1114,272 @@
   ^-  form:m
   ?:  =(~ ids)  (pure:m |)
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
-  ::  one pass over the mailbox, grouping the named ids by the thread
-  ::  that actually holds them. Flat on purpose: a roll nested inside a
-  ::  roll cannot thread the outer accumulator through, because the
-  ::  inner one starts from the BUNT of its own sample rather than from
-  ::  the value in hand - it silently drops what the outer had
-  ::  accumulated, and the `_acc` needed to spell it BANGS this file at
-  ::  spawn, which takes the writer with it.
-  =/  hits=(list [t=thread-id:uc is=(set msg-id:uc)])
-    %+  murn  ~(tap by loaded)
-    |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
-    ^-  (unit [thread-id:uc (set msg-id:uc)])
-    =/  mine=(set msg-id:uc)
-      %-  ~(gas in *(set msg-id:uc))
-      %+  murn  ~(val by ss)
-      |=  st=stored-msg:uc
-      ^-  (unit msg-id:uc)
-      =/  i=msg-id:uc  (id:uc unsigned.msg.st)
-      ?:((~(has in ids) i) `i ~)
-    ?:(=(~ mine) ~ `[t mine])
+  =/  hits  (group-ids loaded ids)
   ?~  hits  (reject root 'unknown message')
-  ;<  ~  bind:m  (mark-read-loop root hits)
+  ;<  ~  bind:m  (mark-read-loop root hits &)
   ::  %.n ALWAYS. Read state is not content: lattice learned this with
   ::  page history, where every visit bumped and every open reader
   ::  reloaded. It is worse here, because a reader answers a bump by
   ::  refetching the thread it is showing and that refetch marks it read
   ::  again - a loop, not a burst.
   (pure:m |)
+::
+::  +group-ids: which thread holds each of these message ids.
+::
+::    ONE PASS over the mailbox, shared by %read and %unread so the two
+::    cannot disagree about what a set of ids names. Flat on purpose: a
+::    roll nested inside a roll cannot thread the outer accumulator
+::    through, because the inner one starts from the BUNT of its own
+::    sample rather than from the value in hand - it silently drops what
+::    the outer had accumulated, and the `_acc` needed to spell it BANGS
+::    this file at spawn, which takes the writer with it.
+::
+::    Ids naming nothing are skipped rather than refused. A set is not a
+::    single request that can be wrong; it is a client reporting what it
+::    just rendered, and a thread deleted in another tab between render
+::    and poke would otherwise make the whole batch fail.
+::
+++  group-ids
+  |=  [loaded=(map thread-id:uc (map path stored-msg:uc)) ids=(set msg-id:uc)]
+  ^-  (list [t=thread-id:uc is=(set msg-id:uc)])
+  %+  murn  ~(tap by loaded)
+  |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
+  ^-  (unit [thread-id:uc (set msg-id:uc)])
+  =/  mine=(set msg-id:uc)
+    %-  ~(gas in *(set msg-id:uc))
+    %+  murn  ~(val by ss)
+    |=  st=stored-msg:uc
+    ^-  (unit msg-id:uc)
+    =/  i=msg-id:uc  (id:uc unsigned.msg.st)
+    ?:((~(has in ids) i) `i ~)
+  ?:(=(~ mine) ~ `[t mine])
+::
+::  +do-unread: the exact inverse of %read, over the same pass.
+::
+::    Marking a %forged message unread is a no-op on every surface a
+::    user sees, and no branch here says so: the unread count in
+::    +entry-json already skips forged copies, because "%forged messages
+::    are never counted as unread" is a property of how unread is
+::    COMPUTED and not of what is stored. Special-casing it here would
+::    be a second place for that rule to live and a second place for it
+::    to drift.
+::
+::    %.n, always, exactly as %read is: read state is not content, and a
+::    reader that answered a bump by refetching the thread it is showing
+::    would mark it read again - a loop, not a burst.
+::
+++  do-unread
+  |=  [root=path ids=(set msg-id:uc)]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ?:  =(~ ids)  (pure:m |)
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
+  =/  hits  (group-ids loaded ids)
+  ?~  hits  (reject root 'unknown message')
+  ;<  ~  bind:m  (mark-read-loop root hits |)
+  ;<  ~  bind:m  (note root 'unread' & 'ok')
+  (pure:m |)
+::
+::  ── labels, folders and archive ─────────────────────────────────────
+::
+::  +do-label: add or remove ONE label on one thread.
+::
+::    One label and a direction rather than a whole set, so two tabs
+::    adding two different labels do not clobber each other. A
+::    set-valued action is last-write-wins over everything the other tab
+::    did, which for local state that nothing else can reconcile is a
+::    silent loss.
+::
+::    A FOLDER IS A LABEL. There is no second taxonomy anywhere in this
+::    nexus - Inbox, Sent, Archived and Drafts are views, every other
+::    folder is a label, and a message is in as many as its thread
+::    carries. Two taxonomies would eventually disagree about where a
+::    thread is, and the disagreement would be invisible.
+::
+++  do-label
+  |=  [root=path t=thread-id:uc l=@tas add=?]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ::  the label is user input arriving as a JSON string. Nothing
+  ::  downstream re-checks it - a cord sits in a (set @tas) perfectly
+  ::  happily and then crashes `scot %tas` on a request fiber, which is
+  ::  an HTTP connection that never answers.
+  ?.  (label-ok:uc l)  (reject root 'bad label')
+  ;<  ex=?  bind:m  (peek-exists:io [%& %| (tdir root t)])
+  ?.  ex  (reject root 'unknown thread')
+  ;<  mt=meta:uc  bind:m  (read-meta root t)
+  =/  now=(set @tas)  ?:(add (~(put in labels.mt) l) (~(del in labels.mt) l))
+  ::  a no-op writes nothing. Removing a label a thread does not carry
+  ::  is a request a client makes freely.
+  ?:  =(now labels.mt)  (pure:m |)
+  ?.  (lte ~(wyt in now) max-labels:uc)  (reject root 'too many labels')
+  ;<  ~  bind:m  (put-file (meta-rail root t) [/urmail %meta] mt(labels now))
+  ;<  ~  bind:m  (note root 'label' & l)
+  (pure:m |)
+::
+::  +do-archive: set or clear a thread's archive flag.
+::
+::    ARCHIVING IS NOT DELETION. It removes a thread from the Inbox view
+::    and from nowhere else: the chain is untouched, every signature
+::    still stands, the thread is still searchable and still counted,
+::    and new mail arriving in it UN-ARCHIVES it. See +file-arrival -
+::    without that, archiving would be a way for mail to disappear
+::    silently, which is the one thing a mail client must never do.
+::
+++  do-archive
+  |=  [root=path t=thread-id:uc arch=?]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  ex=?  bind:m  (peek-exists:io [%& %| (tdir root t)])
+  ?.  ex  (reject root 'unknown thread')
+  ;<  mt=meta:uc  bind:m  (read-meta root t)
+  ?:  =(arch archived.mt)  (pure:m |)
+  ;<  ~  bind:m  (put-file (meta-rail root t) [/urmail %meta] mt(archived arch))
+  ;<  ~  bind:m  (note root 'archive' & (scot %uv t))
+  (pure:m |)
+::
+::  ── drafts ──────────────────────────────────────────────────────────
+::
+::  +do-save-draft: create or overwrite one unsigned draft.
+::
+::    NOTHING IS SIGNED HERE. A draft has no author, no life, no send
+::    time and no signature, and it is stored outside /mail/thread so no
+::    walk that produces messages can reach it. Signing happens once, at
+::    %send-draft, over the fields as they stand at that moment.
+::
+::    The id comes from the client and is overwritten in place, so a
+::    debounced save costs one grub however many keystrokes it covers.
+::
+++  do-save-draft
+  |=  [root=path d=draft:uc]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ::  the send caps, checked at SAVE time. A draft that cannot be sent
+  ::  is a message the user loses at the last moment, and the whole
+  ::  point of a draft is that nothing is lost.
+  ?.  (draft-ok:uc d)  (reject root 'bad draft')
+  ;<  ~  bind:m  (ensure-dir (draft-dir root))
+  ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
+  ::  the store bound counts only a draft we do not already hold, so
+  ::  re-saving an existing draft is never refused for capacity.
+  ?.  ?|  (lien ds |=(o=draft:uc =(id.o id.d)))
+          (lth (lent ds) max-drafts:uc)
+      ==
+    (reject root 'too many drafts')
+  ;<  ~  bind:m  (put-file (draft-rail root id.d) [/urmail %draft] d)
+  ;<  ~  bind:m  (note root 'save-draft' & (scot %uv id.d))
+  (pure:m |)
+::
+++  do-delete-draft
+  |=  [root=path i=@uv]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  ~  bind:m  (cull-if-there (draft-rail root i))
+  ;<  ~  bind:m  (note root 'delete-draft' & (scot %uv i))
+  (pure:m |)
+::
+::  +do-send-draft: SIGN IT NOW, THEN DELETE IT.
+::
+::    The draft becomes a message at this instant and not before: the
+::    signature is made over the fields as they stand, by +do-send,
+::    exactly as a compose is. There is no path by which a draft is
+::    signed at save time and no path by which a stored draft carries a
+::    signature.
+::
+::    DELETION IS GATED ON THE SEND ACTUALLY HAVING HAPPENED. +do-send
+::    answers whether it sent; a refused send - a body over the cap, an
+::    unknown prev, a full blob store - leaves the draft exactly where
+::    it was. Deleting unconditionally would destroy the composed
+::    message at the one moment the ship is telling the user it will not
+::    carry it, which is the failure the web route's cap checks were
+::    added to prevent, arriving through a different door.
+::
+++  do-send-draft
+  |=  [root=path i=@uv]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  d=(unit draft:uc)  bind:m  (read-draft root i)
+  ?~  d  (reject root 'unknown draft')
+  ;<  sent=?  bind:m  (do-send root to.u.d subj.u.d body.u.d '' prev.u.d ~ ~)
+  ?.  sent
+    ::  +do-send has already written its own reason to /tr/last. The
+    ::  draft survives.
+    (pure:m |)
+  ;<  ~  bind:m  (cull-if-there (draft-rail root i))
+  ;<  ~  bind:m  (note root 'send-draft' & (scot %uv i))
+  ::  %.n: +do-send bumped the beacon itself, before its fan-out.
+  (pure:m |)
+::
+::  ── filters ─────────────────────────────────────────────────────────
+::
+++  do-save-rule
+  |=  [root=path r=rule:uc]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ::  a rule with no condition matches every delivered chain, and with
+  ::  `archive` set would empty the inbox permanently and silently.
+  ?.  (rule-ok:uc r)  (reject root 'bad rule')
+  ;<  ~  bind:m  (ensure-dir (rule-dir root))
+  ;<  rs=(list rule:uc)  bind:m  (read-rules root)
+  ::  every rule is evaluated against every delivered chain, ON THE
+  ::  WRITER, which is the ship's single serialisation point for mail.
+  ?.  ?|  (lien rs |=(o=rule:uc =(id.o id.r)))
+          (lth (lent rs) max-rules:uc)
+      ==
+    (reject root 'too many rules')
+  ;<  ~  bind:m  (put-file (rule-rail root id.r) [/urmail %rule] r)
+  ;<  ~  bind:m  (note root 'save-rule' & (scot %uv id.r))
+  (pure:m |)
+::
+++  do-delete-rule
+  |=  [root=path i=@uv]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  ~  bind:m  (cull-if-there (rule-rail root i))
+  ;<  ~  bind:m  (note root 'delete-rule' & (scot %uv i))
+  (pure:m |)
+::
+::  +file-arrival: what happens to a thread's LOCAL state when mail
+::  lands in it. Un-archive, then the filters, in ONE rewrite of meta.
+::
+::    ORDER IS THE WHOLE ARGUMENT, and it runs AFTER verification and
+::    after the chain is stored - never before. A filter that ran first
+::    could decide what gets stored, and an attacker who learns your
+::    rules could then aim a forgery at one and have the evidence of it
+::    quietly put somewhere you do not look. Here the chain is already
+::    on disk with every verdict already set, and all a rule can reach
+::    is a label and a flag.
+::
+::    UN-ARCHIVE ON NEW MAIL. Without it, archiving a thread would make
+::    every later message in it vanish silently, which is mail loss
+::    wearing the costume of a feature. Only actual new content
+::    un-archives: `wrote` is +sync-slots' answer, so a redelivery of a
+::    chain we already hold - which any ship may poke at us, since
+::    delivery is public - changes nothing.
+::
+::    A MATCHING RULE'S ARCHIVE STILL WINS for the mail that just
+::    arrived, because "skip the inbox" is a standing instruction about
+::    exactly this delivery. So the un-archive is the DEFAULT that
+::    rules are then applied over, not something applied after them.
+::
+++  file-arrival
+  |=  [root=path t=thread-id:uc c=chain:uc wrote=?]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  rs=(list rule:uc)  bind:m  (read-rules root)
+  =/  got  (apply-rules:uc rs c)
+  ;<  mt=meta:uc  bind:m  (read-meta root t)
+  =/  arch=?  ?:(wrote archive.got |(archived.mt archive.got))
+  =/  want=(set @tas)  (~(uni in labels.mt) add.got)
+  ::  the label bound refuses the ADDITION, never the delivery: a rule
+  ::  that would push a thread past the cap simply does not add. Nacking
+  ::  the chain instead would turn a rule the user wrote into a way for
+  ::  a sender to get their own mail rejected.
+  =/  ls=(set @tas)  ?:((lte ~(wyt in want) max-labels:uc) want labels.mt)
+  ?:  &(=(arch archived.mt) =(ls labels.mt))  (pure:m ~)
+  ;<  ~  bind:m
+    (put-file (meta-rail root t) [/urmail %meta] mt(archived arch, labels ls))
+  (note root 'file-arrival' & (scot %uv t))
 ::
 ::  +do-delete: the escape hatch. Every capacity limit here is otherwise
 ::  permanent: a thread pinned at the distinct-id cap has no other remedy.
@@ -1140,6 +1510,13 @@
     ;<  ~  bind:m  (note root 'deliver' & 'no change')
     (pure:m |)
   ;<  ~  bind:m  (touch-idx root rid)
+  ::  LOCAL FILING, AFTER STORAGE AND AFTER EVERY VERDICT IS SET. New
+  ::  mail un-archives the thread; then the user's filters may add
+  ::  labels and archive it again. Nothing here can suppress a message,
+  ::  because by this point the chain is already on disk with its
+  ::  verdicts and a $rule has no field that reaches it. See
+  ::  +file-arrival.
+  ;<  ~  bind:m  (file-arrival root rid c wrote)
   ;<  ~  bind:m  (note root 'deliver' & (scot %uv rid))
   (pure:m &)
 ::
@@ -1809,23 +2186,27 @@
 ::  cannot find the trap.
 ::
 ++  mark-read-loop
-  |=  [root=path xs=(list [t=thread-id:uc is=(set msg-id:uc)])]
+  |=  [root=path xs=(list [t=thread-id:uc is=(set msg-id:uc)]) rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
-  ;<  ~  bind:m  (mark-read root t.i.xs is.i.xs)
-  (mark-read-loop root t.xs)
+  ;<  ~  bind:m  (mark-read root t.i.xs is.i.xs rd)
+  (mark-read-loop root t.xs rd)
 ::
 ::  +mark-read: fold a set of ids into one thread's read marks, in ONE
 ::  rewrite of its meta grub however many ids are named.
 ::
+::    `rd` is the direction: & unions the ids in, | takes them out.
+::    %read and %unread are the same walk and the same write, which is
+::    what keeps them from disagreeing about what a set of ids names.
+::
 ++  mark-read
-  |=  [root=path t=thread-id:uc is=(set msg-id:uc)]
+  |=  [root=path t=thread-id:uc is=(set msg-id:uc) rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
-  mt(read (~(uni in read.mt) is))
+  %^  put-file  (meta-rail root t)  [/urmail %meta]
+  mt(read ?:(rd (~(uni in read.mt) is) (~(dif in read.mt) is)))
 ::
 ++  touch-idx
   |=  [root=path t=thread-id:uc]
@@ -2149,9 +2530,29 @@
   ?+    [meth suffix]
     (send-err eyre-id 404 'not found')
       [%'GET' [%api %whoami ~]]         (serve-whoami eyre-id)
-      [%'GET' [%api %inbox ~]]          (serve-inbox src eyre-id)
+    ::  THE LISTING, AND EVERY VIEW IS THIS ONE ROUTE. Inbox, Sent,
+    ::  Archived, a label and a search are the same walk over the same
+    ::  tree with a different predicate, so they are the same route with
+    ::  a different `view` - see +serve-inbox. Query args, not path
+    ::  segments, because a view plus a label plus a query plus an
+    ::  offset plus a limit in the path would be five positional
+    ::  segments a client has to get in the right order.
+      [%'GET' [%api %inbox ~]]          (serve-inbox src eyre-id args.parsed)
+      [%'GET' [%api %drafts ~]]         (serve-drafts src eyre-id)
+      [%'GET' [%api %rules ~]]          (serve-rules src eyre-id)
       [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
       [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
+      [%'POST' [%api %unread ~]]        (do-web-unread src eyre-id (req-body req))
+      [%'POST' [%api %label ~]]         (do-web-label src eyre-id (req-body req))
+      [%'POST' [%api %archive ~]]       (do-web-archive src eyre-id (req-body req))
+      [%'POST' [%api %draft ~]]         (do-web-draft src eyre-id (req-body req))
+      [%'POST' [%api %'draft-delete' ~]]
+    (do-web-id src eyre-id (req-body req) %delete-draft)
+      [%'POST' [%api %'draft-send' ~]]
+    (do-web-id src eyre-id (req-body req) %send-draft)
+      [%'POST' [%api %rule ~]]          (do-web-rule src eyre-id (req-body req))
+      [%'POST' [%api %'rule-delete' ~]]
+    (do-web-id src eyre-id (req-body req) %delete-rule)
       [%'POST' [%api %'delete-thread' ~]]
     (do-web-delete src eyre-id (req-body req))
   ==
@@ -2190,28 +2591,196 @@
   ;<  our=@p  bind:m  bowl-our
   (send-json eyre-id (pairs:enjs:format ~[['ship' [%s (scot %p our)]]]))
 ::
-::  +serve-inbox: the thread listing, in the index's order.
+::  +serve-inbox: the thread listing - EVERY VIEW, PAGED, SEARCHABLE.
 ::
-::    ONE deep peek of /mail/thread, walked twice - once for the message
-::    grubs and once for the meta leaves. The alternative, a peek per
-::    thread, is a dart per row on the surface a user hits first. This is
-::    the same O(total stored messages) read the writer already pays and
-::    that the spec already records against +thread-key; the upgrade path
-::    is the same summary grub.
+::    ONE deep peek of /mail/thread, walked three times - once for the
+::    message grubs, once for the meta leaves and once for the copies
+::    this build cannot read. The alternative, a peek per thread, is a
+::    dart per row on the surface a user hits first. This is the same
+::    O(total stored messages) read the writer already pays and that the
+::    spec already records against +thread-key; the upgrade path is the
+::    same summary grub.
+::
+::    A VIEW IS A PREDICATE OVER THAT ONE WALK, NOT A STORED SET. Inbox,
+::    Sent, Archived and each label are the same listing filtered
+::    differently, which is why they cannot disagree about where a
+::    thread is - there is only one place a thread is, and the views are
+::    questions asked of it. See +in-view.
+::
+::    SEARCH IS THE SAME WALK with `q` non-empty, and it runs HERE, on a
+::    request fiber, never on the writer: a search is a read, the writer
+::    serialises mutations, and a linear sweep placed on it would queue
+::    every send and every delivery behind whatever someone typed into a
+::    search box.
+::
+::    PAGINATION counts the whole view and renders only the page, so
+::    `total` is honest about a view the client has not fetched. It is
+::    applied AFTER the predicate: a page of the inbox is a page of the
+::    inbox, not the inbox-shaped subset of the first fifty threads.
 ::
 ++  serve-inbox
+  |=  [src=@p eyre-id=@ta args=quay:eyre]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ::  `our` in hand, not just the owner answer: Inbox and Sent are both
+  ::  questions about us, so the bowl read the owner gate pays for is
+  ::  the same one those two views need.
+  ;<  our=@p  bind:m  bowl-our
+  ?.  =(our src)  (send-err eyre-id 403 'forbidden')
+  =/  view=@t   (fall (arg args 'view') 'inbox')
+  =/  q=@t      (fall (arg args 'q') '')
+  =/  lab=@t    (fall (arg args 'label') '')
+  =/  off=@ud   (fall (arg-ud args 'offset') 0)
+  ::  an ABSENT limit defaults; a limit of 0 is an empty page, literally.
+  =/  lim=@ud   (min max-page:uc (fall (arg-ud args 'limit') 50))
+  ;<  root=path  bind:m  nexus-root
+  ;<  ix=mail-idx:uc  bind:m  (read-idx root)
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
+  =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
+  =/  loaded  (collect-threads b)
+  =/  metas   (collect-metas b)
+  =/  lost    (collect-unreadable b)
+  =/  keep=(list thread-id:uc)
+    %+  skim  inbox.ix
+    |=(t=thread-id:uc (in-view our view lab q t loaded metas lost))
+  =/  jon=json
+    %-  pairs:enjs:format
+    :~  ['total' (numb:enjs:format (lent keep))]
+        ['offset' (numb:enjs:format off)]
+        ['limit' (numb:enjs:format lim)]
+        ['view' [%s view]]
+        :-  'threads'
+        (inbox-json (page:uc keep off lim) loaded metas lost q)
+    ==
+  (send-json eyre-id jon)
+::
+::  +arg / +arg-ud: one query argument, decoded.
+::
+::    A quay is a (list [@t @t]) and a repeated key is legal in a URL, so
+::    the FIRST occurrence wins rather than the last - a client that
+::    sends ?view=inbox&view=archived gets the one it asked for first
+::    instead of whatever ended up at the end of the list.
+::
+++  arg
+  |=  [args=quay:eyre k=@t]
+  ^-  (unit @t)
+  ?~  args  ~
+  ?:(=(k p.i.args) `q.i.args $(args t.args))
+::
+++  arg-ud
+  |=  [args=quay:eyre k=@t]
+  ^-  (unit @ud)
+  =/  v=(unit @t)  (arg args k)
+  ?~  v  ~
+  (rush u.v dem:ag)
+::
+::  +in-view: is this thread in the named view, under this query?
+::
+::    Pure, and every clause is a lib predicate rather than a rule
+::    written twice - +in-inbox and +in-sent are import-free and tested.
+::
+::    A THREAD WITH NO READABLE COPY IS NOT DROPPED. Its chain is empty,
+::    so it is a participant in nothing and would fail every view test;
+::    dropping it would make it vanish from the listing while its meta
+::    and its /mail/idx entry survived, which is exactly the silent
+::    disappearance the unreadable count exists to stop. It answers the
+::    only questions that can honestly be asked of it - archived or not
+::    - and it never answers a SEARCH, because we cannot search what we
+::    cannot read and saying we did would be a lie.
+::
+++  in-view
+  |=  $:  our=@p
+          view=@t
+          lab=@t
+          q=@t
+          t=thread-id:uc
+          loaded=(map thread-id:uc (map path stored-msg:uc))
+          metas=(map thread-id:uc meta:uc)
+          lost=(map thread-id:uc @ud)
+      ==
+  ^-  ?
+  =/  ss=(map path stored-msg:uc)  (~(gut by loaded) t ~)
+  =/  n=@ud  (~(gut by lost) t 0)
+  ::  the index names a thread with nothing at all under it: a stale
+  ::  entry, which +inbox-json also drops.
+  ?:  &(=(~ ss) =(0 n))  |
+  =/  mt=meta:uc  (~(gut by metas) t *meta:uc)
+  ?:  =(~ ss)
+    ::  unreadable-only. No chain, so no participants, no authorship and
+    ::  no searchable text.
+    ?&  =('' q)
+        ?+  view  |
+          %inbox     !archived.mt
+          %all       &
+          %archived  archived.mt
+          %label     (~(has in labels.mt) `@tas`lab)
+        ==
+    ==
+  =/  c=chain:uc  (chain-of ss)
+  ?&  ?+  view  |
+        %inbox     (in-inbox:uc our (participants:uc c) archived.mt direct.mt)
+        %sent      (in-sent:uc our c)
+        %archived  archived.mt
+        %all       &
+        %label     ?&((label-ok:uc `@tas`lab) (~(has in labels.mt) `@tas`lab))
+      ==
+      (chain-matches:uc q c)
+  ==
+::
+::  +serve-drafts: the Drafts view.
+::
+::    A SEPARATE ROUTE, not a `view` on the listing, because a draft is
+::    not a thread and has no sender, no verdict, no participants and no
+::    unread state. Squeezing it into a thread row would mean inventing
+::    every one of those, and inventing a sender for an unsigned message
+::    is the exact confusion drafts are kept out of /mail/thread to
+::    prevent.
+::
+++  serve-drafts
   |=  [src=@p eyre-id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
   ;<  root=path  bind:m  nexus-root
-  ;<  ix=mail-idx:uc  bind:m  (read-idx root)
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
-  =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
-  =/  jon=json
-    (inbox-json inbox.ix (collect-threads b) (collect-metas b) (collect-unreadable b))
-  (send-json eyre-id jon)
+  ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
+  ::  newest first, matching the listing's order.
+  =/  sorted=(list draft:uc)
+    (sort ds |=([a=draft:uc b=draft:uc] (gth at.a at.b)))
+  %+  send-json  eyre-id
+  :-  %a
+  %+  turn  sorted
+  |=  d=draft:uc
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv id.d)]]
+      ['to' [%a (turn ~(tap in to.d) |=(w=@p `json`[%s (scot %p w)]))]]
+      ['subj' [%s subj.d]]
+      ['body' [%s body.d]]
+      ['prev' ?~(prev.d ~ [%s (scot %uv u.prev.d)])]
+      ['at' (time:enjs:format at.d)]
+  ==
+::
+++  serve-rules
+  |=  [src=@p eyre-id=@ta]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  ;<  root=path  bind:m  nexus-root
+  ;<  rs=(list rule:uc)  bind:m  (read-rules root)
+  %+  send-json  eyre-id
+  :-  %a
+  %+  turn  rs
+  |=  r=rule:uc
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv id.r)]]
+      ['from' ?~(from.r ~ [%s (scot %p u.from.r)])]
+      ['subject' ?~(subject.r ~ [%s u.subject.r])]
+      ['add' [%a (turn ~(tap in add.r) |=(l=@tas `json`[%s l]))]]
+      ['archive' [%b archive.r]]
+  ==
 ::
 ::  +serve-thread: one thread, every stored copy with its own verdict.
 ::
@@ -2370,6 +2939,13 @@
     ::  under a pre-body-mime shape, refused rather than relabelled by
     ::  +read-stored. Reported so a thread that renders short says why.
       ['unreadable' (numb:enjs:format lost)]
+    ::  LOCAL STATE, rendered beside the signed content and never mixed
+    ::  into it. Nothing here travels and nothing here is covered by a
+    ::  signature; two ships holding this thread may disagree about
+    ::  every field below and still agree, byte for byte, about who
+    ::  signed what.
+      ['archived' [%b archived.mt]]
+      ['labels' [%a (turn ~(tap in labels.mt) |=(l=@tas `json`[%s l]))]]
   ==
 ::
 ::  +inbox-json: the listing. Deliberately not the full chains - the list
@@ -2384,6 +2960,11 @@
           loaded=(map thread-id:uc (map path stored-msg:uc))
           metas=(map thread-id:uc meta:uc)
           lost=(map thread-id:uc @ud)
+        ::  the search term, '' for an ordinary listing. It reaches
+        ::  +entry-json because a search row must be drawn from the
+        ::  message that MATCHED, not from the newest honest copy - see
+        ::  there.
+          q=@t
       ==
   ^-  json
   :-  %a
@@ -2401,8 +2982,8 @@
   ::  the silent disappearance this build exists to stop saying
   ::  nothing about, so the row says it instead.
   ?:  =(~ ss)
-    ?:(=(0 n) ~ `(unreadable-entry-json t n))
-  `(entry-json t ss (~(gut by metas) t *meta:uc) n)
+    ?:(=(0 n) ~ `(unreadable-entry-json t n (~(gut by metas) t *meta:uc)))
+  `(entry-json t ss (~(gut by metas) t *meta:uc) n q)
 ::
 ::  +unreadable-entry-json: the row for a thread this build cannot read
 ::  a single message of.
@@ -2413,7 +2994,7 @@
 ::    content of the row.
 ::
 ++  unreadable-entry-json
-  |=  [t=thread-id:uc n=@ud]
+  |=  [t=thread-id:uc n=@ud mt=meta:uc]
   ^-  json
   %-  pairs:enjs:format
   :~  ['id' [%s (scot %uv t)]]
@@ -2427,10 +3008,14 @@
       ['unread' [%b |]]
       ['participants' [%a ~]]
       ['unreadable' (numb:enjs:format n)]
+    ::  the row shape is uniform across both branches, so a client never
+    ::  has to ask which kind of row it is holding before reading a field.
+      ['archived' [%b archived.mt]]
+      ['labels' [%a (turn ~(tap in labels.mt) |=(l=@tas `json`[%s l]))]]
   ==
 ::
 ++  entry-json
-  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc lost=@ud]
+  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc lost=@ud q=@t]
   ^-  json
   =/  c=chain:uc  (chain-of ss)
   =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
@@ -2451,7 +3036,18 @@
   =/  honest=chain:uc
     %+  skip  c
     |=(m=msg:uc =(%forged (~(gut by vs) [(id:uc unsigned.m) sig.m] %unverified)))
-  =/  newest=msg:uc  ?~(honest (rear c) (rear honest))
+  ::  ON A SEARCH, THE ROW IS DRAWN FROM THE MESSAGE THAT MATCHED.
+  ::
+  ::  The two rules above are right for a listing and wrong for a
+  ::  search. A search for a forgery answered with a row drawn from the
+  ::  newest honest copy would name a ship that did not write the thing
+  ::  the user searched for and label it `verified` - the safety
+  ::  mechanism telling a lie about the result it was asked to find.
+  ::  Search covers %forged messages deliberately; the row says which
+  ::  one it found and carries that copy's verdict, so a forged hit
+  ::  reads FORGED.
+  =/  picked=(unit msg:uc)  (newest-match:uc q c)
+  =/  newest=msg:uc  ?^(picked u.picked ?~(honest (rear c) (rear honest)))
   ::  the spec is explicit that %forged messages "are never counted as
   ::  unread and never sort into the normal inbox flow", so an unread
   ::  count that included them would let one poke bold every row.
@@ -2482,6 +3078,10 @@
     ::  can be partly readable, which is why the count rides on the
     ::  ordinary row too and not only on the placeholder one.
       ['unreadable' (numb:enjs:format lost)]
+    ::  local state, so the sidebar can show which view a row is in
+    ::  without a second request per row.
+      ['archived' [%b archived.mt]]
+      ['labels' [%a (turn ~(tap in labels.mt) |=(l=@tas `json`[%s l]))]]
   ==
 ::
 ::  ── writes ──────────────────────────────────────────────────────────
@@ -2570,6 +3170,140 @@
   =/  i=(unit (set @uv))  (de-read:uw u.jon)
   ?~  i  (send-err eyre-id 400 'bad msg-ids')
   ;<  ~  bind:m  (poke-writer [%read u.i])
+  (send-ok eyre-id)
+::
+::  ── the mail-client writes ──────────────────────────────────────────
+::
+::  Each one is the same three steps: owner gate, decode, poke. The
+::  decoders live in the import-free web lib so a test can reach them;
+::  the semantic checks (is this a @tas? does this rule have a
+::  condition?) live at the writer, because this route is not the only
+::  caller and a check at the boundary is not a substitute for a check
+::  at the point of use.
+::
+++  do-web-unread
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  i=(unit (set @uv))  (de-read:uw u.jon)
+  ?~  i  (send-err eyre-id 400 'bad msg-ids')
+  ;<  ~  bind:m  (poke-writer [%unread u.i])
+  (send-ok eyre-id)
+::
+++  do-web-label
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  r=(unit label-req:uw)  (de-label:uw u.jon)
+  ?~  r  (send-err eyre-id 400 'bad label request')
+  ::  ANSWERED HERE, WHERE THE ANSWER CAN STILL BE NO. The route pokes
+  ::  and returns as soon as the writer takes the poke, so a label the
+  ::  writer refuses would otherwise be a 200 and a sidebar entry that
+  ::  never appears, with the reason only in /tr/last.
+  ?.  (label-ok:uc `@tas`label.u.r)
+    (send-err eyre-id 400 'a label is a lowercase term: a-z, 0-9 and -')
+  ;<  ~  bind:m
+    (poke-writer [%label thread-id.u.r `@tas`label.u.r add.u.r])
+  (send-ok eyre-id)
+::
+++  do-web-archive
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  r=(unit [t=@uv a=?])  (de-archive:uw u.jon)
+  ?~  r  (send-err eyre-id 400 'bad archive request')
+  ;<  ~  bind:m  (poke-writer [%archive t.u.r a.u.r])
+  (send-ok eyre-id)
+::
+::  +do-web-draft: save one draft. NOTHING IS SIGNED ON THIS PATH.
+::
+::    The caps are checked here for the same reason /api/send checks
+::    them: this route answers before the writer applies, and a draft
+::    silently refused is the composed message the drafts feature exists
+::    to protect, lost at save time instead of at send time.
+::
+++  do-web-draft
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  r=(unit draft-req:uw)  (de-draft:uw u.jon)
+  ?~  r  (send-err eyre-id 400 'bad draft')
+  ;<  now=@da  bind:m  bowl-now
+  =/  d=draft:uc
+    [%0 id.u.r to.u.r subj.u.r body.u.r prev.u.r now]
+  ?.  (draft-ok:uc d)
+    (send-err eyre-id 400 'draft too long')
+  ;<  ~  bind:m  (poke-writer [%save-draft d])
+  (send-ok eyre-id)
+::
+++  do-web-rule
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  r=(unit rule-req:uw)  (de-rule:uw u.jon)
+  ?~  r  (send-err eyre-id 400 'bad rule')
+  ::  labels arrive as strings and are refused here if they are not
+  ::  terms, so the 400 names the field the user got wrong.
+  ?.  (levy add.u.r |=(l=@t (label-ok:uc `@tas`l)))
+    (send-err eyre-id 400 'a label is a lowercase term: a-z, 0-9 and -')
+  =/  rl=rule:uc
+    :*  %0
+        id.u.r
+        from.u.r
+        subject.u.r
+        (~(gas in *(set @tas)) (turn add.u.r |=(l=@t `@tas`l)))
+        archive.u.r
+    ==
+  ::  a rule with neither a sender nor a subject matches every delivered
+  ::  chain, and with `archive` set would empty the inbox silently.
+  ?.  (rule-ok:uc rl)
+    (send-err eyre-id 400 'a rule needs a sender or a subject to match')
+  ;<  ~  bind:m  (poke-writer [%save-rule rl])
+  (send-ok eyre-id)
+::
+::  +do-web-id: the three routes that carry only an id.
+::
+::    delete-draft, send-draft and delete-rule differ in nothing but the
+::    action tag, so they share one arm rather than three copies of the
+::    same owner gate and the same decoder.
+::
+++  do-web-id
+  |=  [src=@p eyre-id=@ta raw=@t tag=?(%delete-draft %send-draft %delete-rule)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  i=(unit @uv)  (de-id:uw u.jon)
+  ?~  i  (send-err eyre-id 400 'bad id')
+  ;<  ~  bind:m
+    %-  poke-writer
+    ?-  tag
+      %delete-draft  [%delete-draft u.i]
+      %send-draft    [%send-draft u.i]
+      %delete-rule   [%delete-rule u.i]
+    ==
   (send-ok eyre-id)
 ::
 ++  do-web-delete

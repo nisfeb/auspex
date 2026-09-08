@@ -174,6 +174,35 @@
       [%fetch-blob hash=@uv from=ship]
       [%restrict-blob hash=@uv ships=(set ship)]
       [%publish-blob hash=@uv]
+    ::  ── the mail-client actions. Every one is LOCAL STATE ──────────
+    ::
+    ::  None of these touch `unsigned`, none produce or alter a
+    ::  signature, and none of them may move the change beacon: they
+    ::  change a thread in ways no other ship can see, and the beacon
+    ::  exists to tell OTHER open readers that content moved. Labelling
+    ::  a thread and then having every open tab refetch the mailbox is
+    ::  the read-mark storm again, wearing a different hat.
+    ::
+    ::  %label carries one label and a direction rather than a whole
+    ::  set, so two tabs adding two different labels do not clobber each
+    ::  other: a set-valued action is last-write-wins over everything
+    ::  the other tab did.
+      [%label =thread-id label=@tas add=?]
+      [%archive =thread-id archived=?]
+    ::  %unread is the exact inverse of %read, over the same set and
+    ::  the same grouping pass. Forged messages never counted toward
+    ::  unread in the first place (see +entry-json), so marking one
+    ::  unread is a no-op on every surface a user sees - which is the
+    ::  correct behaviour and not a special case anywhere.
+      [%unread ids=(set msg-id)]
+    ::  drafts. %send-draft signs and sends, and deletes the draft ONLY
+    ::  if the send succeeded - see +do-send-draft.
+      [%save-draft =draft]
+      [%delete-draft id=@uv]
+      [%send-draft id=@uv]
+    ::  filters.
+      [%save-rule =rule]
+      [%delete-rule id=@uv]
   ==
 ::
 ::  $file: one file as handed to %send, before it is hashed and stored.
@@ -333,6 +362,74 @@
 ::  $mail-idx: the derived inbox order, at /mail/idx. Newest first.
 ::
 +$  mail-idx  [%0 inbox=(list thread-id)]
+::
+::  ── the mail-client layer: local state, never signed ────────────────
+::
+::  Everything from here down is the right-hand column of the spec's
+::  "Local versus signed" table. None of it touches `unsigned`, none of
+::  it travels, and two ships may disagree about all of it.
+::
+::  $draft: a message that has not been signed, at /mail/draft/<id>.
+::
+::    A DRAFT IS NOT A MESSAGE AND MUST NEVER BE RENDERABLE AS ONE. It
+::    carries no `from`, no `life`, no `sent` and no signature, because
+::    there is nothing to sign yet: signing happens at the moment of
+::    send, once, over the fields as they stand then. Anything that
+::    could show a draft in a thread would be showing an unsigned,
+::    unauthenticated message beside signed ones, which is the one
+::    confusion this whole product exists to remove.
+::
+::    Two things enforce that structurally rather than by care. It is
+::    stored OUTSIDE /mail/thread, so no tree walk that produces
+::    messages can reach it; and its shape shares no prefix with
+::    $stored-msg (%0 against %2), so the `;;` ladder that reads a
+::    stored copy refuses a draft noun outright. See
+::    +test-a-draft-is-not-a-stored-message.
+::
+::    `id` is minted by the client, not here: a draft id is local,
+::    means nothing on any other ship, and never appears in a
+::    signature. The client holding it from the first save is what
+::    makes a debounced save overwrite one grub instead of laying a new
+::    one per keystroke - the write path stays a fire-and-forget poke,
+::    exactly like every other action.
+::
+::    Versioned like every other persisted shape, and version 0 is the
+::    first. The spec writes the field list without a version head; the
+::    head is added because every persisted grub on this nexus is read
+::    back through a `;;` ladder and a shape with no version cannot be
+::    laddered later without booming what is already on disk.
+::
++$  draft
+  $:  %0
+      id=@uv
+      to=(set ship)
+      subj=@t
+      body=@t
+      prev=(unit msg-id)
+      at=@da
+  ==
+::
+::  $rule: one delivery filter, at /mail/rule/<id>.
+::
+::    APPLIED AFTER VERIFICATION, NEVER BEFORE, and the shape is what
+::    enforces it: a rule may add labels and it may archive, and there
+::    is no field for deleting, rejecting or marking read. A filter that
+::    could suppress a message would let an attacker who learns your
+::    rules hide the evidence of their own forgery - subject lines are
+::    guessable and a rule is a standing instruction, so "quarantine
+::    anything from ~evil" would be exactly the wrong tool.
+::
+::    Archiving is not suppression: an archived thread is one view away,
+::    still counted, still searchable, and new mail in it un-archives it.
+::
++$  rule
+  $:  %0
+      id=@uv
+      from=(unit ship)
+      subject=(unit @t)
+      add=(set @tas)
+      archive=?
+  ==
 ::
 ::  the capacity limits. Arms rather than constants in the nexus so the
 ::  predicates below and their callers cannot drift apart.
@@ -1149,4 +1246,258 @@
 ::
 ++  fits-depth
   |=([c=chain m=@ud] (lte (max-ancestry c) m))
+::
+::  ── the mail-client predicates ──────────────────────────────────────
+::
+::  All pure, all import-free, and therefore all reachable by -test. The
+::  nexus arms that use them are fibers and are not; keeping every
+::  decision that can be stated as a function on this side is what makes
+::  the views testable at all.
+::
+::  +max-label / +max-labels: a label is a @tas the user typed.
+::
+::    Capped for the same reason every other user-supplied field is: it
+::    is rendered, it is stored per thread, and a label nobody can read
+::    off a sidebar is not a label. The count bound is per thread, so no
+::    single thread's meta can be grown without limit by a client that
+::    keeps adding.
+::
+++  max-label   32           ::  bytes in one label
+++  max-labels  64           ::  labels on one thread
+::  +max-rules: filters this ship will hold.
+::
+::    Every rule is evaluated against every delivered chain, on the
+::    writer, which is the ship's single serialisation point for mail.
+::    That is a small cost per rule and an unbounded one with no bound.
+::
+++  max-rules   64
+::  +max-drafts: drafts this ship will hold.
+++  max-drafts  1.000
+::  +max-page: the largest listing page a request may ask for.
+::
+::    A page is rendered whole into one JSON response on one request
+::    fiber, so the bound is on the response, not on the walk: the walk
+::    over every stored thread is paid either way and is what `total`
+::    counts.
+::
+++  max-page    200
+::
+::  +term-ok: is this atom actually a @tas?
+::
+::    A label arrives as a JSON string and is stored in a `(set @tas)`,
+::    where nothing re-checks it: an atom is an atom, so a cord holding
+::    a space or a capital letter would sit in that set and render
+::    through `scot %tas` - which crashes. On a request fiber that is an
+::    HTTP connection that never answers, so the check happens at the
+::    boundary instead, and this is it.
+::
+++  term-ok
+  |=  l=@tas
+  ^-  ?
+  =/  t=tape  (trip l)
+  ?~  t  |
+  ?.  &((gte i.t 'a') (lte i.t 'z'))  |
+  ::  `tape`t, not t: ?~ has narrowed t to a NON-EMPTY tape and +levy
+  ::  recurses on its own sample, so the recursion hands ~ to a gate
+  ::  whose sample type no longer admits it. Same shape as the +scag
+  ::  call in +has-sub below, and it is the standard cost of calling a
+  ::  wet list gate from inside a ?~.
+  %+  levy  `tape`t
+  |=  c=@tD
+  ?|  &((gte c 'a') (lte c 'z'))
+      &((gte c '0') (lte c '9'))
+      =(c '-')
+  ==
+::
+++  label-ok
+  |=(l=@tas &((term-ok l) (lte (met 3 l) max-label)))
+::
+++  labels-ok
+  |=  ls=(set @tas)
+  ^-  ?
+  &((lte ~(wyt in ls) max-labels) (levy ~(tap in ls) label-ok))
+::
+::  +has-sub: does `hay` contain `ned`, case-insensitively?
+::
+::    The one string primitive this layer needs, shared by search and by
+::    the filters' subject match so the two cannot disagree about what a
+::    substring is. Case-insensitive because a user typing into a search
+::    box is not making a statement about capitalisation - and because a
+::    filter that missed "Invoice" while matching "invoice" would be a
+::    filter that silently does not work.
+::
+::    An empty needle matches everything, which is what makes an absent
+::    query mean "no filter" at every call site without a branch.
+::
+++  has-sub
+  |=  [hay=@t ned=@t]
+  ^-  ?
+  =/  n=tape  (cass (trip ned))
+  ?:  =(~ n)  &
+  =/  ln=@ud  (lent n)
+  =/  h=tape  (cass (trip hay))
+  |-  ^-  ?
+  ?~  h  |
+  ::  `tape`h, not h: ?~ has narrowed h to a NON-EMPTY tape, +scag is a
+  ::  wet gate casting its result to ^+ its sample, and one of its
+  ::  branches produces ~ - which does not nest under a non-empty list.
+  ::  Widening at the call site is the fix; the same shape bites every
+  ::  wet list gate called from inside a ?~.
+  ?:  =(n (scag ln `tape`h))  &
+  $(h t.h)
+::
+::  +matches: does one message answer this query?
+::
+::    Subject, body and sender, which is the set the spec names. The
+::    sender is matched on its rendered @p, so typing part of a ship
+::    name finds it.
+::
+::    IT DOES NOT LOOK AT THE VERDICT. Search covers %forged messages
+::    exactly as it covers every other, and the result carries the
+::    verdict so the reader sees which it found. Hiding a forged message
+::    from search would be the same mistake as filtering it out of a
+::    thread: the forgery is the thing worth finding.
+::
+++  matches
+  |=  [q=@t u=unsigned]
+  ^-  ?
+  ?:  =('' q)  &
+  ?|  (has-sub subj.u q)
+      (has-sub body.u q)
+      (has-sub (scot %p from.u) q)
+  ==
+::
+++  chain-matches
+  |=  [q=@t c=chain]
+  ^-  ?
+  ?:  =('' q)  &
+  (lien c |=(m=msg (matches q unsigned.m)))
+::
+::  +newest-match: the newest message in a chain answering the query.
+::
+::    What a search result row draws its sender, subject and VERDICT
+::    from. Drawing them from the newest non-forged copy - which is what
+::    an ordinary listing row does, and rightly - would answer a search
+::    for a forged message with a row labelled `verified`, naming a
+::    ship that did not write the thing that matched. A search says what
+::    it found.
+::
+++  newest-match
+  |=  [q=@t c=chain]
+  ^-  (unit msg)
+  ?:  =('' q)  ~
+  =/  hits=chain  (skim c |=(m=msg (matches q unsigned.m)))
+  ?~(hits ~ `(rear hits))
+::
+::  +in-inbox: PARTICIPANT OR DIRECT, and not archived.
+::
+::    `direct` is set when a chain arrived through a delivery poke, and
+::    it is what makes BCC work at all: a blind-copied recipient is in
+::    neither `from` nor `to` of any message in the chain, so a
+::    participant-only Inbox would hide their mail completely. The flag
+::    has existed since the BCC decision and nothing read it until now.
+::
+++  in-inbox
+  |=  [our=ship ps=(set ship) archived=? direct=?]
+  ^-  ?
+  &(!archived ?|((~(has in ps) our) direct))
+::
+::  +in-sent: did we write any message in this thread?
+::
+::    A walk, not a stored set. Authorship is a signed field, so the
+::    question is answerable from the chain itself and a second record
+::    of it could only ever disagree with the first.
+::
+++  in-sent
+  |=  [our=ship c=chain]
+  ^-  ?
+  (lien c |=(m=msg =(our from.unsigned.m)))
+::
+::  +page: one page of a list, and nothing else.
+::
+::    `total` is the length of the list handed in, computed by the
+::    caller before this is called - so the caller reports the size of
+::    the view and renders only the page. A limit of 0 is an empty page
+::    rather than "everything": the route defaults an absent limit
+::    instead, so 0 can stay literal here.
+::
+++  page
+  |*  [l=(list) off=@ud lim=@ud]
+  ^+  l
+  ?:  =(0 lim)  ~
+  (scag lim (slag off l))
+::
+::  +draft-ok: the request-only caps, on a draft.
+::
+::    The same three bounds a send is checked against, applied when the
+::    draft is SAVED rather than only when it is sent. A draft that
+::    cannot be sent is a message the user will lose at the last moment,
+::    and the point of drafts is that nothing is lost.
+::
+++  draft-ok
+  |=  d=draft
+  ^-  ?
+  ?&  (lte (met 3 body.d) max-body)
+      (lte (met 3 subj.d) max-subj)
+      (lte ~(wyt in to.d) max-to)
+  ==
+::
+::  +rule-ok: a rule that can be stored.
+::
+::    A rule with neither a sender nor a subject matches EVERY delivered
+::    chain. That is refused: with `archive` set it would empty the
+::    inbox permanently and silently, and the user who wrote it would
+::    see mail stop arriving rather than an error. At least one
+::    condition, so a rule is always a statement about some mail rather
+::    than about all of it.
+::
+++  rule-ok
+  |=  r=rule
+  ^-  ?
+  ?&  ?|(?=(^ from.r) ?=(^ subject.r))
+      ?~(subject.r & (lte (met 3 u.subject.r) max-subj))
+      (labels-ok add.r)
+  ==
+::
+::  +rule-matches: one rule against one message. AND across the
+::  conditions a rule actually sets; an absent condition is not a
+::  condition.
+::
+++  rule-matches
+  |=  [r=rule u=unsigned]
+  ^-  ?
+  ?&  ?~(from.r & =(u.from.r from.u))
+      ?~(subject.r & (has-sub subj.u u.subject.r))
+  ==
+::
+::  +rule-hits: does this rule match ANY message in the delivered chain?
+::
+::    Any, not the newest: a chain carries the whole path leading to the
+::    message that prompted the delivery, and a rule about a sender is a
+::    statement about the conversation they are in.
+::
+++  rule-hits
+  |=  [r=rule c=chain]
+  ^-  ?
+  (lien c |=(m=msg (rule-matches r unsigned.m)))
+::
+::  +apply-rules: what the matching rules ask for, together.
+::
+::    Labels union and archive ORs, so rules compose rather than
+::    override. There is deliberately no way for one rule to un-archive
+::    or to remove a label: a rule is additive, and additive is what
+::    makes "a filter cannot suppress a message" a property of the type
+::    rather than a promise in a comment.
+::
+::    Written as two folds over the matching rules rather than one
+::    +roll with a tuple accumulator, because that accumulator's bunt
+::    would carry `archive=%.y` - a bare ? bunts loud, which is the same
+::    trap `archived` in $meta already carries a $~ for.
+::
+++  apply-rules
+  |=  [rs=(list rule) c=chain]
+  ^-  [add=(set @tas) archive=?]
+  =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c)))
+  :-  (~(gas in *(set @tas)) (zing (turn hits |=(r=rule ~(tap in add.r)))))
+  (lien hits |=(r=rule archive.r))
 --

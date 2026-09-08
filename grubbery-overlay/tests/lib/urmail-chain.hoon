@@ -32,6 +32,21 @@
   =/  u=unsigned:sur  [who 1 to subj body '' sent prev as]
   [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
 ::
+::  +fake-from: a message SIGNED BY ONE SHIP AND CLAIMING TO BE ANOTHER.
+::
+::    A genuine signature over a lying `from` - which is exactly what a
+::    forgery is, and what makes it verifiable AS a forgery: the key
+::    looked up is the claimed sender's, the signature was made with
+::    somebody else's, and the check fails. On a fake ship every ship's
+::    keypair derives from its @p, so this needs no network and no
+::    second ship.
+::
+++  fake-from
+  |=  [signer=ship claim=ship subj=@t body=@t sent=@da]
+  ^-  msg:sur
+  =/  u=unsigned:sur  [claim 1 (sy ~[~palnet-sampel]) subj body '' sent ~ ~]
+  [u (sign-with:urmail (fake-ring:urmail signer) (digest:urmail u))]
+::
 ::  +forge hardcodes life 1, so the map is keyed on [w 1] for every ship
 ::  passed in.
 ++  all-keys
@@ -913,5 +928,241 @@
     ::  the same ship at two lives is two keys and two scries
     (expect !>(!(fits-signers:urmail ~[a1 a-later] 1)))
     (expect !>((fits-signers:urmail ~[a1 a-later] 2)))
+  ==
+::
+::  ── the mail-client layer ───────────────────────────────────────────
+::
+::  Every one of these is a view or a local-state decision. None of them
+::  touches `unsigned`, and the two that matter most are the ones that
+::  keep a forged message visible: search finds it, and a filter cannot
+::  hide it.
+::
+::  a label is a @tas the user typed, so it is checked at the boundary.
+::  A cord holding a space or a capital sits in a (set @tas) perfectly
+::  happily and then crashes `scot %tas` on a request fiber, which is an
+::  HTTP connection that never answers.
+++  test-label-ok-rejects-a-non-term
+  ;:  weld
+    (expect !>((label-ok:urmail %work)))
+    (expect !>((label-ok:urmail %to-read-2)))
+    ::  empty, capitalised, spaced, leading digit: none of them is a @tas
+    (expect !>(!(label-ok:urmail %$)))
+    (expect !>(!(label-ok:urmail `@tas`'Work')))
+    (expect !>(!(label-ok:urmail `@tas`'to read')))
+    (expect !>(!(label-ok:urmail `@tas`'2fa')))
+    (expect !>(!(label-ok:urmail `@tas`'work!')))
+    ::  and the length cap
+    (expect !>((label-ok:urmail `@tas`(crip (reap 32 'a')))))
+    (expect !>(!(label-ok:urmail `@tas`(crip (reap 33 'a')))))
+  ==
+::
+++  test-labels-ok-bounds-the-set
+  ;:  weld
+    (expect !>((labels-ok:urmail (sy ~[%a %b %c]))))
+    ::  one bad member fails the set
+    (expect !>(!(labels-ok:urmail (sy ~[%a `@tas`'B']))))
+  ==
+::
+::  the one string primitive the layer has. Case-insensitive on both
+::  sides, and an empty needle matches everything - which is what lets an
+::  absent query mean "no filter" with no branch at any call site.
+++  test-has-sub-is-case-insensitive
+  ;:  weld
+    (expect !>((has-sub:urmail 'Quarterly Invoice' 'invoice')))
+    (expect !>((has-sub:urmail 'quarterly invoice' 'INVOICE')))
+    (expect !>((has-sub:urmail 'abc' 'abc')))
+    (expect !>((has-sub:urmail 'abc' 'a')))
+    (expect !>((has-sub:urmail 'abc' 'c')))
+    (expect !>(!(has-sub:urmail 'abc' 'abcd')))
+    (expect !>(!(has-sub:urmail '' 'a')))
+    ::  an empty needle is no constraint
+    (expect !>((has-sub:urmail 'abc' '')))
+    (expect !>((has-sub:urmail '' '')))
+  ==
+::
+::  search reads subject, body and the RENDERED sender, so typing part of
+::  a ship name finds it.
+++  test-search-covers-subject-body-and-sender
+  =/  m  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'Quarterly report' 'the numbers are in' ~2026.1.1 ~)
+  ;:  weld
+    (expect !>((matches:urmail 'quarterly' unsigned.m)))
+    (expect !>((matches:urmail 'numbers' unsigned.m)))
+    (expect !>((matches:urmail 'sampel-palnet' unsigned.m)))
+    (expect !>(!(matches:urmail 'nothing here' unsigned.m)))
+    ::  an empty query matches, so a listing with no search term is the
+    ::  same code path as one with one
+    (expect !>((matches:urmail '' unsigned.m)))
+  ==
+::
+::  SEARCH FINDS A FORGED MESSAGE, and the row it produces is drawn from
+::  that message so it can be labelled forged. Drawing the row from the
+::  newest non-forged copy - which is right for an ordinary listing - would
+::  answer a search for the forgery with a row naming the ship that did
+::  not write it.
+++  test-search-finds-and-names-the-forged-message
+  =/  real   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'invoice' 'the real one' ~2026.1.1 ~)
+  ::  a message ~marbud signed while claiming to be ~sampel-palnet: a
+  ::  genuine signature over a lying `from`, which is what a forgery is.
+  =/  liar  (fake-from ~marbud-marbud ~sampel-palnet 'invoice' 'PAY HERE INSTEAD' ~2026.1.2)
+  =/  c=chain:sur  (merge:urmail ~ ~[real liar])
+  ::  the newest match for a term only the forgery carries IS the forgery
+  =/  hit  (newest-match:urmail 'pay here' c)
+  ::  and its verdict, computed the ordinary way, is %forged - so the row
+  ::  this message produces is labelled forged
+  =/  vs  (verify-chain:urmail (all-keys ~[~sampel-palnet ~marbud-marbud]) c)
+  ;:  weld
+    ::  both copies are in the chain, and the query hits the forged one
+    (expect-eq !>(2) !>((lent c)))
+    (expect !>((chain-matches:urmail 'pay here' c)))
+    (expect !>(?=(^ hit)))
+    (expect-eq !>('PAY HERE INSTEAD') !>(?~(hit '' body.unsigned.u.hit)))
+    (expect !>((lien vs |=([* v=verdict:sur] =(%forged v)))))
+  ==
+::
+::  an empty query has no newest match, which is what makes the ordinary
+::  listing keep its own summary rule.
+++  test-newest-match-is-empty-without-a-query
+  =/  m  (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
+  (expect !>(?=(~ (newest-match:urmail '' ~[m]))))
+::
+::  INBOX IS PARTICIPANT OR DIRECT. The direct flag is what makes a BCC'd
+::  recipient's mail visible at all: they are in neither `from` nor `to`
+::  of any message in the chain they were handed.
+++  test-inbox-is-participant-or-direct
+  =/  us  ~sampel-palnet
+  =/  ps  (sy ~[~palnet-sampel ~marbud-marbud])
+  ;:  weld
+    ::  not a participant, not direct: not our inbox
+    (expect !>(!(in-inbox:urmail us ps | |)))
+    ::  the BCC case: not a participant, but it arrived here
+    (expect !>((in-inbox:urmail us ps | &)))
+    ::  an ordinary participant
+    (expect !>((in-inbox:urmail us (~(put in ps) us) | |)))
+    ::  archived beats both
+    (expect !>(!(in-inbox:urmail us (~(put in ps) us) & |)))
+    (expect !>(!(in-inbox:urmail us ps & &)))
+  ==
+::
+++  test-sent-is-threads-we-authored
+  =/  mine   (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
+  =/  yours  (forge ~palnet-sampel ~ 'a' 'b' ~2026.1.1 ~)
+  ;:  weld
+    (expect !>((in-sent:urmail ~sampel-palnet ~[yours mine])))
+    (expect !>(!(in-sent:urmail ~sampel-palnet ~[yours])))
+    (expect !>(!(in-sent:urmail ~sampel-palnet ~)))
+  ==
+::
+++  test-page-slices-without-losing-the-total
+  =/  l=(list @ud)  ~[0 1 2 3 4 5 6 7 8 9]
+  ;:  weld
+    (expect-eq !>(`(list @ud)`~[0 1 2]) !>((page:urmail l 0 3)))
+    (expect-eq !>(`(list @ud)`~[3 4 5]) !>((page:urmail l 3 3)))
+    ::  a page past the end is empty, not a crash
+    (expect-eq !>(`(list @ud)`~) !>((page:urmail l 100 3)))
+    ::  a partial last page
+    (expect-eq !>(`(list @ud)`~[9]) !>((page:urmail l 9 3)))
+    ::  limit 0 is an empty page, literally. The route defaults an
+    ::  ABSENT limit rather than reading 0 as "everything".
+    (expect-eq !>(`(list @ud)`~) !>((page:urmail l 0 0)))
+  ==
+::
+::  A DRAFT IS NOT A MESSAGE, and the shapes are what enforce it: the
+::  ladder that reads a stored signed copy refuses a draft noun outright,
+::  so nothing that produces messages can ever produce one.
+++  test-a-draft-is-not-a-stored-message
+  =/  d=draft:sur  [%0 0v1 (sy ~[~palnet-sampel]) 'subject' 'body' ~ ~2026.1.1]
+  =/  res  (mule |.(;;(stored-msg:sur d)))
+  ::  and the converse: a stored copy is not a draft
+  =/  m  (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
+  =/  st=stored-msg:sur  [%2 m %verified]
+  =/  back  (mule |.(;;(draft:sur st)))
+  ;:  weld
+    (expect !>(?=(%| -.res)))
+    (expect !>(?=(%| -.back)))
+  ==
+::
+++  test-draft-ok-applies-the-send-caps
+  =/  ok=draft:sur   [%0 0v1 (sy ~[~palnet-sampel]) 'subject' 'body' ~ ~2026.1.1]
+  =/  fat=draft:sur  ok(body (crip (reap 100.001 'a')))
+  =/  loud=draft:sur  ok(subj (crip (reap 1.001 'a')))
+  ;:  weld
+    (expect !>((draft-ok:urmail ok)))
+    (expect !>(!(draft-ok:urmail fat)))
+    (expect !>(!(draft-ok:urmail loud)))
+  ==
+::
+::  a rule with no condition matches everything, and with `archive` set
+::  would empty the inbox silently. Refused.
+++  test-rule-needs-a-condition
+  =/  none=rule:sur  [%0 0v1 ~ ~ ~ |]
+  =/  by-from=rule:sur  [%0 0v1 `~sampel-palnet ~ (sy ~[%work]) |]
+  =/  by-subj=rule:sur  [%0 0v1 ~ `'invoice' ~ &]
+  =/  bad-label=rule:sur  by-from(add (sy ~[`@tas`'Work']))
+  ;:  weld
+    (expect !>(!(rule-ok:urmail none)))
+    (expect !>((rule-ok:urmail by-from)))
+    (expect !>((rule-ok:urmail by-subj)))
+    (expect !>(!(rule-ok:urmail bad-label)))
+  ==
+::
+++  test-rule-matches-and-across-its-conditions
+  =/  m  (forge ~sampel-palnet ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
+  =/  both=rule:sur    [%0 0v1 `~sampel-palnet `'invoice' ~ |]
+  =/  wrong-who=rule:sur  both(from `~palnet-sampel)
+  =/  wrong-what=rule:sur  both(subject `'receipt')
+  ;:  weld
+    (expect !>((rule-matches:urmail both unsigned.m)))
+    (expect !>(!(rule-matches:urmail wrong-who unsigned.m)))
+    (expect !>(!(rule-matches:urmail wrong-what unsigned.m)))
+    ::  an absent condition is not a condition
+    (expect !>((rule-matches:urmail both(subject ~) unsigned.m)))
+  ==
+::
+::  A FILTER MAY ADD LABELS AND ARCHIVE, AND NOTHING ELSE. There is no
+::  field for delete and none for mark-read, so this is a property of the
+::  type rather than a promise: whatever set of rules fires, the answer
+::  is a set of labels and one archive flag.
+++  test-apply-rules-composes-additively
+  =/  m  (forge ~sampel-palnet ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
+  =/  c=chain:sur  ~[m]
+  =/  r1=rule:sur  [%0 0v1 `~sampel-palnet ~ (sy ~[%work]) |]
+  =/  r2=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) &]
+  =/  r3=rule:sur  [%0 0v3 `~palnet-sampel ~ (sy ~[%never]) &]
+  =/  got  (apply-rules:urmail ~[r1 r2 r3] c)
+  ::  no rule fires: no labels, and NOT archived. A bare ? bunts to %.y,
+  ::  so an accumulator-shaped fold here would archive everything the
+  ::  moment no rule matched.
+  =/  quiet  (apply-rules:urmail ~[r3] c)
+  =/  none   (apply-rules:urmail ~ c)
+  ;:  weld
+    ::  the two matching rules' labels union; the non-matching one adds
+    ::  nothing
+    (expect-eq !>((sy ~[%work %money])) !>(add.got))
+    ::  archive ORs across matching rules
+    (expect !>(archive.got))
+    (expect !>(!archive.quiet))
+    (expect-eq !>(*(set @tas)) !>(add.quiet))
+    ::  and with no rules at all
+    (expect !>(!archive.none))
+  ==
+::
+::  A FILTER CANNOT SUPPRESS A FORGED MESSAGE. Rules are evaluated over
+::  the chain AFTER verification and can only ask for labels and an
+::  archive - so the forged copy is still in the chain, still carries its
+::  own verdict, and is still what a search finds.
+++  test-a-filter-cannot-hide-a-forgery
+  =/  real  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'invoice' 'the real one' ~2026.1.1 ~)
+  =/  liar  (fake-from ~marbud-marbud ~sampel-palnet 'invoice' 'pay here instead' ~2026.1.2)
+  =/  c=chain:sur  (merge:urmail ~ ~[real liar])
+  ::  a rule aimed squarely at this thread, archiving it
+  =/  r=rule:sur  [%0 0v1 `~sampel-palnet `'invoice' (sy ~[%quarantine]) &]
+  =/  got  (apply-rules:urmail ~[r] c)
+  ;:  weld
+    (expect !>(archive.got))
+    (expect-eq !>((sy ~[%quarantine])) !>(add.got))
+    ::  and the chain the rule was applied to is UNCHANGED: both copies,
+    ::  the forgery included, are still there to be stored and shown
+    (expect-eq !>(2) !>((lent c)))
+    (expect !>((chain-matches:urmail 'pay here' c)))
   ==
 --
