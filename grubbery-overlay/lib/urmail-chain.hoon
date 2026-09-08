@@ -95,7 +95,12 @@
 ::  $meta: local state about a thread, at /mail/thread/<tid>/meta.
 ::  Never signed, never travels: two ships may disagree about any of it.
 ::
-+$  meta  [%0 read=(set msg-id) archived=? labels=(set @tas)]
+::  archived defaults to %.n explicitly. A bare ? bunts to %.y, so every
+::  thread would be born archived and a v2 inbox view would show nothing.
+::  $~ and not $_: $_ produces a mold that IGNORES its input and always
+::  returns the default, which would make the read-back flag a constant.
+::
++$  meta  [%0 read=(set msg-id) archived=$~(%.n ?) labels=(set @tas)]
 ::
 ::  $mail-idx: the derived inbox order, at /mail/idx. Newest first.
 ::

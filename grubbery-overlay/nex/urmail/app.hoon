@@ -142,7 +142,14 @@
   ^-  form:m
   ;<  ~  bind:m  (ensure-dir (thread-dir root))
   ;<  ~  bind:m  (ensure-dir (tdir root t))
-  (ensure-dir (mdir root t))
+  ;<  ~  bind:m  (ensure-dir (mdir root t))
+  ::  lay a default meta so EVERY thread has the leaf the tree says it
+  ::  has. A delivered thread is never marked read, so nothing else would
+  ::  ever create one, and a reader would find the leaf missing rather
+  ::  than empty. Guarded, so it never clobbers real read marks.
+  ;<  ex=?  bind:m  (peek-exists:io [%& %& (tdir root t) %meta])
+  ?:  ex  (pure:m ~)
+  (put-file [%& %& (tdir root t) %meta] [/urmail %meta] *meta:uc)
 ::
 ::  ── reads ───────────────────────────────────────────────────────────
 ::
@@ -414,13 +421,25 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  road=road:tarball  [%& %| (tdir root t)]
-  ;<  ex=?  bind:m  (peek-exists:io road)
-  ;<  *  bind:m  ?:(ex (cull-soft:io road) (pure:m `(unit tang)`~))
+  ;<  ~  bind:m  (cull-if-there road)
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
   ;<  ~  bind:m
     %^  put-file  [%& %& (mail-dir root) %idx]  [/urmail %idx]
     ix(inbox (skip inbox.ix |=(o=thread-id:uc =(o t))))
   (note root 'delete-thread' & (scot %uv t))
+::
+::  +cull-if-there: cull a road that may not exist, soft. Its own arm rather
+::  than a ?: at the call site, because the two branches would be fibers of
+::  different result types and cannot be unified.
+::
+++  cull-if-there
+  |=  road=road:tarball
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ex=?  bind:m  (peek-exists:io road)
+  ?.  ex  (pure:m ~)
+  ;<  *  bind:m  (cull-soft:io road)
+  (pure:m ~)
 ::
 ::  +deliver: accept a chain from any ship.
 ::
