@@ -713,6 +713,25 @@
 ::    read-mark is not content and a bump would make an open reader
 ::    refetch, which marks it read again - a loop, not a burst.
 ::
+::    EVERY PAYLOAD IS CLAMMED HERE, UNDER MULE, AND NOWHERE ELSE.
+::
+::    The wire marcs are noun passthroughs precisely so that they
+::    cannot refuse anything, and this is where the refusing happens.
+::    They used to be typed, which looked stricter and was catastrophic:
+::    grubbery validates a poke in +hydrate, before any nexus code runs,
+::    and a validation failure there fails the writer PROCESS - after
+::    which +rise-wait restarts it by CONSUMING the next poke without
+::    processing it. A typed wire marc therefore never rejected a bad
+::    chain; it destroyed the NEXT GOOD ONE, silently. /main.sig is
+::    granted to the `public` usergroup, so any ship on the network
+::    could do that for the price of one malformed noun, repeatedly, to
+::    a mail application.
+::
+::    Validation you cannot catch is not validation, it is a fuse. A
+::    malformed payload is now refused the way every other cap is
+::    refused: a branch that returns cleanly, labelled, with the writer
+::    still standing and the next poke still its own.
+::
 ++  apply
   |=  [root=path =from:fiber:nexus =sage:tarball]
   =/  m  (fiber:fiber:nexus ,?)
@@ -720,7 +739,9 @@
   ::  a chain from ANYONE. src is deliberately not checked against the
   ::  participants: the signatures are the authority, not the courier.
   ?:  =([/ %urmail-chain] p.sage)
-    (deliver root !<(chain:uc q.sage))
+    =/  res  (mule |.(~|(%urmail-bad-chain ;;(chain:uc q.q.sage))))
+    ?:  ?=(%| -.res)  (reject root 'malformed chain')
+    (deliver root p.res)
   ?.  ?|(=([/ %urmail-action] p.sage) =([/urmail %blob-in] p.sage))
     ::  an unknown blot. Ignore it rather than crash - see the header.
     (pure:m |)
@@ -737,8 +758,12 @@
   ::  source check is what makes that harmless. The hash is re-checked
   ::  in +take-blob regardless.
   ?:  =([/urmail %blob-in] p.sage)
-    (take-blob root !<(blob-in:uc q.sage))
-  (act root !<(action:uc q.sage))
+    =/  res  (mule |.(~|(%urmail-bad-blob-in ;;(blob-in:uc q.q.sage))))
+    ?:  ?=(%| -.res)  (reject root 'malformed blob-in')
+    (take-blob root p.res)
+  =/  res  (mule |.(~|(%urmail-bad-action ;;(action:uc q.q.sage))))
+  ?:  ?=(%| -.res)  (reject root 'malformed action')
+  (act root p.res)
 ::
 ++  act
   |=  [root=path a=action:uc]
@@ -2002,14 +2027,22 @@
 ::    vane. Lattice rests on that flag alone; matching a reference
 ::    implementation is not a reason to stop at it on a write surface.
 ::
-::    ON THE WRITE ROUTES ONLY, and that is a measured decision rather
-::    than a half-done one. `src` is in hand but `our` is not: getting
-::    it is a poke to /sys/bowl.sig and a reply, the round trip whose
-::    ~0.2s per request is recorded on the owner gate below. Paying it
-::    on the three routes that mutate the tree puts it next to a writer
-::    poke that already costs more; paying it on every GET would add it
-::    to the shell and to app.js, where the same flag is already
-::    checked and there is nothing to mutate.
+::    ON EVERY ROUTE THAT TOUCHES MAIL, and on no other. `src` is in
+::    hand but `our` is not: getting it is a poke to /sys/bowl.sig and
+::    a reply, the round trip whose ~0.2s per request is recorded on
+::    the owner gate below. That is worth paying wherever the answer
+::    could be someone else's mail, and not worth paying anywhere else.
+::
+::    So: the three writes, and the two DATA READS - /api/inbox and
+::    /api/thread/<id> - which return the owner's mailbox. If
+::    `authenticated` could ever be true for a visiting ship those two
+::    would hand over the mail, and the cost of being wrong about that
+::    is not comparable to the cost of a bowl read.
+::
+::    NOT the shell or app.js. They are a static document and a static
+::    script, identical for every viewer, and 0.2s on each asset load
+::    buys nothing. /api/whoami is likewise only the answer `our`,
+::    which is what the check would fetch anyway.
 ::
 ++  is-owner
   |=  src=@p
@@ -2054,14 +2087,14 @@
   ::  sit in the table below, which keys on the whole suffix. The ?= comes
   ::  FIRST in the &, so the branch can reach into the path it matched.
   ?:  &(?=([%api %thread @ ~] suffix) =(%'GET' meth))
-    (serve-thread eyre-id i.t.t.suffix)
+    (serve-thread src eyre-id i.t.t.suffix)
   ::  the rest of the surface, keyed on the WHOLE suffix rather than on
   ::  its last segment: /read and /api/read are different requests and
   ::  only one of them is a route.
   ?+    [meth suffix]
     (send-err eyre-id 404 'not found')
       [%'GET' [%api %whoami ~]]         (serve-whoami eyre-id)
-      [%'GET' [%api %inbox ~]]          (serve-inbox eyre-id)
+      [%'GET' [%api %inbox ~]]          (serve-inbox src eyre-id)
       [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
       [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
       [%'POST' [%api %'delete-thread' ~]]
@@ -2112,21 +2145,27 @@
 ::    is the same summary grub.
 ::
 ++  serve-inbox
-  |=  eyre-id=@ta
+  |=  [src=@p eyre-id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
   ;<  root=path  bind:m  nexus-root
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
   ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
   =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
-  (send-json eyre-id (inbox-json inbox.ix (collect-threads b) (collect-metas b)))
+  =/  jon=json
+    (inbox-json inbox.ix (collect-threads b) (collect-metas b) (collect-unreadable b))
+  (send-json eyre-id jon)
 ::
 ::  +serve-thread: one thread, every stored copy with its own verdict.
 ::
 ++  serve-thread
-  |=  [eyre-id=@ta seg=@ta]
+  |=  [src=@p eyre-id=@ta seg=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  (send-err eyre-id 400 'bad thread id')
   ;<  root=path  bind:m  nexus-root
@@ -2147,6 +2186,24 @@
   ?:  &(=(~ ss) =(0 lost))  (send-err eyre-id 404 'no such thread')
   ;<  mt=meta:uc  bind:m  (read-meta root u.t)
   (send-json eyre-id (thread-json u.t ss mt lost))
+::
+::  +collect-unreadable: per thread, how many copies this build cannot
+::  read - out of the same deep peek +collect-threads already walks.
+::
+::    Only threads with a nonzero count appear, so an ordinary mailbox
+::    produces an empty map and the listing pays nothing for it.
+::
+++  collect-unreadable
+  |=  b=ball:tarball
+  ^-  (map thread-id:uc @ud)
+  %-  ~(gas by *(map thread-id:uc @ud))
+  %+  murn  ~(tap by dir.b)
+  |=  [seg=@ta kid=ball:tarball]
+  ^-  (unit [thread-id:uc @ud])
+  =/  t=(unit @uv)  (slaw %uv seg)
+  ?~  t  ~
+  =/  n=@ud  (unreadable-in kid)
+  ?:(=(0 n) ~ `[u.t n])
 ::
 ::  +collect-metas: every thread's meta leaf, out of the same deep peek
 ::  +collect-threads walks for message grubs.
@@ -2234,6 +2291,7 @@
   |=  $:  order=(list thread-id:uc)
           loaded=(map thread-id:uc (map path stored-msg:uc))
           metas=(map thread-id:uc meta:uc)
+          lost=(map thread-id:uc @ud)
       ==
   ^-  json
   :-  %a
@@ -2241,11 +2299,46 @@
   |=  t=thread-id:uc
   ^-  (unit json)
   =/  ss=(map path stored-msg:uc)  (~(gut by loaded) t ~)
-  ?:  =(~ ss)  ~
-  `(entry-json t ss (~(gut by metas) t *meta:uc))
+  =/  n=@ud  (~(gut by lost) t 0)
+  ::  A THREAD WITH NO READABLE COPY STILL GETS A ROW, as long as
+  ::  something is actually stored under it. After the %1 refusal that
+  ::  is reachable on any ship carrying pre-freeze mail: every copy is
+  ::  refused, +entry-json has no message to draw a sender and subject
+  ::  from, and dropping the row made the thread disappear from the
+  ::  listing while its meta and its /mail/idx entry survived. That is
+  ::  the silent disappearance this build exists to stop saying
+  ::  nothing about, so the row says it instead.
+  ?:  =(~ ss)
+    ?:(=(0 n) ~ `(unreadable-entry-json t n))
+  `(entry-json t ss (~(gut by metas) t *meta:uc) n)
+::
+::  +unreadable-entry-json: the row for a thread this build cannot read
+::  a single message of.
+::
+::    Every field is a placeholder and none of them pretends otherwise:
+::    there is no sender to name, because naming one would mean reading
+::    a message we just said we cannot read. The count is the honest
+::    content of the row.
+::
+++  unreadable-entry-json
+  |=  [t=thread-id:uc n=@ud]
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv t)]]
+      ['subject' [%s '']]
+      ['from' [%s '']]
+      ['snippet' [%s '']]
+      ['verdict' [%s %unverified]]
+      ['forged' [%b |]]
+      ['count' (numb:enjs:format 0)]
+      ['last' (time:enjs:format *@da)]
+      ['unread' [%b |]]
+      ['participants' [%a ~]]
+      ['unreadable' (numb:enjs:format n)]
+  ==
 ::
 ++  entry-json
-  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc]
+  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc lost=@ud]
   ^-  json
   =/  c=chain:uc  (chain-of ss)
   =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
@@ -2293,6 +2386,10 @@
       ['last' (time:enjs:format (last-sent:uc c))]
       ['unread' [%b unread]]
       ['participants' [%a (turn ~(tap in (participants:uc c)) |=(s=ship [%s (scot %p s)]))]]
+    ::  copies stored here that this build cannot read. Usually 0; a row
+    ::  can be partly readable, which is why the count rides on the
+    ::  ordinary row too and not only on the placeholder one.
+      ['unreadable' (numb:enjs:format lost)]
   ==
 ::
 ::  ── writes ──────────────────────────────────────────────────────────

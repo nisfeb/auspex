@@ -55,8 +55,22 @@ export default function ThreadList({
                 </span>
               )}
             </div>
-            <div className="truncate text-sm">{e.subject}</div>
-            <div className="truncate text-xs text-neutral-500">{e.snippet}</div>
+            {e.count === 0 && e.unreadable > 0 ? (
+              /* A thread this ship cannot read a single message of. There
+                 is no sender or subject to show without reading one, so
+                 the row says what it actually knows. Dropping the row
+                 instead would make the thread disappear from the listing
+                 while its read state and its index entry survived. */
+              <div className="truncate text-sm text-neutral-500 italic">
+                {e.unreadable} unreadable {e.unreadable === 1 ? 'message' : 'messages'} —
+                {' '}stored in an older format this ship cannot read
+              </div>
+            ) : (
+              <>
+                <div className="truncate text-sm">{e.subject}</div>
+                <div className="truncate text-xs text-neutral-500">{e.snippet}</div>
+              </>
+            )}
           </button>
         </li>
       ))}

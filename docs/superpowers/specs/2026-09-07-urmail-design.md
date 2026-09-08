@@ -643,11 +643,39 @@ silent at the point of failure.
 1. **Every blot needs a marc.** A poke to a blot with no marc parks its dart
    silently and hangs the poking fiber forever, printing nothing. Every path
    above ships a marc under `mar/urmail/`.
-2. **Persistent-state marcs are noun passthroughs.** A marc written as
-   `|_ x=type:lib` re-validates every stored grub against the live type on
-   read, so changing the type booms every persisted grub and readers fall to
-   bunt defaults. Message grubs carry a version and the reader upgrades in
-   place. This is not optional for mail.
+2. **Every marc is a noun passthrough — wire marcs included.** Two different
+   hazards, one rule.
+
+   *Persisted* grubs: a marc written as `|_ x=type:lib` re-validates every
+   stored grub against the live type on read, so changing the type booms every
+   persisted grub and readers fall to bunt defaults. Message grubs carry a
+   version and the reader upgrades in place.
+
+   *Wire* payloads: this originally went the other way. The two delivery marcs
+   were **typed**, so that a malformed chain failed validation at the boundary
+   rather than reaching the writer as an unchecked noun. That was sound
+   reasoning about the wrong risk, and it was **reversed** after the branching
+   slice measured what it actually did.
+
+   Grubbery validates a poke in `+hydrate`, **before any nexus code runs**. A
+   validation failure there fails the writer *process*, and `+rise-wait`
+   restarts a failed process by **consuming the next poke without processing
+   it**. So a typed wire marc never rejected a bad chain: it destroyed the
+   **next good one**, silently, with no crash visible and nothing written
+   anywhere. `/main.sig` is granted to the `public` usergroup by design, so
+   any ship on the network could do that for the price of one malformed noun,
+   and repeating it was a denial of delivery against a mail application.
+
+   **Validation you cannot catch is not validation, it is a fuse.** Every marc
+   is `|_ n=*` with `++ grab ++ noun *`, and the clam lives in `+apply` under
+   `mule` with a `~|` label, where a malformed payload is refused the way every
+   other cap is refused — a branch that returns cleanly, with the writer still
+   standing and the next poke still its own. Do not restore a typed wire marc
+   for the argument that first justified it; the boundary check is real and is
+   not worth what it costs.
+
+   Dropping the type also drops the marc's import of the chain lib, which
+   stops every stored grub revalidating each time that lib changes.
 3. **Every persistent path needs a covering `%fall` row in `on-load`.** `spin`
    rebuilds the bole from scratch and drops anything uncovered. An uncovered
    path is lost mail.

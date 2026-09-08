@@ -47,6 +47,12 @@ export interface InboxEntry {
   last: number
   unread: boolean
   participants: string[]
+  // Copies in this thread that the ship cannot read: grubs written under
+  // a pre-body-mime shape, refused rather than relabelled. Usually 0. A
+  // row whose count is nonzero and whose `count` is 0 is a thread with
+  // NO readable message — it still gets a row, because a thread silently
+  // vanishing from the listing is the failure this field exists to stop.
+  unreadable: number
 }
 
 // urmail is a grubbery NEXUS, not a gall agent, so there is no Eyre scry
