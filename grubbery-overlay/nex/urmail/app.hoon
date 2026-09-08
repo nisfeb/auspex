@@ -1898,6 +1898,31 @@
   =/  n=@ud  (lent p)
   (pure:m ?:((lth n 2) p (scag (sub n 2) p)))
 ::
+::  +is-owner: is this request really from the ship that owns us?
+::
+::    `authenticated.req` is eyre's own answer and should already imply
+::    this - it means the request carried a valid session for our
+::    owner's web login. This compares the `src` the request fiber was
+::    handed anyway, so the surface does not rest on one flag from one
+::    vane. Lattice rests on that flag alone; matching a reference
+::    implementation is not a reason to stop at it on a write surface.
+::
+::    ON THE WRITE ROUTES ONLY, and that is a measured decision rather
+::    than a half-done one. `src` is in hand but `our` is not: getting
+::    it is a poke to /sys/bowl.sig and a reply, the round trip whose
+::    ~0.2s per request is recorded on the owner gate below. Paying it
+::    on the three routes that mutate the tree puts it next to a writer
+::    poke that already costs more; paying it on every GET would add it
+::    to the shell and to app.js, where the same flag is already
+::    checked and there is nothing to mutate.
+::
+++  is-owner
+  |=  src=@p
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  our=@p  bind:m  bowl-our
+  (pure:m =(our src))
+::
 ::  +handle-request: one HTTP request, on its own ephemeral fiber.
 ::
 ++  handle-request
@@ -1942,10 +1967,10 @@
     (send-err eyre-id 404 'not found')
       [%'GET' [%api %whoami ~]]         (serve-whoami eyre-id)
       [%'GET' [%api %inbox ~]]          (serve-inbox eyre-id)
-      [%'POST' [%api %send ~]]          (do-web-send eyre-id (req-body req))
-      [%'POST' [%api %read ~]]          (do-web-read eyre-id (req-body req))
+      [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
+      [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
       [%'POST' [%api %'delete-thread' ~]]
-    (do-web-delete eyre-id (req-body req))
+    (do-web-delete src eyre-id (req-body req))
   ==
 ::
 ::  ── the client, as grubs ────────────────────────────────────────────
@@ -2192,9 +2217,11 @@
 ::  that tells them apart, here as everywhere else.
 ::
 ++  do-web-send
-  |=  [eyre-id=@ta raw=@t]
+  |=  [src=@p eyre-id=@ta raw=@t]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  jon=(unit json)  (de:json:html raw)
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  req=(unit send-req:uw)  (de-send:uw u.jon)
@@ -2245,9 +2272,11 @@
   (send-ok eyre-id)
 ::
 ++  do-web-read
-  |=  [eyre-id=@ta raw=@t]
+  |=  [src=@p eyre-id=@ta raw=@t]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  jon=(unit json)  (de:json:html raw)
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  i=(unit @uv)  (de-read:uw u.jon)
@@ -2256,9 +2285,11 @@
   (send-ok eyre-id)
 ::
 ++  do-web-delete
-  |=  [eyre-id=@ta raw=@t]
+  |=  [src=@p eyre-id=@ta raw=@t]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  jon=(unit json)  (de:json:html raw)
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  i=(unit @uv)  (de-delete:uw u.jon)
