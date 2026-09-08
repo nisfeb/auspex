@@ -48,15 +48,43 @@ falls back to the bunt. For mail that is data loss. The shape check lives in
 the nexus instead, as a `;;` ladder under `mule` — newest shape first, a later
 version added above the default and upgraded in place.
 
+## Upgrading from slice 2 — read this before deploying over live mail
+
+`unsigned` changed twice and is now **frozen**. `$stored-msg` is at version 2;
+versions 0 (pre-attachments) and 1 (pre-`body-mime`) are **refused, not
+migrated**, for the reason below. Three consequences a ship carrying old mail
+will actually hit:
+
+- **Old messages become unreadable, not forged.** A refused grub is dropped in
+  `+read-stored` before verification, so it never reaches `+verify-chain`, is
+  never labelled, is never counted toward unread, and renders as `"unreadable"`
+  through the marc. That is the intended outcome: relabelling genuine mail as
+  `%forged` would be strictly worse.
+- **Ghost threads.** A thread whose every message is an old-version grub still
+  has a directory, still appears in `/mail/idx`, and still counts against
+  `max-threads` — because the index is maintained on write and nothing sweeps
+  it on read. It shows as an empty thread.
+- **Old grubs cannot be culled by the writer.** `+sync-slots` builds its cull
+  list from what `+read-stored` returned, and it returned nothing for them, so
+  they are invisible to the only thing that deletes messages. `%delete-thread`
+  removes the whole thread directory and is the only way to clear them.
+
+The clean upgrade is therefore `%delete-thread` on every affected thread, run
+before or after the deploy, and there is no in-place path. If a ship's mail
+matters, take a copy of the tree first.
+
 There is one place that rule cannot save anything, and it is worth naming.
-`$stored-msg` went to version 1 when `unsigned` gained `attachments`, and a
-version 0 grub is **refused**, not upgraded. `msg-id` and the signature both
-cover the shape, so rewriting a %0 message into the %1 shape would leave a
-message whose signature no longer matches its own contents — which every peer
-would then read as `%forged`. Turning genuine mail into apparent forgeries is
-worse than refusing it. A signed message cannot be migrated; the only true
-migration is to carry every historical shape and its digest forever, and that
-is deferred until the chain format is declared stable.
+`$stored-msg` is **refused** rather than upgraded across versions. `msg-id` and
+the signature both cover the shape, so rewriting an old message into the new
+shape would leave a message whose signature no longer matches its own contents
+— which every peer would then read as `%forged`. Turning genuine mail into
+apparent forgeries is worse than refusing it. A signed message cannot be
+migrated; the only true migration is to carry every historical shape and its
+digest forever, and it is not worth doing now that the format is frozen.
+
+`$meta` and `$stored-blob` sit on the other side of that line and **do** upgrade
+in place, because nothing in either is covered by a signature. That contrast is
+the whole reason local state is kept out of `unsigned`.
 
 **Wire marcs are typed**, because they are never read back off disk and a
 malformed chain from a hostile ship should fail at the boundary.
