@@ -1,5 +1,10 @@
 /-  sur=urmail
 /+  *test, urmail
+::  the chain mark is built here as a library so its JSON arms are covered
+::  by the same suite as everything else. Same pattern as app/lens.hoon in
+::  %base, which builds /mar/lens/command this way to reach its +grab.
+::
+/=  chain-mark  /mar/urmail/chain
 |%
 ::  +forge: build a genuinely signed message as any ship, using the fake-ship
 ::  key derivation. This is what lets the third-party forward case be tested
@@ -427,4 +432,71 @@
   %+  expect-eq
     !>  2
     !>  (distinct-ids:urmail ~[a a(sig 0x1) a(sig 0x2) b])
+::
+::  ---------------------------------------------------------------------
+::  the chain mark's JSON form
+::
+::  "The JSON forms exist so the web UI can read chains without a second
+::  representation" - and that only holds if the JSON form is the SAME
+::  representation, losslessly. A chain's entire value is that any holder
+::  can re-derive its ids and re-check its signatures, so a JSON encoding
+::  that rounds, drops or summarises a signed field is not a rendering of
+::  the chain, it is a different and unverifiable object.
+::  ---------------------------------------------------------------------
+::
+::  +grow then +grab returns the identical noun, including `life` and
+::  `sig` - the two fields a "readable" encoding is most tempted to drop,
+::  and the two without which nothing can be verified.
+++  test-mark-json-round-trips-a-chain
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  c=chain:sur  ~[a b]
+  %+  expect-eq
+    !>  c
+    !>  (json:grab:chain-mark json:grow:~(. chain-mark c))
+::
+::  the case the millisecond timestamp encoder used elsewhere in this desk
+::  gets wrong. `sent` is one of the seven fields (sham unsigned) covers,
+::  and on a real send it is `now.bowl`, which carries sub-millisecond
+::  bits. Rounding it changes every id and flips every verdict to %forged
+::  - silently, and only for chains that came through JSON. A fixture
+::  whose `sent` is not a whole millisecond is the only thing that catches
+::  it, so the round trip is asserted here AND re-verified afterwards.
+++  test-mark-json-keeps-sub-millisecond-sent
+  =/  a
+    %-  forge
+    :*  ~sampel-palnet  (sy ~[~palnet-sampel])  'hi'  'one'
+        ~2026.1.1..00.00.00..0001  ~
+    ==
+  =/  c=chain:sur  ~[a]
+  =/  back=chain:sur  (json:grab:chain-mark json:grow:~(. chain-mark c))
+  ;:  weld
+    (expect-eq !>(c) !>(back))
+    %+  expect-eq
+      !>  ~[%verified]
+      !>  %+  turn  (verify-chain:urmail (all-keys ~[~sampel-palnet]) back)
+          |=([* v=verdict:sur] v)
+  ==
+::
+::  a chain that has been through JSON is still a chain a stranger can
+::  verify: round-trip the marquee forward case and re-check every
+::  signature on the far side. This is the mark arms and the design's
+::  headline claim in one assertion.
+++  test-mark-json-preserves-third-party-verifiability
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'from sampel' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  back=chain:sur
+    (json:grab:chain-mark json:grow:~(. chain-mark `chain:sur`~[a b]))
+  =/  keys  (all-keys ~[~sampel-palnet ~palnet-sampel])
+  %+  expect-eq
+    !>  ~[%verified %verified]
+    !>  (turn (verify-chain:urmail keys back) |=([* v=verdict:sur] v))
 --
