@@ -62,6 +62,23 @@ export default function ThreadView({
   // any later promise resolves.
   const idRef = useRef(id)
 
+  // The thread id the reply audience was last seeded from, and the guard
+  // that keeps finding 1's fix from being switched off remotely.
+  //
+  // The effect below re-runs on `updatedAt`, which App bumps for every
+  // /updates push — and +receive emits one on EVERY delivery, including a
+  // delivery the attacker sent. Re-seeding the audience there would throw
+  // away the user's removals and restore the attacker-inclusive default,
+  // at a moment of the attacker's choosing, including the window between
+  // the removal and the click on Send. Worse, the same effect leaves the
+  // typed `reply` alone, so the composer would look untouched while its
+  // audience had silently widened.
+  //
+  // The whole Critical fix rests on the edit surviving until Send, so the
+  // seed happens once per thread and no remote push ever repeats it. The
+  // refetch itself still runs on every push: only the seed is gated.
+  const seededFor = useRef<string | null>(null)
+
   // The stale-thread race: click thread A, then click B before A's scry
   // resolves. React runs A's effect cleanup and B's effect setup back to
   // back, synchronously, with no microtask in between — so a *hoisted*
@@ -75,10 +92,18 @@ export default function ThreadView({
   useEffect(() => {
     let cancelled = false
     idRef.current = id
+    // A different thread than the one the audience was seeded from, so
+    // this run may seed. A re-run for the SAME thread - which is what a
+    // remote push produces - may not.
+    const fresh = seededFor.current !== id
     setT(null)
     setNotFound(false)
     setLoadError(null)
     setSendError(null)
+    if (fresh) {
+      setRecipients([])
+      setPending('')
+    }
     thread(id).then((th) => {
       if (cancelled) return
       if (th === null) {
@@ -86,8 +111,11 @@ export default function ThreadView({
         return
       }
       setT(th)
-      setRecipients(defaultRecipients(th))
-      setPending('')
+      if (fresh) {
+        setRecipients(defaultRecipients(th))
+        setPending('')
+        seededFor.current = id
+      }
       th.messages.filter((m) => !m.read).forEach((m) => markRead(m.id).catch(console.error))
     }).catch((e) => {
       if (cancelled) return
