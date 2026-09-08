@@ -499,4 +499,89 @@
   %+  expect-eq
     !>  ~[%verified %verified]
     !>  (turn (verify-chain:urmail keys back) |=([* v=verdict:sur] v))
+::
+::  ---------------------------------------------------------------------
+::  SPEC TEST 6: "a chain arriving from a non-participant ship is accepted
+::  and verifies". One of the three claims the design says a chat app
+::  cannot make.
+::
+::  The `verifies` half is the marquee test above. These three cover the
+::  `accepted` half as far as pure code can: the chain below names neither
+::  the ship holding it (~marbud-marbud) nor the ship that couriered it
+::  (~wicdev-wisryt), and every arm +receive puts it through takes it
+::  unchanged. Nothing in lib/urmail.hoon has a courier argument to check,
+::  which is the point.
+::
+::  What is NOT covered here, and why: that `on-poke` really does omit the
+::  `?>  =(our.bowl src.bowl)` gate on %urmail-chain that it applies to
+::  %urmail-action. That is a property of the agent core, needs a bowl,
+::  and `lib/test-agent.hoon` does not compile at [%zuse 408] - see
+::  docs/verification.md, "The headline gap". It is backed by live dojo
+::  evidence only. Do not read the tests below as covering it.
+::  ---------------------------------------------------------------------
+::
+::  every message verifies although the holder is in neither `from` nor
+::  `to` of any of them. The signatures are the authority, not the courier.
+++  test-non-participant-chain-verifies
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  c=chain:sur  ~[a b]
+  =/  keys  (all-keys ~[~sampel-palnet ~palnet-sampel])
+  ;:  weld
+    (expect !>(!(~(has in (participants:urmail c)) ~marbud-marbud)))
+    (expect !>(!(~(has in (participants:urmail c)) ~wicdev-wisryt)))
+    %+  expect-eq
+      !>  ~[%verified %verified]
+      !>  (turn (verify-chain:urmail keys c) |=([* v=verdict:sur] v))
+  ==
+::
+::  and it files under the id every holder of the conversation computes -
+::  the root's content hash - with nothing about the courier in it. First
+::  contact anchors on the prev=~ message; a later delivery of the same
+::  chain by a different courier resolves to the same id, which is what
+::  makes double delivery a no-op instead of a duplicate conversation.
+++  test-non-participant-chain-files-under-the-root-id
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  c=chain:sur  ~[a b]
+  =/  tid  (id:urmail unsigned.a)
+  =/  stored=(map thread-id:sur thread:sur)
+    (malt ~[[tid `thread:sur`[c (participants:urmail c) ~2026.1.2]]])
+  ;:  weld
+    (expect-eq !>(tid) !>((thread-key:urmail ~ c)))
+    (expect-eq !>(tid) !>((thread-key:urmail stored c)))
+  ==
+::
+::  and it survives the rest of +receive's pipeline intact: the input caps
+::  accept it, it merges whole into empty state, and +prune sheds nothing.
+::  Each of these is a pure function of the chain alone - there is no
+::  courier to consult - so a stranger's chain is stored exactly as a
+::  participant's would be.
+++  test-non-participant-chain-survives-the-receive-pipeline
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  c=chain:sur  ~[a b]
+  =/  merged  (merge:urmail ~ c)
+  =/  vs  (malt (verify-chain:urmail (all-keys ~[~sampel-palnet ~palnet-sampel]) merged))
+  ;:  weld
+    (expect !>((fits-length:urmail c 1.000)))
+    (expect !>((fits-bodies:urmail c 100.000)))
+    (expect !>((fits-subjects:urmail c 1.000)))
+    (expect !>((fits-recipients:urmail c 100)))
+    (expect-eq !>(c) !>(merged))
+    (expect-eq !>(2) !>((distinct-ids:urmail merged)))
+    (expect-eq !>(c) !>((prune:urmail merged vs 4)))
+  ==
 --
