@@ -34,6 +34,31 @@
 ::
 +$  verdict  ?(%verified %unverified %forged)
 ::
+::  $attachment: the METADATA of one attached file. Never the bytes.
+::
+::    The chain travels whole on every send, so bytes must not live in it.
+::    An attachment costs the chain ~100 bytes whatever the file weighs.
+::
+::    `hash` is (sham octs) over the CONTENT, and it is the content's
+::    address: the bytes live at /mail/blob/<hash> and are published into
+::    the remote-scry farm at that same hash. The hash is the authority
+::    and the courier is irrelevant - any ship holding the bytes can serve
+::    them, and a blob whose contents do not hash to the name it was
+::    fetched under is discarded.
+::
+::    Hashed as octs, NOT as a bare atom. An atom loses leading zero
+::    BYTES, so two different files that differ only in leading zeros
+::    would share an address; octs carries the length, so they do not.
+::    It also ties `size` to the hash: a lie about the size is a lie
+::    about the content address.
+::
++$  attachment
+  $:  name=@t          ::  original filename
+      size=@ud         ::  bytes
+      mime=@t          ::  content type
+      hash=@uv         ::  (sham octs) over the contents
+  ==
+::
 ::  $unsigned: everything a signature covers.
 ::
 ::    `life` travels with the message because signatures must outlive key
@@ -43,6 +68,17 @@
 ::    `prev` is what makes a flat list a chain. A reply points at the
 ::    message it answers; a forward points into the chain it carries.
 ::
+::    `attachments` is INSIDE here, so it is covered by the signature and
+::    by msg-id. Swapping a file breaks the signature. That placement is
+::    also a WIRE BREAK: msg-id is (sham unsigned), so every message
+::    signed against the seven-field shape has a different id and a dead
+::    signature under the eight-field one. A signed message cannot be
+::    migrated - its signature covers a shape that no longer exists - so
+::    the only true migration is to carry every historical shape forever,
+::    and that is deferred until the format is declared stable. See
+::    +read-stored in the nexus for how the old grubs are refused rather
+::    than silently relabelled.
+::
 +$  unsigned
   $:  from=ship
       life=@ud
@@ -51,6 +87,7 @@
       body=@t
       sent=@da
       prev=(unit msg-id)
+      attachments=(list attachment)
   ==
 ::
 +$  msg    [=unsigned sig=@ux]
@@ -72,11 +109,49 @@
 ::    action on the poke's source being us - so no peer can delete a
 ::    thread out from under us.
 ::
+::    %attach-file carries BYTES, so it is the one action with a size to
+::    it. It is local-only like the rest, and it is the only way bytes
+::    ever enter this ship's blob store from the user side.
+::
 +$  action
-  $%  [%send to=(set ship) subj=@t body=@t prev=(unit msg-id)]
+  $%  [%send to=(set ship) subj=@t body=@t prev=(unit msg-id) files=(list file)]
       [%read =msg-id]
       [%delete-thread =thread-id]
+      [%fetch-blob hash=@uv from=ship]
+      [%restrict-blob hash=@uv ships=(set ship)]
+      [%publish-blob hash=@uv]
   ==
+::
+::  $file: one file as handed to %send, before it is hashed and stored.
+::
++$  file  [name=@t mime=@t =octs]
+::
+::  $blob-vis: who may fetch one blob's bytes.
+::
+::    %public     grown into the remote-scry farm, so ANY ship holding
+::                the hash may keen it. Permissionless, and the default:
+::                a chain is forwardable to anyone by design, and an
+::                attachment nobody but the original recipients could
+::                read would make a forward carry an unreadable file.
+::    %restricted withdrawn from the farm and served only over a weir to
+::                named ships. Per-attachment permission.
+::
++$  blob-vis
+  $%  [%public ~]
+      [%restricted ships=(set ship)]
+  ==
+::
+::  $stored-blob: one attachment's bytes, at /mail/blob/<hash>.
+::
+::    Bytes and nothing else. Visibility lives in a separate small grub
+::    so that changing who may read a file does not rewrite the file.
+::
++$  stored-blob  [%0 =octs]
+::
+::  $blob-index: visibility for every blob we hold, at /mail/blobvis.
+::  Absent from the map means %public, the default.
+::
++$  blob-index  [%0 vis=(map @uv blob-vis)]
 ::
 ::  the tree's persisted shapes. Every one of these is read back through
 ::  ;; against a NOUN-marc vase, newest shape first, so a later version
@@ -90,7 +165,18 @@
 ::    differing in signature are distinct grubs with distinct verdicts.
 ::    That is the [id sig] keying, expressed as storage layout.
 ::
-+$  stored-msg  [%0 =msg =verdict]
+::    Version 1, not 0. Version 0 held the seven-field $unsigned, which
+::    this slice replaced with the eight-field one that carries
+::    attachments. A %0 grub can be RECOGNISED (its head is 0) but it
+::    cannot be upgraded: msg-id and the signature both cover the shape,
+::    so rewriting a %0 message into the %1 shape would produce a
+::    message whose signature no longer matches its own contents and
+::    which every peer would then read as %forged. Turning genuine mail
+::    into apparent forgeries is worse than refusing it, so +read-stored
+::    refuses a %0 grub outright and the format change is recorded as a
+::    break rather than papered over.
+::
++$  stored-msg  [%1 =msg =verdict]
 ::
 ::  $meta: local state about a thread, at /mail/thread/<tid>/meta.
 ::  Never signed, never travels: two ships may disagree about any of it.
@@ -115,6 +201,159 @@
 ++  max-to       100          ::  recipients per message
 ++  max-copies   4            ::  copies (same id, distinct sig) per message
 ++  max-threads  10.000       ::  distinct threads this ship will hold
+::
+::  the attachment limits.
+::
+::    max-blob is 256K rather than something round and large because a
+::    blob is answered over remote scry, which fragments the response
+::    into ames packets; a multi-megabyte keen is a lot of packets for a
+::    fetch that has no partial-progress story. Raise it when the fetch
+::    has one.
+::
+::    max-blobs bounds this ship's blob store. It cannot be weaponised:
+::    bytes only ever enter through a LOCAL action (%send's files or
+::    %fetch-blob), never through a delivered chain, which carries
+::    metadata alone.
+::
+++  max-blob     262.144      ::  bytes in one attachment
+++  max-attach   16           ::  attachments per message
+++  max-name     256          ::  bytes of filename
+++  max-mime     128          ::  bytes of content type
+++  max-blobs    1.000        ::  blobs this ship will store
+::
+::  +blob-hash: the content address of a file's bytes.
+::
+::    Over octs, not over the bare atom: an atom has no leading zero
+::    bytes, so hashing q alone gives two distinct files one address.
+::
+++  blob-hash
+  |=  =octs
+  ^-  @uv
+  (sham octs)
+::
+::  +blob-ok: do these bytes belong at this address?
+::
+::    The whole of blob acceptance. A blob whose contents do not hash to
+::    the name it was fetched under is discarded without comment: blobs
+::    are a cache, so losing one loses a file, never a message and never
+::    a signature.
+::
+++  blob-ok
+  |=  [=octs h=@uv]
+  ^-  ?
+  =(h (blob-hash octs))
+::
+::  +describe: the signed metadata for one file.
+::
+++  describe
+  |=  f=file
+  ^-  attachment
+  [name.f p.octs.f mime.f (blob-hash octs.f)]
+::
+::  +file-ok: is this file storable at all?
+::
+::    p.octs is the DECLARED length and q is the atom. An atom cannot
+::    carry more bytes than it measures, so a declared length below the
+::    measured one is a malformed octs and would make +blob-hash disagree
+::    with anything the bytes are later re-measured against.
+::
+++  file-ok
+  |=  f=file
+  ^-  ?
+  ?&  (lte p.octs.f max-blob)
+      (gte p.octs.f (met 3 q.octs.f))
+      (lte (met 3 name.f) max-name)
+      (lte (met 3 mime.f) max-mime)
+  ==
+::
+++  files-ok
+  |=  fs=(list file)
+  ^-  ?
+  ?&  (lte (lent fs) max-attach)
+      (levy fs file-ok)
+  ==
+::
+::  +fits-attachments: the INCOMING bound, applied to a delivered chain.
+::
+::    A delivered chain carries metadata only, so this bounds what a
+::    hostile peer can make us store per message and what it can make us
+::    later try to fetch. `size` is checked against max-blob here as
+::    well: an attachment claiming a gigabyte is a claim we would never
+::    honour, and rejecting it at the boundary is cheaper than
+::    discovering it at fetch time.
+::
+++  fits-attachments
+  |=  [c=chain m=@ud]
+  ^-  ?
+  %+  levy  c
+  |=  x=msg
+  =/  as  attachments.unsigned.x
+  ?&  (lte (lent as) m)
+      %+  levy  as
+      |=  a=attachment
+      ?&  (lte size.a max-blob)
+          (lte (met 3 name.a) max-name)
+          (lte (met 3 mime.a) max-mime)
+      ==
+  ==
+::
+::  +chain-hashes: every content address a chain refers to.
+::
+++  chain-hashes
+  |=  c=chain
+  ^-  (set @uv)
+  %-  ~(gas in *(set @uv))
+  %-  zing
+  (turn c |=(m=msg (turn attachments.unsigned.m |=(a=attachment hash.a))))
+::
+::  +blob-spur: where a blob is bound in this ship's remote-scry farm.
+::
+::    gall's farm is a FLAT namespace shared by every nexus in the
+::    grubbery yoke (lattice grows at /pub/page/...), so urmail names its
+::    own prefix. Content-addressed, and there is NO revision segment:
+::    lattice needs one because a page is mutable and the namespace
+::    requires an immutable binding per spur, while a blob's bytes are
+::    fixed by its name. That is the whole reason this fetch needs no
+::    rev-discovery channel, and rev-discovery is the weir-gated part.
+::
+++  blob-spur
+  |=  h=@uv
+  ^-  path
+  /urmail/blob/[(scot %uv h)]
+::
+::  +blob-keen-path: the ames spar path of one blob in a PEER's farm.
+::
+::    MUST mirror +blob-spur or every read misses forever.
+::
+::      g          gall
+::      x          the value care
+::      <case>     the gall case. A spur that has never been grown and
+::                 never culled binds at case 1 (+grow:of-farm in
+::                 sys/lull: an empty fan with no high-water mark takes
+::                 key 1), so case 1 is the answer for a
+::                 content-addressed blob and a re-grow of the same
+::                 bytes leaves it bound and correct.
+::      <agent>    the yoke whose farm is read: the gall agent, not the
+::                 nexus. urmail lives inside %grubbery.
+::      ''         THE EMPTY SEGMENT, load-bearing. The publisher's ames
+::                 takes the head of the spur as the beam's desk slot and
+::                 the tail as s.bem, and gall's +scry sends anything not
+::                 starting with the empty knot to the agent's +on-peek
+::                 instead of to the vane's scry farm.
+::      1          the namespace version marker gall's +scry requires.
+::
+::    Built by cons: the empty segment is the one a path literal cannot
+::    spell, and the one nobody notices is missing.
+::
+++  blob-keen-path
+  |=  [agent=@ta h=@uv case=@ud]
+  ^-  path
+  %+  weld  `path`[%g %x (scot %ud case) agent %$ %'1' ~]
+  (blob-spur h)
+::
+::  +blob-page-mark: the page mark a blob is grown under.
+::
+++  blob-page-mark  ^-(@tas %urmail-blob)
 ::
 ::  +digest: the preimage every urmail signature covers.
 ::

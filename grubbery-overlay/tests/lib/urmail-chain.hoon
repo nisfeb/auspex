@@ -15,7 +15,21 @@
 ++  forge
   |=  [who=ship to=(set ship) subj=@t body=@t sent=@da prev=(unit msg-id:sur)]
   ^-  msg:sur
-  =/  u=unsigned:sur  [who 1 to subj body sent prev]
+  (forge-with who to subj body sent prev ~)
+::
+::  +forge-with: the same, carrying attachments. Kept separate so every
+::  assertion ported from the pre-attachment suite stays byte-identical.
+++  forge-with
+  |=  $:  who=ship
+          to=(set ship)
+          subj=@t
+          body=@t
+          sent=@da
+          prev=(unit msg-id:sur)
+          as=(list attachment:sur)
+      ==
+  ^-  msg:sur
+  =/  u=unsigned:sur  [who 1 to subj body sent prev as]
   [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
 ::
 ::  +forge hardcodes life 1, so the map is keyed on [w 1] for every ship
@@ -50,7 +64,7 @@
 ::  tested directly rather than reimplemented by its callers.
 ++  test-digest-is-salted-sham
   =/  u=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~]
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
   %+  expect-eq
     !>  (shaf %urmail (sham u))
     !>  (digest:urmail u)
@@ -61,7 +75,7 @@
 ::  and it is mandatory per the spec.
 ++  test-digest-domain-separated
   =/  u=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~]
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
   ;:  weld
     (expect !>(!=((digest:urmail u) (sham u))))
     (expect !>(!=((digest:urmail u) (shaf %ames (sham u)))))
@@ -72,7 +86,7 @@
 ::  without coordinating.
 ++  test-msg-id-covers-every-field
   =/  base=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~]
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
   =/  d  (digest:urmail base)
   ;:  weld
     (expect !>(!=(d (digest:urmail base(body 'other')))))
@@ -82,6 +96,9 @@
     (expect !>(!=(d (digest:urmail base(sent ~2026.1.2)))))
     (expect !>(!=(d (digest:urmail base(to (sy ~[~sampel-palnet]))))))
     (expect !>(!=(d (digest:urmail base(prev `0v1)))))
+    ::  attachments are inside `unsigned`, so the id covers them too and
+    ::  swapping a file cannot leave the signature standing.
+    (expect !>(!=(d (digest:urmail base(attachments ~[['f' 3 'text/plain' 0v2]])))))
   ==
 ::
 ::  THE MARQUEE TEST. ~sampel writes to ~palnet; ~palnet forwards the chain
@@ -215,7 +232,7 @@
 ++  test-verifies-under-rotated-life
   =/  who  ~sampel-palnet
   =/  u=unsigned:sur
-    [who 2 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~]
+    [who 2 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
   =/  m=msg:sur
     [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
   =/  keys  (malt ~[[[who 2] `(fake-pass:urmail who)]])
@@ -435,4 +452,133 @@
   %+  expect-eq
     !>  2
     !>  (distinct-ids:urmail ~[a a(sig 0x1) a(sig 0x2) b])
+
+::  ── attachments ──────────────────────────────────────────────────────
+::
+::  the content address covers the LENGTH as well as the atom. Hashing the
+::  bare atom would give two files that differ only in leading zero bytes
+::  one address, and would let a lie about `size` pass unnoticed.
+++  test-blob-hash-covers-length
+  =/  a=octs  [3 'abc']
+  =/  b=octs  [4 'abc']
+  ;:  weld
+    (expect !>(=((blob-hash:urmail a) (blob-hash:urmail [3 'abc']))))
+    (expect !>(!=((blob-hash:urmail a) (blob-hash:urmail b))))
+    (expect !>(!=((blob-hash:urmail a) (sham q.a))))
+  ==
+::
+::  THE ACCEPTANCE RULE. A blob is accepted only if its bytes hash to the
+::  address it was fetched under. Everything else about the courier is
+::  irrelevant, and a mismatch is discarded rather than stored.
+++  test-blob-ok-rejects-wrong-bytes
+  =/  good=octs  [11 'hello world']
+  =/  h  (blob-hash:urmail good)
+  ;:  weld
+    (expect !>((blob-ok:urmail good h)))
+    (expect !>(!(blob-ok:urmail [11 'hello xorld'] h)))
+    ::  right bytes, wrong declared length: still a different address
+    (expect !>(!(blob-ok:urmail [12 'hello world'] h)))
+    (expect !>(!(blob-ok:urmail good 0v0)))
+  ==
+::
+::  +describe is what puts a file's identity inside the signature. Its
+::  size and hash must agree with the bytes it was built from.
+++  test-describe-matches-its-bytes
+  =/  f=file:sur  ['note.txt' 'text/plain' [11 'hello world']]
+  =/  a  (describe:urmail f)
+  ;:  weld
+    (expect-eq !>('note.txt') !>(name.a))
+    (expect-eq !>(11) !>(size.a))
+    (expect-eq !>('text/plain') !>(mime.a))
+    (expect !>((blob-ok:urmail octs.f hash.a)))
+  ==
+::
+::  a file whose declared length is BELOW its measured bytes is malformed:
+::  the atom carries more than the octs claims, so the address computed at
+::  send time would not be the address the bytes are re-measured against.
+++  test-file-ok-rejects-malformed-octs
+  ;:  weld
+    (expect !>((file-ok:urmail ['a' 'text/plain' [11 'hello world']])))
+    (expect !>((file-ok:urmail ['a' 'text/plain' [40 'hello world']])))
+    (expect !>(!(file-ok:urmail ['a' 'text/plain' [3 'hello world']])))
+    (expect !>(!(file-ok:urmail ['a' 'text/plain' [1.000.000 'x']])))
+    (expect !>(!(file-ok:urmail [(crip (reap 300 'n')) 'text/plain' [1 'x']])))
+    (expect !>(!(file-ok:urmail ['a' (crip (reap 200 'm')) [1 'x']])))
+  ==
+::
+::  swapping a file breaks the signature. This is the whole reason the
+::  metadata sits inside `unsigned` rather than beside it: an attacker who
+::  substitutes an attachment cannot leave the message verifying.
+++  test-swapped-attachment-is-forged
+  =/  f=file:sur  ['note.txt' 'text/plain' [11 'hello world']]
+  =/  g=file:sur  ['note.txt' 'text/plain' [11 'hello xorld']]
+  =/  a
+    %-  forge-with
+    :*  ~sampel-palnet  (sy ~[~palnet-sampel])  'hi'  'see attached'
+        ~2026.1.1  ~  ~[(describe:urmail f)]
+    ==
+  =/  swapped=msg:sur  a(attachments.unsigned ~[(describe:urmail g)])
+  =/  keys  (all-keys ~[~sampel-palnet])
+  ;:  weld
+    (expect-eq !>(~[%verified]) !>((turn (verify-chain:urmail keys ~[a]) |=([* v=verdict:sur] v))))
+    (expect-eq !>(~[%forged]) !>((turn (verify-chain:urmail keys ~[swapped]) |=([* v=verdict:sur] v))))
+  ==
+::
+::  the incoming bound applies per message, and a chain is rejected whole
+::  when any message in it exceeds it. A delivered chain carries metadata
+::  only, so this is what bounds what a hostile peer can make us store -
+::  and what it can later make us try to fetch.
+++  test-incoming-attachment-caps
+  =/  small  ['f' 3 'text/plain' 0v1]
+  =/  huge   ['f' 999.999.999 'text/plain' 0v2]
+  =/  ok
+    (forge-with ~sampel-palnet (sy ~[~palnet-sampel]) 's' 'b' ~2026.1.1 ~ ~[small small])
+  =/  many
+    %-  forge-with
+    :*  ~sampel-palnet  (sy ~[~palnet-sampel])  's'  'b'  ~2026.1.2  ~
+        ~[small small small]
+    ==
+  =/  big
+    (forge-with ~sampel-palnet (sy ~[~palnet-sampel]) 's' 'b' ~2026.1.3 ~ ~[huge])
+  ;:  weld
+    (expect !>((fits-attachments:urmail ~[ok] 2)))
+    (expect !>(!(fits-attachments:urmail ~[ok many] 2)))
+    ::  a size beyond max-blob is refused at the boundary whatever the count
+    (expect !>(!(fits-attachments:urmail ~[big] 16)))
+  ==
+::
+::  +chain-hashes is what a reader walks to know which bytes it is missing.
+++  test-chain-hashes-collects-every-address
+  =/  a
+    %-  forge-with
+    :*  ~sampel-palnet  (sy ~[~palnet-sampel])  'hi'  'one'  ~2026.1.1  ~
+        ~[['f' 3 'text/plain' 0v1] ['g' 3 'text/plain' 0v2]]
+    ==
+  =/  b
+    %-  forge-with
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're'  'two'  ~2026.1.2
+        `(id:urmail unsigned.a)  ~[['h' 3 'text/plain' 0v2]]
+    ==
+  %+  expect-eq
+    !>  (sy ~[0v1 0v2])
+    !>  (chain-hashes:urmail ~[a b])
+::
+::  THE PATHS. A blob is bound at its hash with NO revision segment: the
+::  content is its own address, so there is nothing to discover and the
+::  fetcher builds the whole path from the hash alone. The keen path is
+::  pinned here because the empty knot in it is exactly the segment a path
+::  literal cannot spell and the one nobody notices is missing.
+++  test-blob-paths-are-content-addressed
+  =/  h  0v1.23456
+  ;:  weld
+    (expect-eq !>(/urmail/blob/'0v1.23456') !>((blob-spur:urmail h)))
+    %+  expect-eq
+      !>  `path`[%g %x %'1' %grubbery %$ %'1' %urmail %blob '0v1.23456' ~]
+      !>  (blob-keen-path:urmail %grubbery h 1)
+    ::  the case is a segment of the path, so a probe at a later case is a
+    ::  different read of the SAME immutable binding.
+    %+  expect-eq
+      !>  `path`[%g %x %'2' %grubbery %$ %'1' %urmail %blob '0v1.23456' ~]
+      !>  (blob-keen-path:urmail %grubbery h 2)
+  ==
 --
