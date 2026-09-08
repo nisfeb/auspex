@@ -301,8 +301,18 @@
     ?~  tid  ~
     chain:(~(got by threads) u.tid)
   =/  new=chain:sur   (merge:urmail old ~[m])
-  ::  thread identity is never (root:urmail new) - see +thread-key.
-  =/  rid=thread-id:sur  (thread-key new)
+  ::  the thread is already resolved: `tid` came from `prev`, which names
+  ::  exactly one message and therefore exactly one chain, and a compose is
+  ::  by definition the root of a new thread. Re-deriving it with +thread-key
+  ::  here would be both slower (an O(total stored messages) scan on every
+  ::  local send) and WRONG: +thread-key returns the first map-traversal
+  ::  match, so if any other thread happens to share an [id sig] with `new`
+  ::  it can return an rid that is not u.tid - and `new` holds u.tid's chain,
+  ::  so the put would overwrite that unrelated thread's messages with this
+  ::  thread's, destroying the former and losing the sent message from the
+  ::  latter. Nothing here is attacker-supplied, so no identity fixing is
+  ::  needed; +thread-key exists for the externally reachable +receive.
+  =/  rid=thread-id:sur  ?^(tid u.tid (id:urmail u))
   =.  threads
     %+  ~(put by threads)  rid
     [new (participants:urmail new) (last-sent:urmail new)]
