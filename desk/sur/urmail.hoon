@@ -45,6 +45,10 @@
       [%read =msg-id]
   ==
 ::
++$  update
+  $%  [%thread =thread-id]
+  ==
+::
 +$  state-0
   $:  %0
       threads=(map thread-id thread)

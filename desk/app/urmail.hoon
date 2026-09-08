@@ -31,8 +31,29 @@
 ++  on-fail   on-fail:def
 ++  on-leave  |=(path `this)
 ++  on-agent  |=([wire sign:agent:gall] `this)
-++  on-watch  |=(=path (on-watch:def path))
-++  on-peek   |=(=path (on-peek:def path))
+++  on-peek
+  |=  =path
+  ^-  (unit (unit cage))
+  ?+    path  (on-peek:def path)
+      [%x %inbox ~]
+    ``json+!>(inbox-json:hc)
+  ::
+      [%x %thread @ ~]
+    =/  t  (slaw %uv i.t.t.path)
+    ?~  t  ``json+!>(~)
+    =/  th  (~(get by threads) u.t)
+    ?~  th  ``json+!>(~)
+    ``json+!>((thread-json:hc u.t u.th))
+  ==
+::
+++  on-watch
+  |=  =path
+  ^-  (quip card _this)
+  ?+    path  (on-watch:def path)
+      [%updates ~]
+    ?>  =(our.bowl src.bowl)
+    `this
+  ==
 ::
 ++  on-poke
   |=  [=mark =vase]
@@ -191,6 +212,66 @@
   ::  re-sort: grouping by id destroyed +merge's ordering
   (merge:urmail ~ kept)
 ::
+::  not `=,  enjs:format`: composing enjs:format into lexical scope breaks
+::  type inference for `(scot %p ...)` used inside any `|=` gate nested
+::  within that scope on this ship's Hoon (verified live on both ~wex and
+::  ~feb - nest-fail, have.[%b p=?] need.@, reproduces with a bare
+::  `(|=(a=ship (scot %p a)) ~zod)` the moment enjs:format is `=,`-ed in,
+::  and vanishes the moment it's referenced fully-qualified instead).
+::  Every ship-rendering call below runs inside a nested `|=` (the `turn`
+::  lambdas), so `pairs`/`time`/`numb` are called as `:enjs:format`
+::  instead of face-injected.
+::
+++  msg-json
+  |=  m=msg:sur
+  ^-  json
+  =/  i  (id:urmail unsigned.m)
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv i)]]
+      ['from' [%s (scot %p from.unsigned.m)]]
+      ['to' [%a (turn ~(tap in to.unsigned.m) |=(s=ship [%s (scot %p s)]))]]
+      ['subject' [%s subj.unsigned.m]]
+      ['body' [%s body.unsigned.m]]
+      ['sent' (time:enjs:format sent.unsigned.m)]
+      ['prev' ?~(prev.unsigned.m ~ [%s (scot %uv u.prev.unsigned.m)])]
+      ['verdict' [%s (~(gut by verdicts) [i sig.m] %unverified)]]
+      ['read' [%b (~(has in read) i)]]
+  ==
+::
+++  thread-json
+  |=  [t=thread-id:sur th=thread:sur]
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv t)]]
+      ['messages' [%a (turn chain.th msg-json)]]
+      ['participants' [%a (turn ~(tap in participants.th) |=(s=ship [%s (scot %p s)]))]]
+      ['last' (time:enjs:format last.th)]
+  ==
+::
+::  the inbox summary. Deliberately not the full chains: the list view
+::  needs a subject and a sender, not a hundred message bodies.
+::
+++  inbox-json
+  ^-  json
+  :-  %a
+  %+  turn  inbox
+  |=  t=thread-id:sur
+  =/  th  (~(got by threads) t)
+  =/  newest  (rear chain.th)
+  =/  unread=?
+    %+  lien  chain.th
+    |=(m=msg:sur !(~(has in read) (id:urmail unsigned.m)))
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv t)]]
+      ['subject' [%s subj.unsigned.newest]]
+      ['from' [%s (scot %p from.unsigned.newest)]]
+      ['snippet' [%s (crip (scag 140 (trip body.unsigned.newest)))]]
+      ['count' (numb:enjs:format (lent chain.th))]
+      ['last' (time:enjs:format last.th)]
+      ['unread' [%b unread]]
+      ['participants' [%a (turn ~(tap in participants.th) |=(s=ship [%s (scot %p s)]))]]
+  ==
+::
 ::  +send: compose, reply, and forward are all this.
 ::
 ::    A reply points `prev` at a message in a chain we hold. A forward is
@@ -232,6 +313,7 @@
   ::  ship the whole chain to every recipient. A ship added at message
   ::  forty receives messages one through forty, each independently
   ::  verifiable.
+  :-  [%give %fact ~[/updates] %urmail-update !>([%thread rid])]
   %+  turn  ~(tap in (~(del in to) our.bowl))
   |=  who=ship
   ^-  card
@@ -316,5 +398,6 @@
     [pruned (participants:urmail pruned) (last-sent:urmail pruned)]
   =.  verdicts  vs2
   =.  inbox  [rid (skip inbox |=(t=thread-id:sur =(t rid)))]
-  `state
+  :_  state
+  ~[[%give %fact ~[/updates] %urmail-update !>([%thread rid])]]
 --
