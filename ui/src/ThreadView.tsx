@@ -31,6 +31,17 @@ function defaultRecipients(th: Thread): string[] {
   return [...ships].sort()
 }
 
+// `size` in something a person reads. It is signed and tied to the
+// content hash, so unlike the name and the mime type it cannot drift
+// from the bytes — which makes it the one attachment field worth
+// rendering prominently.
+function fileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown size'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export default function ThreadView({
   id, onSent, onDeleted, onForward, updatedAt,
 }: {
@@ -374,6 +385,42 @@ export default function ThreadView({
             <p className="mt-2 text-xs text-neutral-500">
               Sent as <code>{m['body-mime']}</code>; shown as plain text.
             </p>
+          )}
+          {/* ATTACHMENTS: name and size, and nothing that acts on them.
+              Download is deliberately not here — the bytes are fetched
+              over a keen and that is its own slice. What this buys now is
+              that a message carrying a file stops being invisible: until
+              the API emitted the list, a client could not have shown one
+              however it was written.
+
+              `mime` is rendered as text, on its own line, marked as the
+              sender's claim. It never picks an icon, never picks a
+              renderer, never reaches a header. It arrives pre-signed
+              inside a chain any ship may deliver, so the signature proves
+              the author chose it and nothing else — same argument as
+              body-mime above, which is why they read the same way.
+
+              The name is the other hostile field and is treated as text
+              for the same reason: React escapes it, `break-all` stops a
+              long one from pushing the layout around, and nothing here
+              ever treats it as a path. */}
+          {(m.attachments?.length ?? 0) > 0 && (
+            <ul className="mt-3 space-y-1">
+              {m.attachments!.map((a, j) => (
+                <li
+                  key={j}
+                  className="rounded border border-neutral-200 px-3 py-2 text-sm"
+                >
+                  <span className="break-all">{a.name || '(unnamed file)'}</span>
+                  <span className="ml-2 text-neutral-500">{fileSize(a.size)}</span>
+                  {a.mime && (
+                    <span className="ml-2 text-xs text-neutral-400">
+                      sender says <code>{a.mime}</code>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
         </article>
       ))}

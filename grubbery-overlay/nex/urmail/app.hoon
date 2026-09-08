@@ -642,7 +642,6 @@
     |=([kid=ball:tarball acc=@ud] (add acc (unreadable-under kid)))
   (add here below)
 ::
-
 ::  +chain-of: a thread's copies as one chain, WHOLE TREE INCLUDED.
 ::
 ::    This is the local view: opening a thread shows every branch of it,
@@ -2311,6 +2310,43 @@
       ['body-mime' [%s body-mime.unsigned.m]]
       ['sent' (time:enjs:format sent.unsigned.m)]
       ['prev' ?~(prev.unsigned.m ~ [%s (scot %uv u.prev.unsigned.m)])]
+    ::  ATTACHMENTS. They live INSIDE `unsigned`, so what is rendered
+    ::  here is covered by the same signature the verdict below was
+    ::  computed over: a reader comparing the two is comparing the same
+    ::  bytes, and swapping a file breaks the signature.
+    ::
+    ::  Emitted because the alternative was not "unrendered" but
+    ::  UNREPRESENTABLE: with no field here, a message carrying a file
+    ::  was indistinguishable through this API from one carrying none,
+    ::  and no client could have shown it however it was written. The
+    ::  storage marc has rendered them all along (see mar/urmail/msg),
+    ::  which is what made the gap easy to miss - the data was one
+    ::  route away the whole time.
+    ::
+    ::  `mime` is the author's claim about the file and NOTHING MORE,
+    ::  exactly as body-mime above is. It is signed, so an intermediary
+    ::  cannot change it; a signature proves the author chose it, never
+    ::  that it is true or safe, and the chain carrying it may have been
+    ::  delivered by any ship. It is reported for a human to read. It
+    ::  must never pick a renderer and must never reach a
+    ::  Content-Type header.
+    ::
+    ::  `hash` is the content address and the only field here that
+    ::  proves anything: the bytes live at /mail/blob/<hash>, any ship
+    ::  holding them can serve them, and bytes that do not hash to it
+    ::  are discarded. `size` is tied to it - the hash is over octs, so
+    ::  a lie about the size is a lie about the address.
+      :-  'attachments'
+      :-  %a
+      %+  turn  attachments.unsigned.m
+      |=  a=attachment:uc
+      ^-  json
+      %-  pairs:enjs:format
+      :~  ['name' [%s name.a]]
+          ['size' (numb:enjs:format size.a)]
+          ['mime' [%s mime.a]]
+          ['hash' [%s (scot %uv hash.a)]]
+      ==
     ::  THE VERDICT IS PER MESSAGE, never per thread. A thread holding one
     ::  unverified message is not an unverified thread, and this field is
     ::  the whole product claim reaching the screen.

@@ -138,9 +138,14 @@
 ::    action on the poke's source being us - so no peer can delete a
 ::    thread out from under us.
 ::
-::    %attach-file carries BYTES, so it is the one action with a size to
-::    it. It is local-only like the rest, and it is the only way bytes
-::    ever enter this ship's blob store from the user side.
+::    %send's `files` carry BYTES, so %send is the one action with a size
+::    to it, and it is the only way bytes ever enter this ship's blob
+::    store from the user side. There is no separate attach action: the
+::    files ride on the send that names them, because the metadata built
+::    from those bytes goes inside `unsigned` and is therefore signed -
+::    hashing and signing in one step is what makes `size` and `hash`
+::    agree with what a fetcher will re-measure. A prior draft of this
+::    comment described a %attach-file member; there has never been one.
 ::
 ::    %send's `bcc` affects DELIVERY ONLY. The chain names `to` and
 ::    nothing else; the blind-copied ships get the same canonical bytes,

@@ -1,5 +1,25 @@
 export type Verdict = 'verified' | 'unverified' | 'forged'
 
+// One attached file, as the message describes it. Metadata only — the
+// bytes are content-addressed at `hash` and fetched separately.
+//
+// Every field here is INSIDE the signature, so an intermediary cannot
+// alter one. That is a statement about tampering and not about truth:
+// the author chose all four, and only `hash` is checkable, because the
+// bytes either hash to it or are discarded. `name` and `mime` are
+// claims. `size` is tied to `hash` (the hash is taken over the bytes
+// with their length) so it cannot drift from the content alone.
+export interface Attachment {
+  name: string
+  size: number
+  // HOSTILE. Reported to the reader, never acted on: it must not pick a
+  // renderer, must not become a Content-Type, and must not be trusted to
+  // agree with the bytes. See the note on `body-mime` below — same
+  // field, same signature, same reasoning.
+  mime: string
+  hash: string
+}
+
 export interface Message {
   id: string
   from: string
@@ -14,6 +34,13 @@ export interface Message {
   'body-mime': string
   sent: number
   prev: string | null
+  // Files this message carries. Signed alongside the body, so the list
+  // is as authentic as the message is — and no more. Older builds of the
+  // nexus omitted the field entirely, so treat it as optional and
+  // default it: a message from one of those is a message with no
+  // attachments we can name, which is exactly what an absent field
+  // means here.
+  attachments?: Attachment[]
   verdict: Verdict
   read: boolean
 }
