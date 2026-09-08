@@ -89,7 +89,7 @@ This is not optional and it is not a performance question.
 ## Verification
 
 ```hoon
-=/  pub  .^(  (unit [suite=@ud =pass])
+=/  pub  .^(  (unit [crypto-suite=@ud =pass])
               %j
               /(scot %p our.bowl)/puby/(scot %da now.bowl)/(scot %p from)/(scot %ud life)
           ==)
@@ -104,9 +104,36 @@ the local Azimuth snapshot rather than blocking. A blocking scry inside a Gall
 agent stalls the agent, so the unitized variant is the only safe choice here.
 Do not reach for `%deed`.
 
-The exact product type of `%puby` should be confirmed against `keys` in the
-jael state at implementation time; the shape above is read off the scry body but
-has not been run.
+The product type follows `keys=(map life [crypto-suite=@ud =pass])` in `+point`
+(`sys/lull.hoon`). It is read off the source and has not been run.
+
+### Two constraints the jael source imposes
+
+**Jael answers scries only at exactly `now`.** Its scry arm opens with
+`?.  &(=(lot [%$ %da now]) =([~ ~] lyc))  ~` — a request at any other date
+returns `~`, which blocks. Nothing may scry jael with a stored or hardcoded
+date, and no test can scry jael at all, since a test arm has no bowl.
+
+Therefore the crypto splits in two: **pure gates** that take keys as arguments
+and do all the signing, verifying, and digesting, and **thin scry wrappers**
+that only the agent calls, with a live `now`. Everything worth testing lives on
+the pure side.
+
+**Jael's `%puby` has no fake-ship branch.** `%deed` special-cases fake ships by
+deriving a keypair from the `@p` — `(pit:nu:cric:crypto 512 who %b ~)` — but
+`%puby` reads `pos.zim` directly and returns `~` for any ship the fake ship has
+no Azimuth snapshot of, which on a fake ship is essentially every ship. Left
+alone, every message in development would read `%unverified` and the dev loop
+would never exercise verification.
+
+The key lookup therefore checks `.^(? %j /(scot %p our)/fake/(scot %da now))`
+first and, on a fake ship, derives the peer's key the same way `%deed` does.
+This mirrors jael's own behavior rather than inventing a development mode.
+
+It also makes the strongest test cheap: on a fake ship every ship's keypair is
+derivable from its `@p`, so a test can forge a genuine signature as
+`~sampel-palnet`, put it in a chain, and verify it — the third-party forward
+case, with no network and no second ship.
 
 ### Verification labels, it does not reject
 
