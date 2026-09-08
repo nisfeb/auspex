@@ -109,8 +109,9 @@
 ::    ship/life pair missing from the map is %unverified, never %forged -
 ::    that is true whether the key is missing because we never fetched that
 ::    life, or because a tampered life field pointed at a life we don't hold.
-::    Keys arrive as a map so this stays pure. The agent builds the map by
-::    scrying jael once per distinct [ship life] before calling in.
+::    Keys arrive as a map, keyed this way, so this stays pure: the agent
+::    builds it by scrying jael once per distinct [ship life] before calling
+::    in.
 ::
 ++  verify-chain
   |=  [keys=(map [ship @ud] (unit pass)) c=chain:sur]

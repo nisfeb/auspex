@@ -200,4 +200,18 @@
   %+  expect-eq
     !>  ~[%unverified %verified]
     !>  (turn (verify-chain:urmail keys ~[a b]) |=([* v=verdict:sur] v))
+::
+::  the positive rotation case: a message signed under life 2 verifies when
+::  the map carries that ship's key at life 2. Without this, a lookup that
+::  hardcoded life 1 would pass every other test in the suite.
+++  test-verifies-under-rotated-life
+  =/  who  ~sampel-palnet
+  =/  u=unsigned:sur
+    [who 2 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~]
+  =/  m=msg:sur
+    [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
+  =/  keys  (malt ~[[[who 2] `(fake-pass:urmail who)]])
+  %+  expect-eq
+    !>  ~[%verified]
+    !>  (turn (verify-chain:urmail keys ~[m]) |=([* v=verdict:sur] v))
 --
