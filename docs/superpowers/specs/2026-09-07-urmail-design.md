@@ -969,100 +969,217 @@ third-party verification, since any fake ship's key is derivable from its `@p`.
 
 ---
 
-# Specified but unbuilt
+# The mail client
 
-These are designs, not descriptions. Nothing below exists on the nexus. The
-decisions stand — each was argued once and none of them needs redeciding — but
-every one is a view or a `meta` field, not a change to anything signed.
+Everything in this section **was** the "Specified but unbuilt" list and is
+now on the nexus. It was always a set of views and `meta` fields rather than
+a change to anything signed: not one line of it touches `unsigned`, none of
+it can hide a `%forged` message, and every ship may disagree with every
+other about all of it.
 
-**None of them may weaken a guarantee above.** In particular none may hide a
-`%forged` message, and none may touch `unsigned`.
+Two rules run through the whole layer:
+
+- **None of it moves the change beacon.** A label, an archive flag, an
+  unread mark, a draft and a rule change a thread in ways no other ship can
+  see, and a bump costs every open tab a full inbox listing plus a thread
+  refetch for a change it cannot observe. That is the read-mark storm again,
+  wearing a different hat. The tab that made the change refreshes itself.
+- **Every view is a predicate over the one tree walk the listing already
+  pays.** There are no stored view sets, so two views cannot disagree about
+  where a thread is.
 
 ## Labels, and folders as views over them
 
-Labels are local, per-thread, and never travel — `meta` already carries a
-`labels=(set @tas)`. A **folder** is not a separate concept. The sidebar shows
-views:
+Labels are local, per-thread, and never travel — `meta`'s
+`labels=(set @tas)`, which nothing read until this slice. A **folder** is
+not a separate concept. The sidebar shows views:
 
 | View | Definition |
 |---|---|
 | Inbox | not archived, and we are a participant **or** the chain arrived direct |
 | Sent | any message in the thread is authored by us |
 | Archived | `meta`'s `archived` |
+| All mail | everything stored |
 | Drafts | from `/mail/draft/` |
 | `<label>` | `meta` carries that label |
 
 That is Gmail's model and it avoids a second taxonomy that would inevitably
 disagree with the first.
 
+The Inbox clause is the first thing that ever read `direct`. It was set on
+delivery from the BCC slice onward and no view consulted it, so a
+blind-copied recipient — who is in neither `from` nor `to` of any message in
+the chain they were handed — had mail that no view could reach.
+
+`%label` carries **one label and a direction**, not a set: a set-valued
+action is last-write-wins over whatever another tab did, and for local state
+nothing can reconcile that is a silent loss.
+
+A label is a `@tas` a human typed, so `+label-ok` refuses anything that is
+not one, at the HTTP boundary and again at the writer. A cord holding a
+space or a capital sits in a `(set @tas)` perfectly happily and then crashes
+`scot %tas` on a request fiber, which is an HTTP connection that never
+answers.
+
 ## Archive
 
-`meta`'s `archived` flag, which already exists and already defaults to `%.n`
-explicitly — a bare `?` bunts to `%.y`, so every thread would be born archived
-and the inbox would show nothing.
+`meta`'s `archived`, which already defaulted to `%.n` explicitly — a bare
+`?` bunts to `%.y`, so every thread would be born archived and the inbox
+would show nothing.
 
-Archiving removes a thread from the Inbox view only. It is not deletion, it does
-not touch the chain, and a new message arriving in an archived thread
-**un-archives it** — otherwise mail silently disappears.
+Archiving removes a thread from the Inbox view only. It is not deletion, it
+does not touch the chain, and **a new message arriving in an archived thread
+un-archives it** — otherwise mail silently disappears, which is the failure
+mode a mail client may least afford. `+file-arrival` does this, gated on
+`+sync-slots` having actually written something, so a redelivery of a chain
+we already hold — which any ship may poke at us, since delivery is public —
+un-archives nothing.
 
 ## Mark unread
 
-The inverse of the existing read action, over the same `meta` set. Forged
-messages continue never to count toward unread.
+The inverse of the read action, over the same grouping pass (`+group-ids`)
+and the same single meta rewrite, so the two cannot disagree about what a
+set of ids names. Forged messages continue never to count toward unread, and
+no branch says so: that rule lives in how unread is *computed* in
+`+entry-json`, and a second copy of it here would be a second place for it to
+drift.
+
+The client leaves the thread after marking it unread. Staying would re-run
+the effect that marks a thread read on open, and the user would watch their
+own mark undo itself.
 
 ## Sent
 
-A walk: threads containing a message we authored. The BCC record in `meta` is
-what makes this view accurate about who a message actually went to.
+A walk: threads containing a message we authored, asked of the chain rather
+than recorded beside it — authorship is a signed field, so a second record of
+it could only ever disagree with the first. The BCC record in `meta` is what
+makes this view accurate about who a message actually went to.
 
 ## Drafts
 
 ```hoon
-+$  draft  [id=@uv to=(set ship) subj=@t body=@t prev=(unit msg-id) at=@da]
++$  draft
+  $:  %0
+      id=@uv
+      to=(set ship)
+      subj=@t
+      body=@t
+      prev=(unit msg-id)
+      at=@da
+  ==
 ```
 
-One grub per draft at `/mail/draft/<id>`. Drafts are local and unsigned — a draft
-is not a message and must never be renderable as one. Sending a draft signs it at
-that moment and deletes the draft. The UI saves on a debounce and on close.
+One grub per draft at `/mail/draft/<id>`. Drafts are local and unsigned —
+**a draft is not a message and must never be renderable as one** — and two
+things enforce that structurally rather than by care: a draft is stored
+outside `/mail/thread`, so no walk that produces messages can reach it, and
+its shape shares no prefix with `$stored-msg` (`%0` against `%2`), so the
+ladder that reads a stored copy refuses a draft noun outright.
+
+The version head is this design's one addition to the shape the earlier spec
+wrote: every persisted grub here is read back through a `;;` ladder, and a
+shape with no version cannot be laddered later without booming what is
+already on disk.
+
+Sending signs it at that moment and deletes it, in one writer action
+(`%send-draft`). **The delete is gated on the send having happened.**
+`+do-send` answers whether it sent, and a refused send — a body over the
+cap, an unknown `prev`, a full blob store — leaves the draft exactly where
+it was. Deleting unconditionally would destroy the composed message at the
+one moment the ship is telling the user it will not carry it.
+
+The id is minted by the **client**. A draft id is local, means nothing on
+any other ship and never appears in a signature; the route answers as soon
+as the writer takes the poke, so a server-minted id could never be told to
+the client that needs it to save the same draft again. The UI saves on a
+debounce and again on close.
 
 ## Filters
 
 ```hoon
 +$  rule
-  $:  id=@uv
+  $:  %0
+      id=@uv
       from=(unit ship)      ::  match sender
-      subject=(unit @t)     ::  substring match
+      subject=(unit @t)     ::  substring match, case-insensitive
       add=(set @tas)        ::  labels to apply
       archive=?             ::  skip the inbox
   ==
 ```
 
 One grub per rule at `/mail/rule/<id>`, applied on delivery **after
-verification**, never before — a filter must not be able to suppress a `%forged`
-message, since that would let an attacker who learns your rules hide evidence.
-Filters may add labels and archive; they may not delete, and they may not mark
-read.
+verification and after the chain is stored**, never before. A filter must
+not be able to suppress a `%forged` message: rules are a standing
+instruction and subject lines are guessable, so an attacker who learns your
+rules could otherwise aim a forgery at one and have the evidence of it filed
+somewhere you never look.
+
+**The shape is what enforces that**, not a comment. A rule may add labels
+and it may archive, and there is no field for deleting, rejecting or marking
+read. By the time `+file-arrival` runs, every verdict is set and every copy
+is on disk; all a rule can reach is a label and a flag.
+
+A rule with **neither** a sender nor a subject matches every delivered chain,
+and with `archive` set would empty the inbox permanently and silently. It is
+refused, at the route and at the writer.
+
+Order inside `+file-arrival`: the un-archive is the **default**, and the
+matching rules are applied over it — so an archived thread comes back when
+someone replies, and a rule that says "skip the inbox" still wins for the
+mail that just arrived. The label cap refuses the *addition*, never the
+delivery: nacking a chain because the user's own rule would overflow a cap
+would turn a rule into a way for a sender to get their own mail rejected.
 
 ## Search
 
-Substring match over subject, body and sender across stored threads, computed on
-demand. No index: state is capped, and a linear sweep over that is acceptable and
-honest — it is the same sweep the inbox listing already pays. Search covers
-`%forged` messages too and labels them in results; hiding them would be the same
-mistake as filtering them.
+Substring match over subject, body and the rendered sender across stored
+threads, computed on demand, case-insensitively. No index: state is capped,
+and a linear sweep over that is acceptable and honest — it is the same sweep
+the inbox listing already pays. It runs on a **request fiber**, never on the
+writer: a search is a read, and a sweep placed on the writer would queue
+every send and every delivery behind whatever someone typed into a box.
+
+Search covers `%forged` messages, and **a result row is drawn from the
+message that matched** rather than from the newest non-forged copy. That
+rule is right for an ordinary listing and wrong for a search: answering a
+search for a forgery with a row labelled `verified`, naming a ship that did
+not write the thing that matched, would be the safety mechanism lying about
+the result it was asked to find.
 
 ## Pagination
 
-The listing takes an offset and a limit and returns a page plus a total, so the
-UI can render controls without fetching everything. On this tree that is a
-bounded listing rather than a slice of a materialised list. Views other than
-Inbox paginate identically.
+The listing takes an `offset` and a `limit` and returns a page plus a
+`total`, so the UI can render controls without fetching everything. Applied
+*after* the view predicate, so a page of the inbox is a page of the inbox
+and not the inbox-shaped subset of the first fifty threads. Views other than
+Inbox paginate identically. An absent `limit` defaults to 50 and is capped
+at `max-page` (200); a `limit` of 0 is an empty page, literally.
+
+Query arguments are parsed with `dim:ag` and not `dem:ag`. `dem` is the
+**dot-grouped** decimal parser — it reads `9.999` and refuses `9999`, and
+`+rush` wants the whole cord consumed — so every offset of four digits or
+more fell back to 0 and handed the client page one while it believed it was
+on page five hundred.
 
 ## Recipient validation
 
-`@p` parsing in the UI before the poke, so a typo is caught at the keystroke
-rather than surfacing as a refusal with no explanation. The nexus keeps its own
-validation — the UI is a convenience, not the boundary.
+`@p` parsing in the UI before the poke, in the composer, in the reply chips
+and in the filter editor, so a typo is caught at the keystroke rather than
+surfacing as a refusal with no explanation. Structural rather than a
+syllable dictionary: the client does not carry the syllable tables, and a
+name that is shaped wrong is the mistake people actually make. The nexus
+keeps its own validation — the UI is a convenience, not the boundary — and a
+half-typed ship is kept out of a *saved draft's* recipient list, or autosave
+would stop the moment someone started typing a name.
+
+## The launcher tile
+
+`/tile.json` and `/icon.svg`, both `%over` rows in `+on-load`, exactly as
+lattice lays its own. The launcher lists only apps that carry a tile;
+without it urmail is installed, running, serving and invisible from the
+grubbery home screen, which reads as "not installed" to everyone but the
+person who types the route by hand. `image` names the app **slug** — the
+name before the first dot in `/apps/urmail.urmail_app` — not the folder.
 
 ## What none of this does
 
@@ -1070,10 +1187,11 @@ Rich text, threading collapse, keyboard shortcuts, contacts, spam
 classification, delivery receipts, Thunderbird integration, and any bridge to
 internet email.
 
-Thunderbird in particular is explicitly not designed for. If it happens it is an
-adapter written against whatever API exists then.
+Thunderbird in particular is explicitly not designed for. If it happens it is
+an adapter written against whatever API exists then.
 
 ---
+
 
 # History
 
