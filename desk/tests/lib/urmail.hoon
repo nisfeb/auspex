@@ -100,13 +100,17 @@
     !>  ~[%forged]
     !>  (turn (verify-chain:urmail keys ~[bad]) |=([* v=verdict:sur] v))
 ::
-::  a tampered life flips the verdict too, since life is inside the digest
-++  test-tampered-life-is-forged
+::  a tampered life looks up a [ship life] pair we hold no key for. That is
+::  indistinguishable, from the verifier's side, from an honest ship whose
+::  life-7 key we simply never fetched - so this is %unverified, not
+::  %forged. Accusing a ship of forgery on a key we never had would be
+::  exactly the false-accusation failure the verdict scheme exists to avoid.
+++  test-tampered-life-is-unverified
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'real' ~2026.1.1 ~)
   =/  bad=msg:sur  a(life.unsigned 7)
   =/  keys  (all-keys ~[~sampel-palnet])
   %+  expect-eq
-    !>  ~[%forged]
+    !>  ~[%unverified]
     !>  (turn (verify-chain:urmail keys ~[bad]) |=([* v=verdict:sur] v))
 ::
 ::  no key available means %unverified, never %forged. Moons land here.
@@ -114,7 +118,7 @@
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'real' ~2026.1.1 ~)
   %+  expect-eq
     !>  ~[%unverified]
-    !>  (turn (verify-chain:urmail (malt ~[[~sampel-palnet ~]]) ~[a]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:urmail (malt ~[[[~sampel-palnet 1] ~]]) ~[a]) |=([* v=verdict:sur] v))
 ::
 ::  merging the same chain twice is a no-op: double delivery must not
 ::  duplicate messages
@@ -166,4 +170,34 @@
   %+  expect-eq
     !>  (sy ~[~sampel-palnet ~palnet-sampel ~marbud-marbud])
     !>  (participants:urmail ~[a b])
+::
+::  a forged copy must not shadow the genuine message. Same id, different
+::  signature: both survive the merge so +verify-chain can label them.
+++  test-merge-keeps-both-copies-on-sig-collision
+  =/  a    (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  bad  a(sig 0x0)
+  %+  expect-eq
+    !>  2
+    !>  (lent (merge:urmail ~[bad] ~[a]))
+::
+::  a peer-supplied chain that repeats a message must not produce a chain
+::  with duplicates. `old` is empty here: this is the first-contact case.
+++  test-merge-dedupes-within-new
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  %+  expect-eq  !>(~[a])  !>((merge:urmail ~ ~[a a]))
+::
+::  the true third-party case: ~marbud holds the forwarder's key but not the
+::  original author's, so one chain yields two different verdicts. Catches a
+::  whole-chain single-verdict bug and an off-by-one in the per-message lookup.
+++  test-mixed-verdicts-per-message
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'from sampel' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  keys  (all-keys ~[~palnet-sampel])
+  %+  expect-eq
+    !>  ~[%unverified %verified]
+    !>  (turn (verify-chain:urmail keys ~[a b]) |=([* v=verdict:sur] v))
 --
