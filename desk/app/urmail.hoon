@@ -267,6 +267,19 @@
 ++  send
   |=  [to=(set ship) subj=@t body=@t prev=(unit msg-id:sur)]
   ^-  (quip card _state)
+  ::  the same bounds +receive enforces, enforced here too. +receive
+  ::  rejects a chain that violates any of them and +send checked none,
+  ::  yet every send ships the whole accumulated chain - so one oversized
+  ::  compose poisons a thread permanently: every later message in it is
+  ::  rejected by every recipient, silently, forever, with nothing in the
+  ::  sender's UI to say why. Failing loudly at compose time is the only
+  ::  point where a human can still do something about it.
+  ~|  %urmail-body-too-long
+  ?>  (lte (met 3 body) max-body)
+  ~|  %urmail-subject-too-long
+  ?>  (lte (met 3 subj) max-subj)
+  ~|  %urmail-too-many-recipients
+  ?>  (lte ~(wyt in to) max-to)
   ::  resolve prev to its containing thread. msg-id is a hash over the
   ::  message's full contents, so it names exactly one message and
   ::  therefore exactly one chain.
@@ -287,6 +300,11 @@
     ?~  tid  ~
     chain:(~(got by threads) u.tid)
   =/  new=chain:sur   (merge:urmail old ~[m])
+  ::  the outgoing chain must clear the same length bound the recipient
+  ::  will apply to it on arrival, or the send is a silent no-op at the
+  ::  far end while looking successful here.
+  ~|  %urmail-chain-too-long
+  ?>  (lte (lent new) max-chain)
   ::  the thread is already resolved: `tid` came from `prev`, which names
   ::  exactly one message and therefore exactly one chain, and a compose is
   ::  by definition the root of a new thread. Re-deriving it with +thread-key

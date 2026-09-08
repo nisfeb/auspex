@@ -118,9 +118,12 @@ export default function ThreadView({
           <p className="whitespace-pre-wrap">{m.body}</p>
         </article>
       ))}
+      {/* max-body in desk/app/urmail.hoon. See Compose.tsx: a guard rail
+          in UTF-16 units, not the authority. */}
       <textarea
         value={reply}
         onChange={(e) => setReply(e.target.value)}
+        maxLength={100000}
         placeholder="Reply"
         className="h-28 w-full rounded border border-neutral-300 p-3"
       />

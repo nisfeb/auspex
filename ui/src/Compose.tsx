@@ -42,11 +42,19 @@ export default function Compose({
         />
         <input
           value={subject} onChange={(e) => setSubject(e.target.value)}
+          maxLength={1000}
           placeholder="Subject"
           className="mb-2 w-full border-b border-neutral-200 py-2 text-sm outline-none"
         />
+        {/* The agent rejects a body over max-body (100,000 bytes) or a
+            subject over max-subj (1,000) at compose time, and every send
+            ships the whole accumulated chain, so an oversized message
+            would otherwise be a poke that just nacks. These caps count
+            UTF-16 units rather than bytes, so they are a guard rail, not
+            the authority - the agent stays the authority. */}
         <textarea
           value={body} onChange={(e) => setBody(e.target.value)}
+          maxLength={100000}
           className="h-56 w-full resize-none py-2 text-sm outline-none"
         />
         <div className="flex items-center gap-3">
