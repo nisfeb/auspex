@@ -44,4 +44,12 @@
   $%  [%send to=(set ship) subj=@t body=@t prev=(unit msg-id)]
       [%read =msg-id]
   ==
+::
++$  state-0
+  $:  %0
+      threads=(map thread-id thread)
+      inbox=(list thread-id)              ::  newest first
+      read=(set msg-id)
+      verdicts=(map [msg-id @ux] verdict)   ::  keyed [id sig], see +verify-chain
+  ==
 --
