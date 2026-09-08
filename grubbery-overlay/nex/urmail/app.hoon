@@ -1404,6 +1404,28 @@
 ::    inside one of them is not culled again: a cull of a road that a
 ::    parent cull already removed is at best waste.
 ::
+::    WRITE FIRST, CULL SECOND, AND THAT ORDER IS THE WHOLE SAFETY
+::    ARGUMENT. Every step here is its own event, so any prefix of them
+::    is a state the ship can be interrupted in - by a crash, or by the
+::    |suspend that every deploy performs. Culling first meant a
+::    re-placement spent one event per copy with NO copy of the message
+::    on disk anywhere, and a migration re-places every message in the
+::    thread at once: the whole thread, signatures included, existed
+::    nowhere for that window. Writing first makes the transient state a
+::    DUPLICATE instead of a HOLE, and a duplicate is invisible - the
+::    old and new paths hold the same grub, and +chain-of dedupes on
+::    [id sig] before anything reads it.
+::
+::    Culling after writing cannot remove what was just written, and
+::    that follows from an arm above rather than from care here. `wn` is
+::    +node-dirs over `want`, and +prefixes yields EVERY non-empty
+::    prefix, so `wn` is prefix-closed. A written path is in `want`, so
+::    each of its directories is in `wn`; a created directory is in `wn`
+::    by construction. `stale` is node-dirs(have) MINUS `wn`, so nothing
+::    in it is a prefix of either, and +cull-slots only ever names paths
+::    that are in `have` and not in `want`. The two sets provably do not
+::    overlap.
+::
 ++  sync-slots
   |=  $:  root=path
           t=thread-id:uc
@@ -1421,13 +1443,12 @@
   =/  puts=(list [pk=path st=stored-msg:uc])
     %+  skip  ~(tap by want)
     |=([pk=path st=stored-msg:uc] =(`st (~(get by have) pk)))
-  ;<  ~  bind:m  (cull-dirs dir (minimal-dirs:uc stale))
-  ;<  ~  bind:m
-    %+  cull-slots  dir
-    %+  skip  ~(tap in ~(key by have))
-    |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
   ;<  ~  bind:m  (ensure-nodes dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
-  (put-slots dir puts)
+  ;<  ~  bind:m  (put-slots dir puts)
+  ;<  ~  bind:m  (cull-dirs dir (minimal-dirs:uc stale))
+  %+  cull-slots  dir
+  %+  skip  ~(tap in ~(key by have))
+  |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
 ::
 ::  recursion by ARM NAME, not by $. A $ with arguments inside a ;<
 ::  continuation cannot find the trap (-find.$.+2).
