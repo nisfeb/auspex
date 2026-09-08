@@ -159,7 +159,7 @@ Two things the rehearsal did **not** prove:
   files needing deleted dependencies. Pre-split tiles is one self-contained file
   that already reads app-advertised `tile.json`. Its notifications bell hits
   nexuses the dist desk deleted: permanently grey on production, invisible on
-  `~feb`. ~60 lines to strip; decision pending.
+  `~feb`. **Decided: the launcher is not modified.** It is upstream code and stays upstream's, bell included. A grey bell on production is accepted over carrying a fork of the launcher.
 
 Still open under this gate: urmail's sources and `root.hoon` row are not
 vendored into the dist desk. The docket's `base` also changed
