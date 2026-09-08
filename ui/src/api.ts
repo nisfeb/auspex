@@ -44,6 +44,10 @@ const api = new Urbit('', '', 'urmail')
 // we serve our own, so it is undefined and must be set explicitly.
 api.ship = import.meta.env.VITE_SHIP ?? 'wex'
 
+// Our own @p, with the sig. Needed in the UI so a reply composer can drop
+// us from its own default recipient list.
+export const ourShip = `~${api.ship}`
+
 // NOTE: the on-peek paths in desk/app/urmail.hoon are `/x/inbox` and
 // `/x/thread/<id>` (care %x, matching the brief). But @urbit/http-api's
 // scry() builds the HTTP request as `/~/scry/{app}{path}.json`, and Eyre's
