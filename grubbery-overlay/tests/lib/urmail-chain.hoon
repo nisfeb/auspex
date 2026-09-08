@@ -506,6 +506,81 @@
     (expect !>(!(file-ok:urmail ['a' (crip (reap 200 'm')) [1 'x']])))
   ==
 ::
+::  name and mime are attacker-supplied and arrive PRE-SIGNED, so a
+::  recipient cannot repair one without destroying the signature. mime is
+::  headed for a Content-Type header, where CR or LF is a header-injection
+::  primitive; name is headed for a filename. Refused at the boundary,
+::  because the boundary is the only place left.
+++  test-text-ok-refuses-control-bytes
+  ::  built with +cat at the byte level rather than as a tape: a literal
+  ::  13 infers as @ud, and @ud does not nest into the @tD a tape wants.
+  =/  cr   `@`13
+  =/  lf   `@`10
+  =/  del  `@`127
+  =/  crlf  (cat 3 'text/plain' (cat 3 (cat 3 cr lf) 'X-Evil: yes'))
+  ::  the same value arriving DELIVERED, where it is already signed and
+  ::  a recipient cannot repair it without destroying the signature.
+  =/  bad=msg:sur
+    %-  forge-with
+    :*  ~sampel-palnet  (sy ~[~palnet-sampel])  's'  'b'  ~2026.1.1  ~
+        ~[['f' 3 crlf 0v1]]
+    ==
+  ;:  weld
+    (expect !>((text-ok:urmail 'text/plain' 128)))
+    (expect !>(!(text-ok:urmail crlf 128)))
+    (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 lf 'b')) 128)))
+    (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 cr 'b')) 128)))
+    (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 del 'b')) 128)))
+    (expect !>(!(fits-attachments:urmail ~[bad] 16)))
+  ==
+::
+::  the eviction order: blobs no stored message mentions, oldest first.
+::  A referenced blob is never evictable however old, and %delete-thread
+::  culls messages without culling their blobs, so the unreferenced set
+::  is not hypothetical.
+++  test-unreferenced-is-oldest-first
+  =/  held=(list blob-row:sur)
+    :~  [0v1 ~2026.1.3 10]
+        [0v2 ~2026.1.1 20]
+        [0v3 ~2026.1.2 30]
+        [0v4 ~2026.1.4 40]
+    ==
+  =/  hs  |=(l=(list blob-row:sur) (turn l |=(r=blob-row:sur h.r)))
+  ;:  weld
+    ::  0v2 and 0v4 are referenced, so 0v3 (older) then 0v1
+    (expect-eq !>(~[0v3 0v1]) !>((hs (unreferenced:urmail held (sy ~[0v2 0v4])))))
+    ::  nothing referenced: strict age order over all four
+    (expect-eq !>(~[0v2 0v3 0v1 0v4]) !>((hs (unreferenced:urmail held ~))))
+    ::  everything referenced: nothing is evictable, however old
+    (expect-eq !>(~) !>((hs (unreferenced:urmail held (sy ~[0v1 0v2 0v3 0v4])))))
+    (expect-eq !>(100) !>((held-bytes:urmail held)))
+  ==
+::
+::  +shed-for is what makes max-blobs a store that can be full rather
+::  than one that jams. It refuses rather than half-evicting when the
+::  store cannot be made to fit: culling blobs and THEN rejecting the
+::  write would lose files for nothing.
+++  test-shed-for-refuses-rather-than-half-evicting
+  =/  held=(list blob-row:sur)
+    ~[[0v1 ~2026.1.1 10] [0v2 ~2026.1.2 20]]
+  ;:  weld
+    ::  fits already: no shedding, and nothing is culled speculatively
+    (expect-eq !>([%.y ~]) !>((shed-for:urmail held (sy ~[0v1 0v2]) 0 0)))
+    ::  over the COUNT bound and nothing is unreferenced: refuse, and
+    ::  refuse with an empty drop list, so a caller that culls first and
+    ::  checks second cannot lose files for nothing
+    (expect-eq !>([%.n ~]) !>((shed-for:urmail held (sy ~[0v1 0v2]) max-blobs:urmail 0)))
+    ::  over the COUNT bound, and shedding the unreferenced one is enough
+    (expect-eq !>([%.y ~[0v2]]) !>((shed-for:urmail held (sy ~[0v1]) (dec max-blobs:urmail) 0)))
+    ::  the BYTE bound binds independently of the count: one blob, well
+    ::  under max-blobs, and still no room
+    %+  expect-eq  !>([%.y ~[0v1]])
+    !>  %^    shed-for:urmail
+            ~[[0v1 ~2026.1.1 max-blob-bytes:urmail]]
+          ~
+        [1 100]
+  ==
+::
 ::  swapping a file breaks the signature. This is the whole reason the
 ::  metadata sits inside `unsigned` rather than beside it: an attacker who
 ::  substitutes an attachment cannot leave the message verifying.

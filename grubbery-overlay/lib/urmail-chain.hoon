@@ -183,6 +183,26 @@
 +$  stored-blob  [%1 =octs at=@da]
 +$  stored-blob-0  [%0 =octs]
 ::
+::  $blob-row: one held blob, as the store's bookkeeping sees it.
+::
++$  blob-row  [h=@uv at=@da size=@ud]
+::
+::  $fetch-req: one in-flight blob fetch, at /fetch/<id>.
+::
+::    A request is a GRUB, and the grub is the fiber's state, which is
+::    what moves the network round trip off the writer. `from` is a hint
+::    about where to look and confers nothing: the hash is what proves
+::    the bytes.
+::
++$  fetch-req  [%0 hash=@uv from=ship]
+::
+::  $blob-in: a fetch fiber's answer, poked back at the writer.
+::
+::    ~ for a miss, so the writer culls the request grub either way and
+::    a failed fetch leaves nothing behind. A wire format, never stored.
+::
++$  blob-in  [%0 id=@ta hash=@uv res=(unit octs)]
+::
 ::  $blob-index: visibility for every blob we hold, at /mail/blobvis.
 ::  Absent from the map means %public, the default.
 ::
@@ -255,6 +275,10 @@
 ++  max-name     256          ::  bytes of filename
 ++  max-mime     128          ::  bytes of content type
 ++  max-blobs    1.000        ::  blobs this ship will store
+::  and the bound the spec actually asked for, which a count is not:
+::  1.000 quarter-megabyte blobs is 256MB, and a store bounded only by
+::  count is not bounded by storage.
+++  max-blob-bytes  33.554.432
 ::
 ::  +blob-hash: the content address of a file's bytes.
 ::
@@ -297,8 +321,28 @@
   ^-  ?
   ?&  (lte p.octs.f max-blob)
       (gte p.octs.f (met 3 q.octs.f))
-      (lte (met 3 name.f) max-name)
-      (lte (met 3 mime.f) max-mime)
+      (text-ok name.f max-name)
+      (text-ok mime.f max-mime)
+  ==
+::
+::  +text-ok: a signed metadata string that is safe to hand onward.
+::
+::    Length is not the only thing wrong a `name` or a `mime` can be.
+::    Both are ATTACKER-SUPPLIED and both arrive PRE-SIGNED, so a
+::    recipient cannot repair one without destroying the signature that
+::    makes the message evidence; the only place to refuse it is the
+::    boundary. `mime` in particular is headed for a Content-Type
+::    header, where a CR or an LF is a header-injection primitive, and
+::    `name` is headed for a filename. Control bytes have no legitimate
+::    use in either, so both are refused here rather than escaped by
+::    whichever consumer remembers to.
+::
+++  text-ok
+  |=  [t=@t m=@ud]
+  ^-  ?
+  ?&  (lte (met 3 t) m)
+      %+  levy  (trip t)
+      |=(c=@tD &((gth c 0x1f) !=(c 0x7f)))
   ==
 ::
 ++  files-ok
@@ -327,8 +371,8 @@
       %+  levy  as
       |=  a=attachment
       ?&  (lte size.a max-blob)
-          (lte (met 3 name.a) max-name)
-          (lte (met 3 mime.a) max-mime)
+          (text-ok name.a max-name)
+          (text-ok mime.a max-mime)
       ==
   ==
 ::
@@ -340,6 +384,66 @@
   %-  ~(gas in *(set @uv))
   %-  zing
   (turn c |=(m=msg (turn attachments.unsigned.m |=(a=attachment hash.a))))
+::
+::  +unreferenced: which held blobs no stored message mentions, oldest
+::  first. The eviction order.
+::
+::    This is the other half of +chain-hashes, and the pair is what makes
+::    max-blobs a store that can be full rather than a store that jams.
+::    A blob referenced by any stored message is never evicted, however
+::    old; an unreferenced one is a file whose every message has been
+::    deleted, and %delete-thread culls messages without culling their
+::    blobs, so unreferenced blobs genuinely accumulate.
+::
+::    Ties on `at` fall back to the hash so the order is total and two
+::    runs shed the same blob.
+::
+++  unreferenced
+  |=  [held=(list blob-row) refs=(set @uv)]
+  ^-  (list blob-row)
+  %+  sort  (skip held |=(r=blob-row (~(has in refs) h.r)))
+  |=  [a=blob-row b=blob-row]
+  ?.  =(at.a at.b)  (lth at.a at.b)
+  (lth h.a h.b)
+::
+::  +held-bytes: what the store currently weighs.
+::
+++  held-bytes
+  |=  held=(list blob-row)
+  ^-  @ud
+  (roll (turn held |=(r=blob-row size.r)) add)
+::
+::  +shed-for: which blobs to cull so `need` more, weighing `bytes`,
+::  will fit. ~ when no shedding is needed; a list SHORTER than required
+::  when the store cannot be made to fit, which the caller must treat as
+::  a refusal rather than partially evicting for nothing.
+::
+::    Takes both bounds at once because they can bind independently: a
+::    store can be under the count and over the bytes, or the reverse.
+::
+++  shed-for
+  |=  $:  held=(list blob-row)
+          refs=(set @uv)
+          need=@ud
+          bytes=@ud
+      ==
+  ^-  [ok=? drop=(list @uv)]
+  =/  cnt=@ud    (add (lent held) need)
+  =/  weight=@ud  (add (held-bytes held) bytes)
+  ?:  &((lte cnt max-blobs) (lte weight max-blob-bytes))
+    [& ~]
+  =/  dead=(list blob-row)  (unreferenced held refs)
+  =|  drop=(list @uv)
+  |-  ^-  [ok=? drop=(list @uv)]
+  ?:  &((lte cnt max-blobs) (lte weight max-blob-bytes))
+    [& (flop drop)]
+  ?~  dead  [| ~]
+  %=  $
+    dead    t.dead
+    cnt     (dec cnt)
+    weight  (sub weight (min weight size.i.dead))
+    drop    [h.i.dead drop]
+  ==
 ::
 ::  +blob-spur: where a blob is bound in this ship's remote-scry farm.
 ::
