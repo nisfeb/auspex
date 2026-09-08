@@ -175,43 +175,6 @@
   ?.  =(1 ~(wyt in root-ids))  ~|(%urmail-no-unique-root !!)
   (snag 0 ~(tap in root-ids))
 ::
-::  +prune: enforce the per-id copy bound by SHEDDING, never by rejecting.
-::
-::    Rejecting the merged result is a censorship primitive: an attacker who
-::    lands max-copies forged copies of a chain's genuine root at a ship
-::    that has never seen the thread mints that thread under the genuine
-::    (content-derived) id, holding it full of junk. When the real chain
-::    later arrives from any participant, the count is max-copies+1, a
-::    reject would nack it, and because every +send ships the whole chain,
-::    every subsequent message in that thread would be rejected forever -
-::    for the cost of a few junk-signed messages. It also reinstates, at
-::    the state layer, precisely the shadowing +merge exists to prevent:
-::    junk arriving first would permanently exclude the genuine copy.
-::
-::    Shed the excess instead, and never shed a %verified copy: +merge is
-::    keyless and must keep everything it's handed, but the agent knows the
-::    verdicts by the time it prunes, so it can enforce anti-shadowing with
-::    that knowledge instead of by raw arrival order.
-::
-++  prune
-  |=  [c=chain:sur vs=(map [msg-id:sur @ux] verdict:sur)]
-  ^-  chain:sur
-  =/  groups=(jar msg-id:sur msg:sur)
-    %+  roll  c
-    |=  [m=msg:sur acc=(jar msg-id:sur msg:sur)]
-    (~(add ja acc) (id:urmail unsigned.m) m)
-  =/  kept=chain:sur
-    %-  zing
-    %+  turn  ~(tap by groups)
-    |=  [i=msg-id:sur ms=(list msg:sur)]
-    ^-  chain:sur
-    ?:  (lte (lent ms) max-copies)  ms
-    =/  ver  |=(m=msg:sur =(%verified (~(gut by vs) [i sig.m] %unverified)))
-    =/  good  (scag max-copies (skim ms ver))
-    (weld good (scag (sub max-copies (lent good)) (skip ms ver)))
-  ::  re-sort: grouping by id destroyed +merge's ordering
-  (merge:urmail ~ kept)
-::
 ::  not `=,  enjs:format`: composing enjs:format into lexical scope breaks
 ::  type inference for `(scot %p ...)` used inside any `|=` gate nested
 ::  within that scope on this ship's Hoon (verified live on both ~wex and
@@ -402,7 +365,7 @@
     |=  [[k=[msg-id:sur @ux] v=verdict:sur] acc=_verdicts]
     ?:  ?=(?(%verified %forged) (~(gut by acc) k %unverified))  acc
     (~(put by acc) k v)
-  =/  pruned=chain:sur  (prune new vs2)
+  =/  pruned=chain:sur  (prune:urmail new vs2 max-copies)
   =.  threads
     %+  ~(put by threads)  rid
     [pruned (participants:urmail pruned) (last-sent:urmail pruned)]

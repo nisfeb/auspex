@@ -225,4 +225,68 @@
   %+  expect-eq
     !>  ~[[[(id:urmail unsigned.a) sig.a] %verified] [[(id:urmail unsigned.a) 0x0] %forged]]
     !>  (verify-chain:urmail keys ~[a bad])
+::
+::  +prune sheds the excess instead of rejecting. Five copies of one id
+::  against max-copies=4 must produce a four-message chain, not a crash and
+::  not the whole five - rejecting here is the censorship primitive the
+::  design's trust-boundary section forbids.
+++  test-prune-sheds-excess-rather-than-rejecting
+  =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
+  =/  vs  (malt (verify-chain:urmail (all-keys ~[~sampel-palnet]) cs))
+  %+  expect-eq  !>(4)  !>((lent (prune:urmail cs vs 4)))
+::
+::  a %verified copy is never shed, however many forged copies crowd it and
+::  whatever order they arrive in. The forged copies are placed FIRST here,
+::  so an arrival-ordered fill would keep them and drop the genuine one.
+++  test-prune-never-sheds-a-verified
+  =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
+  =/  vs  (malt (verify-chain:urmail (all-keys ~[~sampel-palnet]) cs))
+  %+  expect-eq
+    !>  ~[a]
+    !>  (prune:urmail cs vs 1)
+::
+::  the fill bucket ranks %unverified above %forged. This is not a nicety:
+::  every moon and comet message is %unverified in v1, so an unranked fill
+::  lets four junk-signature copies evict the one genuine copy of a moon's
+::  message and leave the user holding only forged copies of something that
+::  was never forged. The forged copies come first in the list, so arbitrary
+::  order keeps them.
+++  test-prune-prefers-unverified-over-forged
+  =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  i   (id:urmail unsigned.a)
+  =/  vs=(map [msg-id:sur @ux] verdict:sur)
+    %-  malt
+    ^-  (list [[msg-id:sur @ux] verdict:sur])
+    :~  [[i 0x2] %forged]
+        [[i 0x3] %forged]
+        [[i 0x4] %forged]
+        [[i 0x1] %unverified]
+    ==
+  %+  expect-eq
+    !>  ~[a(sig 0x1)]
+    !>  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+::
+::  the whole ranking in one shot: %verified, then %unverified, then
+::  %forged. With room for two, the survivors are the verified copy and the
+::  unverified one, never a forged one.
+++  test-prune-ranks-verified-then-unverified-then-forged
+  =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  i   (id:urmail unsigned.a)
+  =/  vs=(map [msg-id:sur @ux] verdict:sur)
+    %-  malt
+    ^-  (list [[msg-id:sur @ux] verdict:sur])
+    :~  [[i 0x2] %forged]
+        [[i 0x3] %forged]
+        [[i 0x4] %forged]
+        [[i 0x1] %unverified]
+        [[i sig.a] %verified]
+    ==
+  =/  kept  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
+  ;:  weld
+    (expect-eq !>(2) !>((lent kept)))
+    (expect !>((lien kept |=(m=msg:sur =(sig.m sig.a)))))
+    (expect !>((lien kept |=(m=msg:sur =(sig.m 0x1)))))
+  ==
 --

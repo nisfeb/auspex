@@ -130,4 +130,57 @@
   ?:  (verify-with u.u.k sig.m (digest unsigned.m))
     %verified
   %forged
+::
+::  +prune: enforce the per-id copy bound by SHEDDING, never by rejecting.
+::
+::    Rejecting the merged result is a censorship primitive: an attacker who
+::    lands max-copies forged copies of a chain's genuine root at a ship
+::    that has never seen the thread mints that thread under the genuine
+::    (content-derived) id, holding it full of junk. When the real chain
+::    later arrives from any participant, the count is max-copies+1, a
+::    reject would nack it, and because every +send ships the whole chain,
+::    every subsequent message in that thread would be rejected forever -
+::    for the cost of a few junk-signed messages. It also reinstates, at
+::    the state layer, precisely the shadowing +merge exists to prevent:
+::    junk arriving first would permanently exclude the genuine copy.
+::
+::    Shed the excess instead, in strict verdict order: %verified first,
+::    then %unverified, then %forged. +merge is keyless and must keep
+::    everything it's handed, but the caller knows the verdicts by the time
+::    it prunes, so anti-shadowing is enforced with that knowledge rather
+::    than by raw arrival order.
+::
+::    The %unverified rank is not a nicety. EVERY moon and comet message is
+::    %unverified in v1 - an entire class of sender, not an edge case - so
+::    an unranked fill lets max-copies junk-signature copies evict the one
+::    genuine copy of a moon's message, leaving the user holding only
+::    forged copies of a message that was never forged. Because every send
+::    re-ships the whole accumulated chain, that corrupted chain is then
+::    what gets forwarded onward.
+::
+::    Pure: `vs` and `max-copies` arrive as arguments so this is testable
+::    without an agent.
+::
+++  prune
+  |=  [c=chain:sur vs=(map [msg-id:sur @ux] verdict:sur) max-copies=@ud]
+  ^-  chain:sur
+  =/  groups=(jar msg-id:sur msg:sur)
+    %+  roll  c
+    |=  [m=msg:sur acc=(jar msg-id:sur msg:sur)]
+    (~(add ja acc) (id unsigned.m) m)
+  =/  kept=chain:sur
+    %-  zing
+    %+  turn  ~(tap by groups)
+    |=  [i=msg-id:sur ms=(list msg:sur)]
+    ^-  chain:sur
+    ?:  (lte (lent ms) max-copies)  ms
+    =/  vd    |=(m=msg:sur (~(gut by vs) [i sig.m] %unverified))
+    =/  good  (skim ms |=(m=msg:sur =(%verified (vd m))))
+    =/  fill
+      %+  weld  (skim ms |=(m=msg:sur =(%unverified (vd m))))
+                (skim ms |=(m=msg:sur =(%forged (vd m))))
+    =/  keep  (scag max-copies good)
+    (weld keep (scag (sub max-copies (lent keep)) fill))
+  ::  re-sort: grouping by id destroyed +merge's ordering
+  (merge ~ kept)
 --
