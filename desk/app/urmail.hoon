@@ -150,54 +150,6 @@
   %+  turn  ~(tap in (signers:urmail c))
   |=([who=ship lyf=@ud] [[who lyf] (peer-pass who lyf)])
 ::
-::  +thread-key: which thread a chain belongs to.
-::
-::    Never derived from the incoming list's order or from `sent`: +root
-::    returns the head as supplied, and an attacker controls both the order
-::    and every `sent` field, so either lets one poke duplicate a conversation
-::    or migrate an established thread onto a new id. An established thread's
-::    identity is immutable once set; a first-contact chain is anchored on the
-::    message with prev=~, which is signed content and cannot be forged.
-::
-::    The root is deduped by id, not counted by message: a hostile relay can
-::    forward the genuine root alongside a copy with a tampered signature (the
-::    exact shadowing case +merge exists to preserve, see +merge's own doc),
-::    and both copies carry prev=~ since prev is part of the signed payload
-::    they share. Counting messages instead of distinct ids would reject that
-::    otherwise-legitimate first contact outright, which is a self-inflicted
-::    denial of the very chain this arm exists to accept.
-::
-::    Not fixing, recorded rather than dropped: the `hits` scan below is
-::    O(total stored messages) with a `sham` per message, on the only
-::    externally reachable poke. Bounded by max-threads/max-chain, but
-::    large. Upgrade path: a (map [msg-id @ux] thread-id) index in state.
-::    This is a performance concern, not an authenticity one.
-::
-++  thread-key
-  |=  c=chain:sur
-  ^-  thread-id:sur
-  =/  keys
-    (~(gas in *(set [msg-id:sur @ux])) (turn c |=(m=msg:sur [(id:urmail unsigned.m) sig.m])))
-  =/  hits
-    %+  skim  ~(tap by threads)
-    |=  [t=thread-id:sur th=thread:sur]
-    %+  lien  chain.th
-    |=(o=msg:sur (~(has in keys) [(id:urmail unsigned.o) sig.o]))
-  ::  not fixing: a chain touching two existing threads conflates them here,
-  ::  and p.i.hits picks whichever comes first in map-traversal order. This
-  ::  predates +thread-key (the same pattern already existed in +send's own
-  ::  `hits` lookup) and is equally reachable before and after this fix.
-  ::  Upgrade path: reject chains whose keys match more than one thread,
-  ::  rather than silently picking one. Also availability/correctness of
-  ::  filing, not authenticity - a wrongly-filed message is still exactly
-  ::  as verified or forged as it was.
-  ?^  hits  p.i.hits
-  =/  roots  (skim c |=(m=msg:sur ?=(~ prev.unsigned.m)))
-  =/  root-ids
-    (~(gas in *(set msg-id:sur)) (turn roots |=(m=msg:sur (id:urmail unsigned.m))))
-  ?.  =(1 ~(wyt in root-ids))  ~|(%urmail-no-unique-root !!)
-  (snag 0 ~(tap in root-ids))
-::
 ::  not `=,  enjs:format`: composing enjs:format into lexical scope breaks
 ::  type inference for `(scot %p ...)` used inside any `|=` gate nested
 ::  within that scope on this ship's Hoon (verified live on both ~wex and
@@ -327,7 +279,7 @@
   ::  will apply to it on arrival, or the send is a silent no-op at the
   ::  far end while looking successful here.
   ~|  %urmail-chain-too-long
-  ?>  (lte (lent new) max-chain)
+  ?>  (fits-length:urmail new max-chain)
   ::  the thread is already resolved: `tid` came from `prev`, which names
   ::  exactly one message and therefore exactly one chain, and a compose is
   ::  by definition the root of a new thread. Re-deriving it with +thread-key
@@ -370,21 +322,22 @@
   ::  reject rather than truncate. A chain that violates a limit is not
   ::  partially trustworthy. This governs the INCOMING poke only - once a
   ::  chain has been verified and merged, excess state capacity is a
-  ::  different question with a different answer; see +prune below.
+  ::  different question with a different answer; see +prune in
+  ::  lib/urmail.hoon.
   ~|  %urmail-chain-too-long
-  ?>  (lte (lent c) max-chain)
+  ?>  (fits-length:urmail c max-chain)
   ~|  %urmail-body-too-long
-  ?>  %-  levy  :_  |=(m=msg:sur (lte (met 3 body.unsigned.m) max-body))  c
+  ?>  (fits-bodies:urmail c max-body)
   ~|  %urmail-subject-too-long
-  ?>  %-  levy  :_  |=(m=msg:sur (lte (met 3 subj.unsigned.m) max-subj))  c
+  ?>  (fits-subjects:urmail c max-subj)
   ~|  %urmail-too-many-recipients
-  ?>  %-  levy  :_  |=(m=msg:sur (lte ~(wyt in to.unsigned.m) max-to))    c
+  ?>  (fits-recipients:urmail c max-to)
   ::  verify before storing anything
   =/  vs  (verify-chain:urmail (key-map c) c)
   ::  thread identity is never (root:urmail c) - see +thread-key. `c` is
   ::  attacker-controlled and unsorted at this point, so the head-as-supplied
   ::  is not a stable identity.
-  =/  rid=thread-id:sur  (thread-key c)
+  =/  rid=thread-id:sur  (thread-key:urmail threads c)
   =/  old=thread:sur
     (~(gut by threads) rid *thread:sur)
   =/  new=chain:sur  (merge:urmail chain.old c)
@@ -397,9 +350,8 @@
   ::  it - unforgeable ids don't stop an authorized signer from minting
   ::  many of them. Real fix is a per-source quota; not attempted here.
   ::  Not fixed this round: availability, not authenticity.
-  =/  ids  (~(gas in *(set msg-id:sur)) (turn new |=(m=msg:sur (id:urmail unsigned.m))))
   ~|  %urmail-too-many-messages
-  ?>  (lte ~(wyt in ids) max-chain)
+  ?>  (lte (distinct-ids:urmail new) max-chain)
   ::  the per-thread caps above bound one thread; nothing else bounds how
   ::  many threads this ship will hold, and %urmail-chain is the only
   ::  externally reachable poke, so a fresh single-message chain per poke
@@ -412,23 +364,13 @@
   ::  accepted for v1, same rationale as the distinct-id limitation above.
   ~|  %urmail-too-many-threads
   ?>  ?|((~(has by threads) rid) (lth ~(wyt by threads) max-threads))
-  ::  a verdict is keyed [id sig], so the two copies of one id that +merge
-  ::  deliberately keeps are labeled separately and never collide here.
-  ::  %unverified freezes only against another %unverified: it is not a
-  ::  finding about the signature, only that the key was absent from our
-  ::  snapshot at that instant, and a later poke may arrive after we've
-  ::  fetched the key. %verified and %forged are definitive for a fixed
-  ::  [id sig] - the digest and the key are both fixed - so they can never
-  ::  disagree with each other, and freezing only those two is safe.
+  ::  fold this poke's verdicts into the stored map. See +freeze for why
+  ::  %unverified is the only verdict a later poke may overwrite.
   ::
-  ::    Folded in before +prune, not after: +prune needs the verdict for
-  ::    every message in `new`, including ones already stored from a
-  ::    previous poke, not just the ones this poke happened to verify.
-  =/  vs2=_verdicts
-    %+  roll  vs
-    |=  [[k=[msg-id:sur @ux] v=verdict:sur] acc=_verdicts]
-    ?:  ?=(?(%verified %forged) (~(gut by acc) k %unverified))  acc
-    (~(put by acc) k v)
+  ::  Folded in before +prune, not after: +prune needs the verdict for
+  ::  every message in `new`, including ones already stored from a previous
+  ::  poke, not just the ones this poke happened to verify.
+  =/  vs2  (freeze:urmail verdicts vs)
   =/  pruned=chain:sur  (prune:urmail new vs2 max-copies)
   =.  threads
     %+  ~(put by threads)  rid

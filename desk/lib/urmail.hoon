@@ -183,4 +183,106 @@
     (weld keep (scag (sub max-copies (lent keep)) fill))
   ::  re-sort: grouping by id destroyed +merge's ordering
   (merge ~ kept)
+::
+::  +thread-key: which thread a chain belongs to.
+::
+::    Never derived from the incoming list's order or from `sent`: +root
+::    returns the head as supplied, and an attacker controls both the order
+::    and every `sent` field, so either lets one poke duplicate a conversation
+::    or migrate an established thread onto a new id. An established thread's
+::    identity is immutable once set; a first-contact chain is anchored on the
+::    message with prev=~, which is signed content and cannot be forged.
+::
+::    The root is deduped by id, not counted by message: a hostile relay can
+::    forward the genuine root alongside a copy with a tampered signature (the
+::    exact shadowing case +merge exists to preserve, see +merge's own doc),
+::    and both copies carry prev=~ since prev is part of the signed payload
+::    they share. Counting messages instead of distinct ids would reject that
+::    otherwise-legitimate first contact outright, which is a self-inflicted
+::    denial of the very chain this arm exists to accept.
+::
+::    Pure: `threads` arrives as an argument rather than off the agent's
+::    state, so thread identity - the property an attacker most wants to
+::    move - is testable without an agent.
+::
+::    Not fixing, recorded rather than dropped: the `hits` scan below is
+::    O(total stored messages) with a `sham` per message, on the only
+::    externally reachable poke. Bounded by max-threads/max-chain, but
+::    large. Upgrade path: a (map [msg-id @ux] thread-id) index in state.
+::    This is a performance concern, not an authenticity one.
+::
+++  thread-key
+  |=  [threads=(map thread-id:sur thread:sur) c=chain:sur]
+  ^-  thread-id:sur
+  =/  keys
+    (~(gas in *(set [msg-id:sur @ux])) (turn c |=(m=msg:sur [(id unsigned.m) sig.m])))
+  =/  hits
+    %+  skim  ~(tap by threads)
+    |=  [t=thread-id:sur th=thread:sur]
+    %+  lien  chain.th
+    |=(o=msg:sur (~(has in keys) [(id unsigned.o) sig.o]))
+  ::  not fixing: a chain touching two existing threads conflates them here,
+  ::  and p.i.hits picks whichever comes first in map-traversal order. This
+  ::  predates +thread-key (the same pattern already existed in +send's own
+  ::  `hits` lookup) and is equally reachable before and after this fix.
+  ::  Upgrade path: reject chains whose keys match more than one thread,
+  ::  rather than silently picking one. Also availability/correctness of
+  ::  filing, not authenticity - a wrongly-filed message is still exactly
+  ::  as verified or forged as it was.
+  ?^  hits  p.i.hits
+  =/  roots  (skim c |=(m=msg:sur ?=(~ prev.unsigned.m)))
+  =/  root-ids
+    (~(gas in *(set msg-id:sur)) (turn roots |=(m=msg:sur (id unsigned.m))))
+  ?.  =(1 ~(wyt in root-ids))  ~|(%urmail-no-unique-root !!)
+  (snag 0 ~(tap in root-ids))
+::
+::  +freeze: fold new verdicts into the stored map, definitively-labeled
+::  entries first.
+::
+::    %unverified freezes only against another %unverified: it is not a
+::    finding about the signature, only that the key was absent from our
+::    snapshot at that instant, and a later poke may arrive after we have
+::    fetched the key. %verified and %forged are definitive for a fixed
+::    [id sig] - the digest and the key are both fixed - so they can never
+::    disagree with each other, and freezing only those two is safe.
+::
+::    Keyed [id sig], so the two copies of one id that +merge deliberately
+::    keeps are labeled separately and never collide.
+::
+++  freeze
+  |=  $:  old=(map [msg-id:sur @ux] verdict:sur)
+          new=(list [[msg-id:sur @ux] verdict:sur])
+      ==
+  ^-  (map [msg-id:sur @ux] verdict:sur)
+  =/  acc  old
+  |-  ^-  (map [msg-id:sur @ux] verdict:sur)
+  ?~  new  acc
+  ?:  ?=(?(%verified %forged) (~(gut by acc) -.i.new %unverified))
+    $(new t.new)
+  $(new t.new, acc (~(put by acc) -.i.new +.i.new))
+::
+::  the input caps, as predicates. The agent wraps each in its own tall ~|
+::  and ?>, since the label is what tells a nacked poke apart from any
+::  other crash; keeping the arithmetic here keeps it testable.
+::
+++  fits-length
+  |=([c=chain:sur m=@ud] (lte (lent c) m))
+::
+++  fits-bodies
+  |=([c=chain:sur m=@ud] (levy c |=(x=msg:sur (lte (met 3 body.unsigned.x) m))))
+::
+++  fits-subjects
+  |=([c=chain:sur m=@ud] (levy c |=(x=msg:sur (lte (met 3 subj.unsigned.x) m))))
+::
+++  fits-recipients
+  |=([c=chain:sur m=@ud] (levy c |=(x=msg:sur (lte ~(wyt in to.unsigned.x) m))))
+::
+::  distinct message ids, not messages: +merge deliberately keeps several
+::  signed copies of one id, and the state-capacity bound counts messages
+::  the user could actually read, not copies of them.
+::
+++  distinct-ids
+  |=  c=chain:sur
+  ^-  @ud
+  ~(wyt in (~(gas in *(set msg-id:sur)) (turn c |=(m=msg:sur (id unsigned.m)))))
 --

@@ -306,4 +306,125 @@
     (expect !>((lien two |=(m=msg:sur =(sig.m sig.a)))))
     (expect !>((lien two |=(m=msg:sur =(sig.m 0x1)))))
   ==
+::
+::  a thread's identity comes from CONTENT, never from the order of the
+::  list a poke happened to arrive in. An attacker controls that order, so
+::  reading the head-as-supplied would let one poke mint a duplicate of an
+::  existing conversation under a fresh id. The root here is deliberately
+::  last in the list.
+++  test-thread-key-from-content-not-list-order
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  (id:urmail unsigned.a)
+    !>  (thread-key:urmail ~ ~[b a])
+::
+::  nor from `sent`, which is a signed field the sender chooses freely. A
+::  reply backdated before the root must still resolve to the root.
+++  test-thread-key-ignores-sent
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.9.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'backdated'
+        ~2020.1.1  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  (id:urmail unsigned.a)
+    !>  (thread-key:urmail ~ ~[b a])
+::
+::  once a thread exists, its id is immutable. A poke that carries one
+::  message we already hold plus a brand-new prev=~ message - the shape
+::  that would otherwise migrate an established conversation onto an
+::  attacker-chosen id - files into the thread we already have.
+++  test-thread-key-established-thread-is-immutable
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  evil
+    (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'hi' 'new root' ~2020.1.1 ~)
+  =/  tid  (id:urmail unsigned.a)
+  =/  stored=(map thread-id:sur thread:sur)
+    (malt ~[[tid `thread:sur`[~[a] (participants:urmail ~[a]) ~2026.1.1]]])
+  ;:  weld
+    (expect-eq !>(tid) !>((thread-key:urmail stored ~[evil a])))
+    (expect-eq !>(tid) !>((thread-key:urmail stored ~[a evil])))
+    ::  and the new root does NOT become the id
+    (expect !>(!=((id:urmail unsigned.evil) (thread-key:urmail stored ~[evil a]))))
+  ==
+::
+::  a forged copy of the root carries the same prev=~ and the same id as
+::  the genuine one, because prev is part of the signed payload they
+::  share. First contact with both copies must still resolve, not crash on
+::  "no unique root" - rejecting there would deny the very chain the
+::  anti-shadowing design exists to accept.
+++  test-thread-key-tolerates-a-shadowed-root
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  %+  expect-eq
+    !>  (id:urmail unsigned.a)
+    !>  (thread-key:urmail ~ ~[a a(sig 0x0)])
+::
+::  +freeze: a definitive verdict is never overwritten. %verified and
+::  %forged are both definitive for a fixed [id sig] - digest and key are
+::  both fixed - so a later poke claiming otherwise is either noise or an
+::  attack, and either way must not win.
+++  test-freeze-keeps-a-definitive-verdict
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  k  [(id:urmail unsigned.a) sig.a]
+  =/  old=(map [msg-id:sur @ux] verdict:sur)  (malt ~[[k `verdict:sur`%verified]])
+  ;:  weld
+    %+  expect-eq  !>(`verdict:sur`%verified)
+      !>  (~(got by (freeze:urmail old ~[[k %unverified]])) k)
+    %+  expect-eq  !>(`verdict:sur`%verified)
+      !>  (~(got by (freeze:urmail old ~[[k %forged]])) k)
+  ==
+::
+::  but %unverified is not a finding about the signature - only that the
+::  key was absent from our snapshot at that instant - so a later poke
+::  arriving after we have fetched the key must be able to upgrade it.
+++  test-freeze-upgrades-an-unverified
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  k  [(id:urmail unsigned.a) sig.a]
+  =/  old=(map [msg-id:sur @ux] verdict:sur)  (malt ~[[k `verdict:sur`%unverified]])
+  ;:  weld
+    %+  expect-eq  !>(`verdict:sur`%verified)
+      !>  (~(got by (freeze:urmail old ~[[k %verified]])) k)
+    %+  expect-eq  !>(`verdict:sur`%forged)
+      !>  (~(got by (freeze:urmail old ~[[k %forged]])) k)
+  ==
+::
+::  the input caps reject rather than truncate: a chain that violates one
+::  is not partially trustworthy. Each is a whole-chain predicate, so one
+::  bad message condemns the poke.
+++  test-input-caps-reject-on-any-message
+  =/  ok    (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  big   ok(body.unsigned (crip (reap 200 'x')))
+  =/  loud  ok(subj.unsigned (crip (reap 200 'x')))
+  =/  many  ok(to.unsigned (sy ~[~sampel-palnet ~palnet-sampel ~marbud-marbud]))
+  ;:  weld
+    (expect !>((fits-length:urmail ~[ok ok] 2)))
+    (expect !>(!(fits-length:urmail ~[ok ok] 1)))
+    (expect !>((fits-bodies:urmail ~[ok] 100)))
+    (expect !>(!(fits-bodies:urmail ~[ok big] 100)))
+    (expect !>((fits-subjects:urmail ~[ok] 100)))
+    (expect !>(!(fits-subjects:urmail ~[ok loud] 100)))
+    (expect !>((fits-recipients:urmail ~[ok] 2)))
+    (expect !>(!(fits-recipients:urmail ~[ok many] 2)))
+  ==
+::
+::  the state-capacity bound counts distinct message ids, not messages:
+::  +merge deliberately keeps several signed copies of one id, and a user
+::  can only read one of them. Counting copies would let four junk
+::  signatures consume four slots of a thread's budget.
+++  test-distinct-ids-counts-ids-not-copies
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  2
+    !>  (distinct-ids:urmail ~[a a(sig 0x1) a(sig 0x2) b])
 --
