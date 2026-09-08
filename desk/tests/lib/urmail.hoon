@@ -40,4 +40,21 @@
     (expect !>(!=((digest:urmail u) (sham u))))
     (expect !>(!=((digest:urmail u) (shaf %ames (sham u)))))
   ==
+::
+::  a msg-id is a hash over every signed field, so changing any field
+::  changes the id. This is what lets two ships agree on a thread id
+::  without coordinating.
+++  test-msg-id-covers-every-field
+  =/  base=unsigned:sur
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~]
+  =/  d  (digest:urmail base)
+  ;:  weld
+    (expect !>(!=(d (digest:urmail base(body 'other')))))
+    (expect !>(!=(d (digest:urmail base(subj 'other')))))
+    (expect !>(!=(d (digest:urmail base(life 2)))))
+    (expect !>(!=(d (digest:urmail base(from ~palnet-sampel)))))
+    (expect !>(!=(d (digest:urmail base(sent ~2026.1.2)))))
+    (expect !>(!=(d (digest:urmail base(to (sy ~[~sampel-palnet]))))))
+    (expect !>(!=(d (digest:urmail base(prev `0v1)))))
+  ==
 --
