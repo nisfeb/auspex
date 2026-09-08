@@ -15,6 +15,11 @@ import { send } from './api'
 export interface ForwardIntent {
   prev: string
   subject: string
+  // DISTINCT MESSAGES ON THE PATH from the thread root down to `prev`,
+  // which is exactly what the nexus ships. Not the thread's message
+  // count, which would include sibling branches that no longer travel,
+  // and not the stored-copy count, which counts one message several
+  // times when copies differ in signature.
   count: number
 }
 
@@ -60,19 +65,29 @@ export default function Compose({
       </header>
       <div className="p-4">
         {/* Forwarding transfers evidence rather than quoting text: the
-            recipient gets every message, each still signed by whoever
-            wrote it, and can check those signatures without ever having
-            spoken to those ships. That is the feature — and it is also
-            the whole conversation leaving the room, so it is stated
-            before the To field rather than after the Send button. */}
+            recipient gets every message on the path, each still signed
+            by whoever wrote it, and can check those signatures without
+            ever having spoken to those ships. That is the feature — and
+            it is also part of the conversation leaving the room, so it
+            is stated before the To field rather than after the Send
+            button.
+
+            What travels is the ROOT-TO-HERE PATH, not the thread. A
+            thread branches wherever two people reply to the same
+            message, and sibling branches do not travel — so this counts
+            the messages on the path and says so, rather than counting
+            the thread. `count` is distinct messages, never stored
+            copies: several copies of one message differing in signature
+            are one message here. */}
         {forward && (
           <p className="mb-3 rounded bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200">
-            This sends the <strong>entire signed chain</strong> —
-            {' '}all {forward.count} {forward.count === 1 ? 'message' : 'messages'} in
-            {' '}“{forward.subject}”, not just the latest one. Whoever you name below
-            can read every message in it and can verify for themselves who wrote each
-            one. Nobody is on this list yet; add only the people who should get
-            the whole history.
+            This sends the <strong>signed chain leading to this message</strong> —
+            {' '}the {forward.count} {forward.count === 1 ? 'message' : 'messages'} from
+            the start of “{forward.subject}” down to it, not just the latest one.
+            Other branches of the conversation do not travel. Whoever you name below
+            can read every message on that path and can verify for themselves who
+            wrote each one. Nobody is on this list yet; add only the people who
+            should get that history.
           </p>
         )}
         <input

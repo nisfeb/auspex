@@ -193,7 +193,6 @@
         ;<  ~  bind:m  (grant-public root)
         ;<  ~  bind:m  (republish-all root)
         ;<  ~  bind:m  (migrate-flat root)
-        ;<  ~  bind:m  (note-unreadable root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ::  +apply answers whether the tree actually changed, and that
@@ -747,7 +746,7 @@
   ^-  form:m
   ?-  -.a
     %send           (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
-    %read           (do-read root msg-id.a)
+    %read           (do-read root ids.a)
     %delete-thread  (do-delete root thread-id.a)
     %fetch-blob     (do-fetch-blob root hash.a from.a)
     %restrict-blob  (do-restrict root hash.a ships.a)
@@ -872,7 +871,7 @@
   ::  actually on disk.
   =/  place=(list msg-id:uc)  (place-of:uc (merge:uc full ~[mg]) (id:uc u))
   ;<  ~  bind:m  (write-msg root rid place mg %verified)
-  ;<  ~  bind:m  (mark-read root rid (id:uc u))
+  ;<  ~  bind:m  (mark-read root rid (sy ~[(id:uc u)]))
   ::  record who we blind-copied, LOCALLY, so our own Sent view is
   ::  accurate. This never travels and is not part of any signature.
   ;<  ~  bind:m  (record-bcc root rid (id:uc u) bcc)
@@ -895,17 +894,49 @@
   ::  pointless refetch of a thread it already has.
   (pure:m |)
 ::
+::  +do-read: mark a SET of messages read, in one pass.
+::
+::    Opening a thread marks every unread message in it, so this used to
+::    be one poke, one writer event and one FULL MAILBOX SCAN per
+::    message - forty messages, forty serialised scans on the ship's
+::    single serialisation point for mail, to record something no peer
+::    will ever see. One scan now covers the whole set: the mailbox is
+::    read once, every id is placed against the thread that holds it,
+::    and each affected thread's meta is rewritten once however many of
+::    its messages were named.
+::
+::    Ids naming nothing are skipped rather than refused. A set is not a
+::    single request that can be wrong; it is a client reporting what it
+::    just rendered, and a thread deleted in another tab between render
+::    and poke would otherwise make the whole batch fail.
+::
 ++  do-read
-  |=  [root=path mid=msg-id:uc]
+  |=  [root=path ids=(set msg-id:uc)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
+  ?:  =(~ ids)  (pure:m |)
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
-  =/  hits
-    %+  skim  ~(tap by loaded)
+  ::  one pass over the mailbox, grouping the named ids by the thread
+  ::  that actually holds them. Flat on purpose: a roll nested inside a
+  ::  roll cannot thread the outer accumulator through, because the
+  ::  inner one starts from the BUNT of its own sample rather than from
+  ::  the value in hand - it silently drops what the outer had
+  ::  accumulated, and the `_acc` needed to spell it BANGS this file at
+  ::  spawn, which takes the writer with it.
+  =/  hits=(list [t=thread-id:uc is=(set msg-id:uc)])
+    %+  murn  ~(tap by loaded)
     |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
-    (lien ~(val by ss) |=(s=stored-msg:uc =((id:uc unsigned.msg.s) mid)))
+    ^-  (unit [thread-id:uc (set msg-id:uc)])
+    =/  mine=(set msg-id:uc)
+      %-  ~(gas in *(set msg-id:uc))
+      %+  murn  ~(val by ss)
+      |=  st=stored-msg:uc
+      ^-  (unit msg-id:uc)
+      =/  i=msg-id:uc  (id:uc unsigned.msg.st)
+      ?:((~(has in ids) i) `i ~)
+    ?:(=(~ mine) ~ `[t mine])
   ?~  hits  (reject root 'unknown message')
-  ;<  ~  bind:m  (mark-read root p.i.hits mid)
+  ;<  ~  bind:m  (mark-read-loop root hits)
   ::  %.n ALWAYS. Read state is not content: lattice learned this with
   ::  page history, where every visit bumped and every open reader
   ::  reloaded. It is worse here, because a reader answers a bump by
@@ -1619,27 +1650,19 @@
 ::    and writes nothing. +sync-slots does the work, so the migration and
 ::    the delivery path cannot disagree about where a message goes.
 ::
-::  +note-unreadable: say once, at rise, how much mail this build
-::  cannot read.
+::  REPORTING DOES NOT HAPPEN ON THE WRITER'S RISE.
 ::
-::    +read-stored refuses pre-body-mime grubs rather than relabelling
-::    them, which is right, but it did so with no signal anywhere: the
-::    messages disappear from the API while their meta and their
-::    /mail/idx entries survive. A ship upgrading across that break
-::    should be able to find out that it happened, and a fiber print is
-::    invisible to every tool that can reach this ship - so it goes in
-::    the trace grub, which is the one place a human can read it.
-::
-++  note-unreadable
-  |=  root=path
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
-  =/  n=@ud  ?:(?=([%ball *] vw) (unreadable-in ball.vw) 0)
-  ?:  =(0 n)  (pure:m ~)
-  ;<  ~  bind:m
-    (trace:io ~[leaf+"urmail: {<n>} stored copies this build cannot read"])
-  (note root 'unreadable' & (crip (scow %ud n)))
+::    An earlier draft counted the unreadable grubs from inside the rise
+::    sequence and noted the total. It is off that path now as policy,
+::    not because it was seen to misbehave: the writer rises ONCE and
+::    only then enters its take-poke loop, so anything added there that
+::    fails to return would leave every poke queued forever, with no
+::    crash, no restart and no print, since +rise-wait fires on failure
+::    and not on a hang. The rise does the minimum needed to serve, and
+::    a count that exists to inform a human is served from a REQUEST
+::    FIBER, where the worst case costs one HTTP connection instead of
+::    the ship's entire mail path. +unreadable-in is therefore called
+::    only from +serve-thread.
 ::
 ++  migrate-flat
   |=  root=path
@@ -1702,13 +1725,27 @@
     mt(direct &)
   (pure:m &)
 ::
+::  recursion by ARM NAME: a $ with arguments inside a ;< continuation
+::  cannot find the trap.
+::
+++  mark-read-loop
+  |=  [root=path xs=(list [t=thread-id:uc is=(set msg-id:uc)])]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  xs  (pure:m ~)
+  ;<  ~  bind:m  (mark-read root t.i.xs is.i.xs)
+  (mark-read-loop root t.xs)
+::
+::  +mark-read: fold a set of ids into one thread's read marks, in ONE
+::  rewrite of its meta grub however many ids are named.
+::
 ++  mark-read
-  |=  [root=path t=thread-id:uc i=msg-id:uc]
+  |=  [root=path t=thread-id:uc is=(set msg-id:uc)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
-  mt(read (~(put in read.mt) i))
+  mt(read (~(uni in read.mt) is))
 ::
 ++  touch-idx
   |=  [root=path t=thread-id:uc]
@@ -2341,8 +2378,8 @@
   ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  jon=(unit json)  (de:json:html raw)
   ?~  jon  (send-err eyre-id 400 'not json')
-  =/  i=(unit @uv)  (de-read:uw u.jon)
-  ?~  i  (send-err eyre-id 400 'bad msg-id')
+  =/  i=(unit (set @uv))  (de-read:uw u.jon)
+  ?~  i  (send-err eyre-id 400 'bad msg-ids')
   ;<  ~  bind:m  (poke-writer [%read u.i])
   (send-ok eyre-id)
 ::

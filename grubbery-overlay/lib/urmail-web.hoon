@@ -64,12 +64,27 @@
     ==
   ?:(?=(%| -.res) ~ `p.res)
 ::
-::  +de-read: {"msg-id": "0v..."} -> the id.
+::  +de-read: {"msg-ids": ["0v...", ...]} -> the ids.
+::
+::    A SET, because opening a thread marks every unread message in it
+::    at once. One id per request meant one writer poke, one writer
+::    event and one full mailbox scan per message, on the ship's single
+::    serialisation point for mail, to record something no peer will
+::    ever see.
+::
+::    An empty array decodes fine and is a no-op at the writer, which is
+::    what opening an already-read thread should cost.
 ::
 ++  de-read
   |=  jon=json
-  ^-  (unit @uv)
-  (de-uv-field jon %'msg-id')
+  ^-  (unit (set @uv))
+  =/  res
+    %-  mule
+    |.
+    ^-  (set @uv)
+    %.  jon
+    (ot:dejs:format ~[['msg-ids' (as:dejs:format (se:dejs:format %uv))]])
+  ?:(?=(%| -.res) ~ `p.res)
 ::
 ::  +de-delete: {"thread-id": "0v..."} -> the id.
 ::
@@ -78,9 +93,7 @@
   ^-  (unit @uv)
   (de-uv-field jon %'thread-id')
 ::
-::  +de-uv-field: one named @uv out of an object. The two id routes differ
-::  only in the key, so they are one arm and two names rather than two
-::  copies of the same ladder.
+::  +de-uv-field: one named @uv out of an object.
 ::
 ++  de-uv-field
   |=  [jon=json key=@t]

@@ -159,7 +159,12 @@
           files=(list file)
           bcc=(set ship)
       ==
-      [%read =msg-id]
+    ::  %read takes a SET, because opening a thread marks every unread
+    ::  message in it at once. One id per poke meant one writer event
+    ::  and one full mailbox scan per message - forty messages, forty
+    ::  serialised scans, on the ship's single serialisation point for
+    ::  mail, to record something no peer will ever see.
+      [%read ids=(set msg-id)]
       [%delete-thread =thread-id]
       [%fetch-blob hash=@uv from=ship]
       [%restrict-blob hash=@uv ships=(set ship)]

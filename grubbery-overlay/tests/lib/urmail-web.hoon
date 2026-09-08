@@ -81,8 +81,19 @@
 ::  ── the id routes ───────────────────────────────────────────────────
 ::
 ++  test-de-read
-  %+  expect-eq  !>(`(unit @uv)`[~ 0v1a])
-  !>  (de-read:web (jo '{"msg-id":"0v1a"}'))
+  %+  expect-eq  !>(`(unit (set @uv))`[~ (sy ~[0v1a 0v2b])])
+  !>  (de-read:web (jo '{"msg-ids":["0v1a","0v2b"]}'))
+::
+::  opening an already-read thread sends no ids, which decodes and is a
+::  no-op at the writer rather than a 400.
+++  test-de-read-empty-set
+  %+  expect-eq  !>(`(unit (set @uv))`[~ ~])
+  !>  (de-read:web (jo '{"msg-ids":[]}'))
+::
+::  a bare id where an array belongs is refused, not silently wrapped.
+++  test-de-read-rejects-a-scalar
+  %+  expect-eq  !>(`(unit (set @uv))`~)
+  !>  (de-read:web (jo '{"msg-ids":"0v1a"}'))
 ::
 ++  test-de-delete
   %+  expect-eq  !>(`(unit @uv)`[~ 0v1a])
@@ -92,11 +103,13 @@
 ::  things - a message and a thread - and a decoder that took either would
 ::  let a mis-addressed request mark a thread read or delete a message.
 ++  test-de-read-rejects-thread-key
-  %+  expect-eq  !>(`(unit @uv)`~)  !>((de-read:web (jo '{"thread-id":"0v1a"}')))
+  %+  expect-eq  !>(`(unit (set @uv))`~)
+  !>  (de-read:web (jo '{"thread-id":"0v1a"}'))
 ::
 ++  test-de-delete-rejects-msg-key
   %+  expect-eq  !>(`(unit @uv)`~)  !>((de-delete:web (jo '{"msg-id":"0v1a"}')))
 ::
 ++  test-de-read-bad-id
-  %+  expect-eq  !>(`(unit @uv)`~)  !>((de-read:web (jo '{"msg-id":"~zod"}')))
+  %+  expect-eq  !>(`(unit (set @uv))`~)
+  !>  (de-read:web (jo '{"msg-ids":["~zod"]}'))
 --

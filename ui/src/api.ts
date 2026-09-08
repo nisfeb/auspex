@@ -23,6 +23,12 @@ export interface Thread {
   messages: Message[]
   participants: string[]
   last: number
+  // Copies stored on the ship that THIS BUILD cannot read: grubs written
+  // under a pre-body-mime shape, which the nexus refuses rather than
+  // relabelling, because rewriting a message into the current shape
+  // breaks the signature that makes it evidence. Reported so a thread
+  // that renders short says why instead of just looking empty.
+  unreadable: number
 }
 
 export interface InboxEntry {
@@ -133,7 +139,14 @@ export const send = (
 export const deleteThread = (id: string) =>
   post('/api/delete-thread', { 'thread-id': id })
 
-export const markRead = (id: string) => post('/api/read', { 'msg-id': id })
+// One request for the whole batch. Opening a thread marks every unread
+// message in it, and the nexus writer is the ship's single serialisation
+// point for mail: one id per request meant one writer event and one full
+// mailbox scan per message. An empty list is not sent at all.
+export const markRead = (ids: string[]) =>
+  ids.length === 0
+    ? Promise.resolve()
+    : post('/api/read', { 'msg-ids': ids }).then(() => undefined)
 
 // Grubbery's own keep-SSE endpoint for one nexus grub. The nexus bumps
 // /beacon/rev on every mutation EXCEPT a read-mark, so this stream is

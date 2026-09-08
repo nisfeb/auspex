@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { thread, send, markRead, deleteThread, ourShip, type Thread } from './api'
+import { thread, send, markRead, deleteThread, ourShip, type Message, type Thread } from './api'
 import VerdictBadge from './VerdictBadge'
 import type { ForwardIntent } from './Compose'
 
@@ -125,7 +125,10 @@ export default function ThreadView({
         setPending('')
         seededFor.current = id
       }
-      th.messages.filter((m) => !m.read).forEach((m) => markRead(m.id).catch(console.error))
+      // One request for the whole batch, not one per message: the
+      // writer serialises every mutation and each poke costs it a full
+      // mailbox scan.
+      markRead(th.messages.filter((m) => !m.read).map((m) => m.id)).catch(console.error)
     }).catch((e) => {
       if (cancelled) return
       console.error(e)
@@ -141,7 +144,42 @@ export default function ThreadView({
     return <p className="p-8 text-neutral-400">This conversation no longer exists.</p>
   }
   if (!t) return null
-  const last = t.messages[t.messages.length - 1]
+
+  // WHICH MESSAGE A REPLY OR FORWARD POINTS AT.
+  //
+  // Not simply the last one. `messages` is ordered by `sent`, which is a
+  // signed field the AUTHOR chooses, so anyone who can poke a chain at
+  // this ship controls which message sorts last. The listing already
+  // refuses to draw its sender and subject from a forged copy for
+  // exactly this reason.
+  //
+  // It matters more now than it did. `prev` decides which root-to-leaf
+  // path the nexus ships, so letting a forged copy be the newest would
+  // let one poked chain make every subsequent reply carry the attacker's
+  // message as its parent — and amputate the genuine branch from what
+  // the recipient receives. Fall back to the raw newest only when every
+  // copy is forged, where there is nothing honest to choose.
+  const honest = t.messages.filter((m) => m.verdict !== 'forged')
+  const last = (honest.length ? honest : t.messages)[
+    (honest.length ? honest : t.messages).length - 1
+  ]
+
+  // How many DISTINCT MESSAGES actually travel when `last` is forwarded:
+  // the path from the thread root to it, which is what the nexus ships.
+  // Not t.messages.length — that counts stored COPIES, several of which
+  // may be one message kept in several signatures, and it counts sibling
+  // branches that no longer leave the ship at all.
+  const pathLength = (from: Message): number => {
+    const byId = new Map(t.messages.map((m) => [m.id, m]))
+    const seen = new Set<string>()
+    let cur: Message | undefined = from
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      cur = cur.prev ? byId.get(cur.prev) : undefined
+    }
+    return seen.size
+  }
+  const travels = pathLength(last)
 
   // A @p typed but not yet committed to a chip would otherwise vanish on
   // send. Fold it in rather than silently dropping a recipient the user
@@ -221,9 +259,9 @@ export default function ThreadView({
           onClick={() => onForward({
             prev: last.id,
             subject: last.subject,
-            count: t.messages.length,
+            count: travels,
           })}
-          title={`Hand this whole conversation to someone new. All ${t.messages.length} signed messages travel; the recipient can verify each author independently.`}
+          title={`Hand this line of the conversation to someone new. The ${travels} signed ${travels === 1 ? 'message' : 'messages'} leading to this one travel; other branches do not. The recipient can verify each author independently.`}
           className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
         >
           Forward
@@ -237,6 +275,21 @@ export default function ThreadView({
           Delete
         </button>
       </div>
+      {/* Messages stored on this ship that this build cannot read. The
+          nexus refuses pre-body-mime grubs rather than relabelling them,
+          because rewriting one breaks the signature that makes it
+          evidence — so they are absent from the list above. Saying so is
+          the difference between "your mail is gone" and a true statement
+          the user can act on. */}
+      {t.unreadable > 0 && (
+        <p className="mb-4 rounded bg-neutral-100 p-3 text-xs text-neutral-700 ring-1 ring-neutral-300">
+          {t.unreadable} stored {t.unreadable === 1 ? 'copy' : 'copies'} in this
+          conversation {t.unreadable === 1 ? 'is' : 'are'} not shown: they were
+          written in an older message format that this ship can no longer read.
+          They are still on disk. They are not shown because rewriting one into
+          the current format would break the signature that makes it evidence.
+        </p>
+      )}
       {t.messages.map((m, i) => (
         // Up to 4 copies of a message share the same `id` by design (one
         // genuine, others forged) — index into the fixed, backend-ordered
@@ -301,9 +354,11 @@ export default function ThreadView({
           />
         </div>
         <p className="text-xs text-neutral-500">
-          Everyone listed receives the entire signed chain, not just this
-          reply. Anyone who was ever added to this conversation appears here
-          — remove anyone who should not get the history.
+          Everyone listed receives the {travels} signed{' '}
+          {travels === 1 ? 'message' : 'messages'} leading to this one, not just
+          your reply — and nothing from other branches of the conversation.
+          Anyone who was ever added to this conversation appears here; remove
+          anyone who should not get that history.
         </p>
       </div>
       {/* max-body in grubbery-overlay/lib/urmail-chain.hoon. See
