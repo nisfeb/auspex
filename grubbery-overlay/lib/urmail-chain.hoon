@@ -126,15 +126,36 @@
 ::
 +$  file  [name=@t mime=@t =octs]
 ::
-::  $blob-vis: who may fetch one blob's bytes.
+::  $blob-vis: whether THIS SHIP serves a blob's bytes.
+::
+::    RESTRICTION IS NOT ACCESS CONTROL, and calling it that would be a
+::    lie to the user. It is withdrawal of our own copy, and it is
+::    meaningful only before anyone has opened the attachment.
+::
+::    The reason is structural, not an implementation gap. A blob is
+::    content-addressed and answerable by anyone holding the bytes -
+::    that property is what makes a forwarded chain's attachments
+::    readable at all, and this ship relies on it every time it fetches
+::    one. But a ship that fetches a blob stores it and publishes it
+::    into ITS OWN permissionless farm, because it is now one of the
+::    ships holding the bytes. So the first successful fetch creates a
+::    second, independent, un-revocable source. Withdrawing ours after
+::    that stops nobody.
+::
+::    What restriction therefore buys is exactly this: bytes we have not
+::    yet served cannot be pulled from us, and a hash is not a
+::    capability we hand out by default once we have said no. Treat it
+::    as unpublishing, never as revoking.
 ::
 ::    %public     grown into the remote-scry farm, so ANY ship holding
-::                the hash may keen it. Permissionless, and the default:
-::                a chain is forwardable to anyone by design, and an
-::                attachment nobody but the original recipients could
-::                read would make a forward carry an unreadable file.
-::    %restricted withdrawn from the farm and served only over a weir to
-::                named ships. Per-attachment permission.
+::                the hash may keen it. The default: a chain is
+::                forwardable to anyone by design, and an attachment
+::                nobody but the original recipients could read would
+::                make a forward carry an unreadable file.
+::    %restricted withdrawn from our farm. The named ships are recorded
+::                so a weir grant can serve them a peek instead; see
+::                +do-restrict in the nexus for what that costs and what
+::                the platform will not yet let a nexus do.
 ::
 +$  blob-vis
   $%  [%public ~]
@@ -143,10 +164,24 @@
 ::
 ::  $stored-blob: one attachment's bytes, at /mail/blob/<hash>.
 ::
-::    Bytes and nothing else. Visibility lives in a separate small grub
-::    so that changing who may read a file does not rewrite the file.
+::    Bytes and an arrival time. Visibility lives in a separate small
+::    grub so that changing who may read a file does not rewrite the
+::    file.
 ::
-+$  stored-blob  [%0 =octs]
+::    `at` is what makes "evict the OLDEST unreferenced blob" a thing
+::    the store can actually do rather than a phrase in a spec. It is
+::    local bookkeeping and is deliberately not part of the address:
+::    two ships holding the same file agree on its hash and disagree
+::    about when they got it.
+::
+::    Version 1, and version 0 (no `at`) IS upgraded in place rather
+::    than refused. This is the ladder working as intended, and it is
+::    worth contrasting with $stored-msg, which cannot do the same: a
+::    blob's shape is not covered by any signature, so filling in a
+::    default costs nothing and misrepresents nothing.
+::
++$  stored-blob  [%1 =octs at=@da]
++$  stored-blob-0  [%0 =octs]
 ::
 ::  $blob-index: visibility for every blob we hold, at /mail/blobvis.
 ::  Absent from the map means %public, the default.
