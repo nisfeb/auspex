@@ -251,6 +251,18 @@ export default function ThreadView({
             </span>
           </header>
           <p className="whitespace-pre-wrap">{m.body}</p>
+          {/* body-mime is signed, so an intermediary cannot change which
+              message you read — but a signature proves the author CHOSE
+              the value, never that it is safe, and the chain carrying it
+              may have been delivered by any ship. So the instruction is
+              reported and not obeyed: every body renders as plain text,
+              and a message that asked for anything else says so rather
+              than looking like a rendering bug. */}
+          {m['body-mime'] && m['body-mime'] !== 'text/plain' && (
+            <p className="mt-2 text-xs text-neutral-500">
+              Sent as <code>{m['body-mime']}</code>; shown as plain text.
+            </p>
+          )}
         </article>
       ))}
       <div className="mb-2 rounded border border-neutral-300 p-3">

@@ -15,8 +15,7 @@ inside the signature, fetched by keen with no permission needed — the property
 the migration was for. Cross-ship delivery works, including the three-party
 case: a chain authored by a ship neither party has spoken to still verifies.
 
-**Not done.** There is no UI on the nexus. The React client that exists talks
-to the Gall agent's scries and would have to be repointed. None of the eleven
+**Not done.** None of the eleven
 mail-client features — labels, folders, archive, mark-unread, drafts, filters,
 search, pagination, sent, recipient validation — exist on the nexus. The
 attachment fix wave is in flight. The chain format has broken once already.
@@ -68,9 +67,9 @@ than the hand-rolled maps the Gall design was going to need:
 | Recipient validation | `@p` parse in the UI; the nexus keeps its own |
 | Attachments | done |
 
-### Gate 3 — a UI on the nexus
+### Gate 3 — a UI on the nexus — DONE
 
-The largest unbuilt piece. Two routes, and lattice runs both:
+Two routes were open, and lattice runs both:
 
 - **Serve the React app as grubs**, the way lattice serves `ui-app/`. The
   client exists, works, and has been reviewed; it would be repointed from the
@@ -79,10 +78,18 @@ The largest unbuilt piece. Two routes, and lattice runs both:
   `/ui/views/page.html`. More native, no client build, but discards working
   code.
 
-Recommendation: repoint the existing client. It already renders per-message
-verdict badges, honest copy counts, editable reply recipients and forward —
-all of which took review rounds to get right and none of which is worth
-rebuilding to be idiomatic.
+The first was taken, as recommended: the client already renders per-message
+verdict badges, honest copy counts, editable reply recipients and forward,
+all of which took review rounds to get right and none of which was worth
+rebuilding to be idiomatic. What changed was the transport under it. The
+route surface is specified in `# v3`'s `## The web surface`; live updates
+ride grubbery's keep-SSE over the nexus's change beacon rather than polling.
+
+This gate covers the five things a client cannot work without — listing,
+thread, send, mark-read, delete. The eleven mail-client features are Gate 2
+and are still unbuilt, and the client has no attachment control: a message
+that carries a file renders with no sign of it. Both are views over the same
+routes, not new transports.
 
 ### Gate 4 — the format refusal is demonstrated, not read
 
@@ -117,7 +124,7 @@ Lattice, which is a change to lattice's users, not just ours.
 2. Freeze `unsigned`. Decide what else belongs inside a signature; add it now
    or never.
 3. Build the eleven features on the tree.
-4. Repoint the client at the nexus.
+4. ~~Repoint the client at the nexus.~~ Done.
 5. Rehearse the distribution change on `~wex`, then `~feb`.
 6. Release.
 

@@ -37,6 +37,26 @@
 ::                                 and pokes the answer back; only the
 ::                                 writer touches the tree.
 ::    /mail/idx                    the derived inbox order, newest first.
+::    /app/index.html              the web client, laid down as two grubs:
+::    /app/app.js                  a shell with its css inlined and one
+::                                 script. Assets in cords wedge every
+::                                 request fiber, so the shell is one
+::                                 document and one script, the shape
+::                                 lattice ships for the same reason.
+::    /ui/main.sig                 binds /apps/urmail and dispatches each
+::                                 request into its own fiber.
+::    /ui/requests/<id>            ONE EPHEMERAL FIBER PER HTTP REQUEST.
+::                                 Reads peek the tree here; writes poke
+::                                 the writer and answer ok. The writer
+::                                 serialises mutations and a send fans
+::                                 out to every recipient with a deadline
+::                                 each, so a render or a round trip on it
+::                                 would queue every other mutation behind
+::                                 it.
+::    /beacon/rev                  the change beacon. Open readers keep-SSE
+::                                 this one small grub and refetch when it
+::                                 moves. Bumped on every mutation EXCEPT a
+::                                 read-mark - see +read-mark.
 ::    /tr/last                     the last writer outcome, as json. Fiber
 ::                                 prints go to the raw console and are
 ::                                 invisible to every tool that can reach
@@ -58,6 +78,12 @@
 ::  arm that can crash on hostile input, +thread-key, is called under mule.
 ::
 /<  uc  /lib/urmail-chain.hoon
+/<  uw  /lib/urmail-web.hoon
+::  the built client. Imports resolve relative to THIS file's directory
+::  (/nex/urmail), not /nex. Rebuilt by `npm run build` in ui/, which
+::  writes exactly these two files and fails if it would emit a third.
+/<  uih  ui-app/index.html
+/<  uij  ui-app/app.js
 =<  ^-  nexus:nexus
     |%
     ++  on-load
@@ -105,6 +131,20 @@
           ::  a reload, which is the case where you most want to read it.
           [%fall %| /tr empty-dir:loader]
           [%fall %& [/tr %last] [[/ %json] ~]]
+          ::  /app: the client, %over so a redeploy actually replaces it.
+          ::  A %fall would leave every ship running the build it first
+          ::  loaded, with no error and no way to tell from outside.
+          [%over %& [/app %'index.html'] [[/ %mime] uih]]
+          [%over %& [/app %'app.js'] [[/ %mime] uij]]
+          ::  /ui: the HTTP front end. main.sig binds /apps/urmail and
+          ::  spawns one fiber per request under /ui/requests.
+          [%fall %& [/ui %'main.sig'] [[/ %sig] ~]]
+          [%fall %| /ui/requests empty-dir:loader]
+          ::  /beacon/rev: the change beacon. NESTED, not at the nexus
+          ::  root - grubbery's keep-SSE does not stream a root grub, and
+          ::  a beacon that never streams is a UI that looks live and is
+          ::  not. %fall so the counter survives a reload.
+          [%fall %& [/beacon %rev] [[/ %json] (numb:enjs:format 0)]]
       ==
     ::
     ++  on-file
@@ -129,6 +169,12 @@
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ;<  ~  bind:m  (apply root from sage)
+        ::  bump the change beacon so open readers refetch. NOT for a
+        ::  read-mark: see +read-mark for why that one is excluded and
+        ::  what it would cost here.
+        ;<  ~  bind:m
+          ?:  (read-mark sage)  (pure:m ~)
+          (bump-beacon root)
         $
       ::  /fetch/*: one EPHEMERAL fiber per blob fetch. It keens, pokes
       ::  the answer at the writer, and ends; the writer culls the
@@ -144,6 +190,17 @@
           [[%fetch ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%urmail fetch: failed")
         (run-fetch name.rail)
+      ::  /ui/main.sig: bind the HTTP endpoint and dispatch each request
+      ::  into its own fiber under /ui/requests. This fiber never touches
+      ::  the mail tree; it only routes.
+          [[%ui ~] %'main.sig']
+        ;<  ~  bind:m  (rise-wait:io prod "%urmail /ui/main: failed")
+        ;<  ~  bind:m  (bind-http:io [~ /apps/urmail])
+        (http-dispatch:io %urmail)
+      ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
+          [[%ui %requests ~] @]
+        ;<  ~  bind:m  (rise-wait:io prod "%urmail /ui/requests: failed")
+        (handle-request name.rail)
       ==
     --
 |%
@@ -1463,4 +1520,440 @@
     %wait  [%wait ~]
     %skip  [%skip ~]
   ==
+::
+::  ── the web surface ─────────────────────────────────────────────────
+::
+::  Two kinds of route and one rule between them: a READ peeks the tree
+::  from the request fiber and answers; a WRITE pokes the writer and
+::  answers ok. Nothing here writes to the tree. That is the whole reason
+::  per-request fibers exist - the writer is this ship's single
+::  serialisation point for mail, and a send fans out to every recipient
+::  with a deadline each, so a render or a network round trip placed on it
+::  would queue every other mutation in the ship behind it.
+::
+::  The JSON is byte-for-byte what the gall agent produced, because the
+::  client that consumes it is the reviewed one and a port that quietly
+::  changed the contract would be a rewrite wearing a port's name.
+::
+::  +srv: the HTTP response door. Every response travels up to
+::  /ui/main.sig through it, so the dispatcher can cull the fiber of a
+::  connection the browser already dropped.
+::
+++  srv  ~(. http-res:io [%| 1 %& ~ %'main.sig'])
+::
+::  +read-mark: is this poke a read-mark?
+::
+::    The one mutation that must not bump the change beacon. Lattice
+::    learned this with page history: every view recorded a visit, every
+::    visit bumped the beacon, and every open reader reloaded - a storm
+::    produced by nothing a reader could see. It is sharper here than it
+::    was there. Opening a thread marks SEVERAL messages read at once,
+::    and an open reader answers a beacon bump by refetching the thread
+::    it is showing, which marks it read again. That is not a storm, it
+::    is a loop. Read state is not content.
+::
+++  read-mark
+  |=  =sage:tarball
+  ^-  ?
+  ?.  =([/ %urmail-action] p.sage)  |
+  =/  res  (mule |.(!<(action:uc q.sage)))
+  ?:(?=(%| -.res) | ?=(%read -.p.res))
+::
+::  +bump-beacon: move the beacon so open readers refetch.
+::
+::    The value is `now`, not a counter: a counter would have to be read
+::    before it is written, which is a peek on the write path, and the
+::    reader only ever compares it against the last one it saw.
+::
+++  bump-beacon
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  now=@da  bind:m  bowl-now
+  (put-file [%& %& (weld root /beacon) %rev] [/ %json] (numb:enjs:format `@ud`now))
+::
+::  +nexus-root: this nexus's absolute tree path, from a REQUEST fiber.
+::
+::    Derived, not a constant. A request fiber sits at
+::    <root>/ui/requests/<id>, so its own directory is two below the
+::    root. Lattice hardcodes its equivalent; here the install name is a
+::    documented failure mode - a nexus made under the wrong name seeds a
+::    tree that nothing looks at, with no error anywhere - and a constant
+::    that disagreed with the real install would peek an empty tree and
+::    serve an empty inbox rather than fail.
+::
+++  nexus-root
+  =/  m  (fiber:fiber:nexus ,path)
+  ^-  form:m
+  ;<  here=rail:tarball  bind:m  get-here-abs:io
+  =/  p=path  path.here
+  =/  n=@ud  (lent p)
+  (pure:m ?:((lth n 2) p (scag (sub n 2) p)))
+::
+::  +handle-request: one HTTP request, on its own ephemeral fiber.
+::
+++  handle-request
+  |=  eyre-id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  [src=@p req=inbound-request:eyre]  bind:m
+    (get-state-as:io ,[src=@p inbound-request:eyre])
+  =/  parsed  (parse-url:http-utils url.request.req)
+  ::  drop the /apps/urmail prefix; the remainder is the route.
+  =/  suffix=path  (slag 2 site.parsed)
+  ::  a trailing '/' parses as a trailing empty knot, so without this
+  ::  /apps/urmail/ would miss the shell route and fall to the 404 - and
+  ::  a trailing slash is exactly what a browser adds when the app is
+  ::  opened from a bookmark.
+  =/  suffix=path
+    ?:  &(?=(^ suffix) =('' (rear `path`suffix)))
+      (snip `path`suffix)
+    suffix
+  =/  meth=@tas  method.request.req
+  ::  THE OWNER GATE. urmail has no unauthenticated surface at all: no
+  ::  clearweb view, no public form, no unauthenticated asset. Eyre
+  ::  stamps a request authenticated to our own web login, so this flag
+  ::  IS the src==our check and it is already in hand - reading `our`
+  ::  over /sys/bowl just to compare cost lattice ~0.2s on every request.
+  ?.  authenticated.req
+    (send-err eyre-id 403 'forbidden')
+  ::  the shell and its one script, laid down as grubs in +on-load.
+  ?:  &(?=(~ suffix) =(%'GET' meth))
+    (serve-ui eyre-id %'index.html')
+  ?:  &(=(`path`[%'app.js' ~] suffix) =(%'GET' meth))
+    (serve-ui eyre-id %'app.js')
+  ::  GET /api/thread/<id>: the id is the last segment, so this cannot
+  ::  sit in the table below, which keys on the whole suffix. The ?= comes
+  ::  FIRST in the &, so the branch can reach into the path it matched.
+  ?:  &(?=([%api %thread @ ~] suffix) =(%'GET' meth))
+    (serve-thread eyre-id i.t.t.suffix)
+  ::  the rest of the surface, keyed on the WHOLE suffix rather than on
+  ::  its last segment: /read and /api/read are different requests and
+  ::  only one of them is a route.
+  ?+    [meth suffix]
+    (send-err eyre-id 404 'not found')
+      [%'GET' [%api %whoami ~]]         (serve-whoami eyre-id)
+      [%'GET' [%api %inbox ~]]          (serve-inbox eyre-id)
+      [%'POST' [%api %send ~]]          (do-web-send eyre-id (req-body req))
+      [%'POST' [%api %read ~]]          (do-web-read eyre-id (req-body req))
+      [%'POST' [%api %'delete-thread' ~]]
+    (do-web-delete eyre-id (req-body req))
+  ==
+::
+::  ── the client, as grubs ────────────────────────────────────────────
+::
+::  +serve-ui: the shell or its script, out of /app.
+::
+++  serve-ui
+  |=  [eyre-id=@ta nam=@ta]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  ct=@t  ?:(=(%'app.js' nam) 'text/javascript' 'text/html')
+  ;<  root=path  bind:m  nexus-root
+  ;<  pv=view:nexus  bind:m  (peek:io [%& %& (weld root /app) nam] ~)
+  ?.  ?=([%file *] pv)  (send-err eyre-id 404 'not found')
+  =/  res=(each mime tang)  (mule |.(!<(mime (need-vase:tarball sang.pv))))
+  ?:  ?=(%| -.res)  (send-err eyre-id 500 'bad asset')
+  ::  no-cache, not a max-age. The two grubs are replaced wholesale by a
+  ::  reload, and a cached shell pointing at a script that no longer
+  ::  matches it is a blank page with nothing in the console.
+  %+  send-simple:srv  eyre-id
+  :-  [200 ~[['content-type' ct] ['cache-control' 'no-cache']]]
+  `q.p.res
+::
+::  ── reads ───────────────────────────────────────────────────────────
+::
+::  +serve-whoami: our own @p, so the reply composer can drop us from its
+::  own default recipient list. One /sys/bowl round trip, and the client
+::  makes it once at startup rather than per request.
+::
+++  serve-whoami
+  |=  eyre-id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  our=@p  bind:m  bowl-our
+  (send-json eyre-id (pairs:enjs:format ~[['ship' [%s (scot %p our)]]]))
+::
+::  +serve-inbox: the thread listing, in the index's order.
+::
+::    ONE deep peek of /mail/thread, walked twice - once for the message
+::    grubs and once for the meta leaves. The alternative, a peek per
+::    thread, is a dart per row on the surface a user hits first. This is
+::    the same O(total stored messages) read the writer already pays and
+::    that the spec already records against +thread-key; the upgrade path
+::    is the same summary grub.
+::
+++  serve-inbox
+  |=  eyre-id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  root=path  bind:m  nexus-root
+  ;<  ix=mail-idx:uc  bind:m  (read-idx root)
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
+  =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
+  (send-json eyre-id (inbox-json inbox.ix (collect-threads b) (collect-metas b)))
+::
+::  +serve-thread: one thread, every stored copy with its own verdict.
+::
+++  serve-thread
+  |=  [eyre-id=@ta seg=@ta]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  t=(unit @uv)  (slaw %uv seg)
+  ?~  t  (send-err eyre-id 400 'bad thread id')
+  ;<  root=path  bind:m  nexus-root
+  ;<  ss=(map @ta stored-msg:uc)  bind:m  (read-thread-slots root u.t)
+  ::  an empty thread dir and an absent one are the same thing to a
+  ::  reader. The client turns this 404 into "no longer exists", which is
+  ::  what a thread deleted in another tab actually is.
+  ?:  =(~ ss)  (send-err eyre-id 404 'no such thread')
+  ;<  mt=meta:uc  bind:m  (read-meta root u.t)
+  (send-json eyre-id (thread-json u.t ss mt))
+::
+::  +read-thread-slots: one thread's message grubs.
+::
+++  read-thread-slots
+  |=  [root=path t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,(map @ta stored-msg:uc))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (tdir root t)] ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  (pure:m (collect-slots ball.vw))
+::
+::  +collect-metas: every thread's meta leaf, out of the same deep peek
+::  +collect-threads walks for message grubs.
+::
+++  collect-metas
+  |=  b=ball:tarball
+  ^-  (map thread-id:uc meta:uc)
+  %-  ~(gas by *(map thread-id:uc meta:uc))
+  %+  murn  ~(tap by dir.b)
+  |=  [seg=@ta kid=ball:tarball]
+  ^-  (unit [thread-id:uc meta:uc])
+  =/  t=(unit @uv)  (slaw %uv seg)
+  ?~  t  ~
+  ?~  fil.kid  ~
+  =/  c=(unit [=sang:tarball gain=? bang=(unit tang)])
+    (~(get by contents.u.fil.kid) %meta)
+  ?~  c  ~
+  ?:  (is-boom:tarball sang.u.c)  ~
+  =/  res  (mule |.(;;(meta:uc (sang-noun:tarball sang.u.c))))
+  ?:(?=(%| -.res) ~ `[u.t p.res])
+::
+::  ── json ────────────────────────────────────────────────────────────
+::
+::  Ported from the gall agent's renderers, contract unchanged.
+::
+::  A NOTE ON `enjs:format`, carried over from the agent: every arm below
+::  qualifies `pairs` / `time` / `numb` fully instead of `=,`-ing the core
+::  in. Face-injecting it made `(scot %p ...)` inside a nested |= nest-fail
+::  on this ship's hoon (reproduced live on ~wex and ~feb). Every ship
+::  rendered here sits inside a `turn` lambda, so the workaround is load
+::  bearing, not stylistic.
+::
+++  msg-json
+  |=  [vs=(map [msg-id:uc @ux] verdict:uc) rd=(set msg-id:uc) m=msg:uc]
+  ^-  json
+  =/  i=msg-id:uc  (id:uc unsigned.m)
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv i)]]
+      ['from' [%s (scot %p from.unsigned.m)]]
+      ['to' [%a (turn ~(tap in to.unsigned.m) |=(s=ship [%s (scot %p s)]))]]
+      ['subject' [%s subj.unsigned.m]]
+      ['body' [%s body.unsigned.m]]
+    ::  the author's rendering instruction, signed and therefore
+    ::  unalterable in transit - and hostile input at the render
+    ::  boundary for exactly that reason: a signature proves the author
+    ::  CHOSE the value, never that it is safe. It is reported, not
+    ::  obeyed. The client renders every body as plain text and says so
+    ::  when the message asked for something else.
+      ['body-mime' [%s body-mime.unsigned.m]]
+      ['sent' (time:enjs:format sent.unsigned.m)]
+      ['prev' ?~(prev.unsigned.m ~ [%s (scot %uv u.prev.unsigned.m)])]
+    ::  THE VERDICT IS PER MESSAGE, never per thread. A thread holding one
+    ::  unverified message is not an unverified thread, and this field is
+    ::  the whole product claim reaching the screen.
+      ['verdict' [%s (~(gut by vs) [i sig.m] %unverified)]]
+      ['read' [%b (~(has in rd) i)]]
+  ==
+::
+++  thread-json
+  |=  [t=thread-id:uc ss=(map @ta stored-msg:uc) mt=meta:uc]
+  ^-  json
+  ::  +chain-of re-imposes the canonical order, which the tree does not
+  ::  store: slots are named by (sham [id sig]) and a map has no order.
+  =/  c=chain:uc  (chain-of ss)
+  =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv t)]]
+      ['messages' [%a (turn c |=(m=msg:uc (msg-json vs read.mt m)))]]
+      ['participants' [%a (turn ~(tap in (participants:uc c)) |=(s=ship [%s (scot %p s)]))]]
+      ['last' (time:enjs:format (last-sent:uc c))]
+  ==
+::
+::  +inbox-json: the listing. Deliberately not the full chains - the list
+::  view needs a subject and a sender, not a hundred message bodies.
+::
+::    +murn, not +turn: the index is a derived grub naming thread ids, and
+::    a thread whose grubs are gone should drop out of the listing rather
+::    than crash the route the way the agent's +got did.
+::
+++  inbox-json
+  |=  $:  order=(list thread-id:uc)
+          loaded=(map thread-id:uc (map @ta stored-msg:uc))
+          metas=(map thread-id:uc meta:uc)
+      ==
+  ^-  json
+  :-  %a
+  %+  murn  order
+  |=  t=thread-id:uc
+  ^-  (unit json)
+  =/  ss=(map @ta stored-msg:uc)  (~(gut by loaded) t ~)
+  ?:  =(~ ss)  ~
+  `(entry-json t ss (~(gut by metas) t *meta:uc))
+::
+++  entry-json
+  |=  [t=thread-id:uc ss=(map @ta stored-msg:uc) mt=meta:uc]
+  ^-  json
+  =/  c=chain:uc  (chain-of ss)
+  =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
+  ::  the list view is the surface a user scans fastest, and every field
+  ::  on it is attacker-chosen: anyone may poke a one-message chain
+  ::  claiming from=~zod, subj='Password reset' with a `sent` far in the
+  ::  future, and `sent` is what orders the chain. Two things follow.
+  ::
+  ::  One: the summary is drawn from the newest NON-%forged copy, not from
+  ::  (rear c). A message whose signature we checked and rejected has no
+  ::  business supplying the sender line of an inbox row.
+  ::
+  ::  Two: the row carries the verdict of whatever message it did draw
+  ::  from, so provenance is visible before the thread is opened rather
+  ::  than only after. If every copy is %forged there is nothing honest to
+  ::  fall back to - show the newest anyway, labeled %forged, since hiding
+  ::  the row would delete evidence.
+  =/  honest=chain:uc
+    %+  skip  c
+    |=(m=msg:uc =(%forged (~(gut by vs) [(id:uc unsigned.m) sig.m] %unverified)))
+  =/  newest=msg:uc  ?~(honest (rear c) (rear honest))
+  ::  the spec is explicit that %forged messages "are never counted as
+  ::  unread and never sort into the normal inbox flow", so an unread
+  ::  count that included them would let one poke bold every row.
+  =/  unread=?
+    %+  lien  c
+    |=  m=msg:uc
+    ?&  !=(%forged (~(gut by vs) [(id:uc unsigned.m) sig.m] %unverified))
+        !(~(has in read.mt) (id:uc unsigned.m))
+    ==
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv t)]]
+      ['subject' [%s subj.unsigned.newest]]
+      ['from' [%s (scot %p from.unsigned.newest)]]
+      ['snippet' [%s (crip (scag 140 (trip body.unsigned.newest)))]]
+      ['verdict' [%s (~(gut by vs) [(id:uc unsigned.newest) sig.newest] %unverified)]]
+      ['forged' [%b (lth (lent honest) (lent c))]]
+    ::  `count` is STORED COPIES, not distinct messages, and the client
+    ::  labels it as such. Up to max-copies copies of one message that
+    ::  differ in signature are kept on purpose - one genuine, the rest
+    ::  forged - so a forged copy cannot shadow a real one. A thread
+    ::  showing four may be one message and three forgeries, and calling
+    ::  that a message count would be a lie told by the safety mechanism.
+      ['count' (numb:enjs:format (lent c))]
+      ['last' (time:enjs:format (last-sent:uc c))]
+      ['unread' [%b unread]]
+      ['participants' [%a (turn ~(tap in (participants:uc c)) |=(s=ship [%s (scot %p s)]))]]
+  ==
+::
+::  ── writes ──────────────────────────────────────────────────────────
+::
+::  +poke-writer: hand one action to the serialised writer.
+::
+::    The route answers ok once the writer has taken the poke, not once it
+::    has applied it. The beacon is what closes that gap: the writer bumps
+::    it after the action lands and the open client refetches then. A
+::    request fiber that waited for the apply would hold the connection
+::    across a fan-out - a send to an unreachable ship carries a
+::    twenty-second deadline per recipient.
+::
+++  poke-writer
+  |=  a=action:uc
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  (poke:io [%| 2 %& ~ %'main.sig'] [[/ %urmail-action] a])
+::
+::  +do-web-send: compose, reply and forward. `prev` is the only thing
+::  that tells them apart, here as everywhere else.
+::
+++  do-web-send
+  |=  [eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  req=(unit send-req:uw)  (de-send:uw u.jon)
+  ?~  req  (send-err eyre-id 400 'bad send')
+  ::  body-mime='' is 'text/plain', which is what this composer produces
+  ::  and the only thing the client renders. files=~ and bcc=~: bytes
+  ::  enter the blob store through their own action, and neither an
+  ::  attachment control nor a BCC field exists in the web client yet.
+  ::  All three are absent from $send-req rather than defaulted there, so
+  ::  a client cannot set them by accident through a route that has no UI
+  ::  behind it.
+  ;<  ~  bind:m
+    (poke-writer [%send to.u.req subj.u.req body.u.req '' prev.u.req ~ ~])
+  (send-ok eyre-id)
+::
+++  do-web-read
+  |=  [eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  i=(unit @uv)  (de-read:uw u.jon)
+  ?~  i  (send-err eyre-id 400 'bad msg-id')
+  ;<  ~  bind:m  (poke-writer [%read u.i])
+  (send-ok eyre-id)
+::
+++  do-web-delete
+  |=  [eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  i=(unit @uv)  (de-delete:uw u.jon)
+  ?~  i  (send-err eyre-id 400 'bad thread-id')
+  ;<  ~  bind:m  (poke-writer [%delete-thread u.i])
+  (send-ok eyre-id)
+::
+::  ── responses ───────────────────────────────────────────────────────
+::
+++  req-body
+  |=  req=inbound-request:eyre
+  ^-  @t
+  ?~  body.request.req  ''
+  q.u.body.request.req
+::
+++  send-ok
+  |=  eyre-id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  (send-json eyre-id (pairs:enjs:format ~[['ok' [%b &]]]))
+::
+++  send-json
+  |=  [eyre-id=@ta jon=json]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  %+  send-simple:srv  eyre-id
+  :-  [200 ['content-type' 'application/json']~]
+  `(as-octs:mimes:html (en:json:html jon))
+::
+::  +send-err: errors are JSON too, so the client has one shape to parse
+::  and can show the nexus's own reason instead of a bare status code.
+::
+++  send-err
+  |=  [eyre-id=@ta code=@ud msg=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  %+  send-simple:srv  eyre-id
+  :-  [code ['content-type' 'application/json']~]
+  `(as-octs:mimes:html (en:json:html (pairs:enjs:format ~[['error' [%s msg]]])))
 --

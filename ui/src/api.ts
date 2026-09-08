@@ -6,6 +6,12 @@ export interface Message {
   to: string[]
   subject: string
   body: string
+  // The author's rendering instruction, signed and so unalterable in
+  // transit. Empty means text/plain. It is REPORTED, not obeyed: a
+  // signature proves the author chose the value, never that it is safe,
+  // and it arrives pre-signed inside a chain any ship may deliver. Every
+  // body is rendered as plain text; see ThreadView.
+  'body-mime': string
   sent: number
   prev: string | null
   verdict: Verdict
