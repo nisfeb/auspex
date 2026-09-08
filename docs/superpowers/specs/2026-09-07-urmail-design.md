@@ -508,7 +508,10 @@ grub with a weir on it.
 
 ```
 /main.sig                       the write fiber; serialises every mutation
-/mail/thread/<tid>/msg/<n>      one signed message per grub (noun marc)
+/mail/thread/<tid>/msg/<slot>   one signed message per grub (noun marc)
+                                slot is (sham [id sig]), never positional:
+                                position would break the [id sig] key that
+                                keeps a forged copy from shadowing a real one
 /mail/thread/<tid>/meta         local state: read, archived, labels
 /mail/blob/<hash>               attachment bytes, weir-gated
 /mail/draft/<id>                unsigned drafts
@@ -573,6 +576,30 @@ silent at the point of failure.
 7. **Never hotfix a single file through the mount.** The mount is a stale
    snapshot and commits wholesale, reverting every file changed since the last
    sync. Deploy the full overlay or nothing.
+
+## Installing the nexus
+
+A nexus cannot install itself: a directory's neck is fixed at creation and no
+runtime surface can set one. Two paths, and both are needed:
+
+- **The durable one** is a covering row in grubbery's own `lib/root.hoon`:
+  `[%fall %| /apps/'urmail.urmail_app' [`[`[/urmail %app] ~ %.n ~] ~]]`.
+  Lattice's row sits three lines above it and this is the established pattern
+  for an overlay distribution. That file is outside this repo, so a grubbery
+  pull reverts it — a cost urmail shares with lattice, and the thing the parked
+  code-in-the-ball plan exists to remove.
+- **The fresh-ship bootstrap** is `create_folder {path:'/apps',
+  name:'urmail.urmail_app', nexus:'/urmail/app'}` over the grubbery MCP. Both
+  arguments are load-bearing and each is wrong in a different way: a `nexus` of
+  `/urmail` yields the neck `[~ %urmail]`, which looks for a flat
+  `/nex/urmail.hoon` that does not exist, the build fails, and `make` banks an
+  **empty node** — scries return nothing and no writer spawns. A `name` of
+  `urmail` rather than the compound `urmail.urmail_app` keys the node where
+  nothing looks for it, and writer pokes crash with `inert: no handler` even
+  though the tree seeded fine.
+
+Editing the source afterwards does **not** re-seed a wrong-neck node; reload
+gates on neck-match. A bad install has to be removed and redone.
 
 ## The writer, and the change beacon
 
