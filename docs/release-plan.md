@@ -164,6 +164,27 @@ repo, and a grubbery pull reverts it.** `sync-overlay.sh` greps for the row and
 prints it when it is missing; that is a check, not a fix. Whatever carries
 lattice's row through a distribution has to carry urmail's.
 
+## The real-key path — proven
+
+Every `verified` verdict produced during development came from the fake-ship
+key derivation, because both dev ships are fake and `+peer-pass` short-circuits
+before the `%puby` scry on a fake ship. The whole-product review called this
+the largest gap in the product: the path that verifies a *real* planet had
+never executed.
+
+Closed on 2026-09-08 on `~martyr-sanryg`, by the user in the dojo:
+
+- `%puby` returns a key on a real ship (`~zod`, life 6, crypto-suite 1 = `%b`,
+  the same suite the fake derivation uses). The annotation read off jael's
+  source matches a live return.
+- The ship's own `%vein` ring signed a `%urmail`-salted digest and the pass from
+  its own Azimuth snapshot verified it, through the same arms `+sign-with` and
+  `+verify-with` use. `%.y`.
+
+Transcripts in `docs/verification.md`. What remains is not a gate: the nexus's
+own `+peer-pass` `%puby` branch executes for the first time on the first real
+ship that runs urmail. The crypto beneath it is now known good.
+
 ## Sequence
 
 1. ~~Finish the attachment fix wave.~~ Done.
