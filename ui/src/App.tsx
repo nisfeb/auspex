@@ -2,13 +2,18 @@ import { useEffect, useState, useCallback } from 'react'
 import { inbox, subscribeUpdates, unsubscribe, type InboxEntry } from './api'
 import ThreadList from './ThreadList'
 import ThreadView from './ThreadView'
-import Compose from './Compose'
+import Compose, { type ForwardIntent } from './Compose'
 
 export default function App() {
   const [entries, setEntries] = useState<InboxEntry[]>([])
   const [inboxError, setInboxError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
+  // Non-null while the composer is open as a forward. Held here rather
+  // than in ThreadView so the forward composer is the same panel as the
+  // compose one — one composer, one code path, one place where the
+  // recipient list is built (from nothing).
+  const [forwarding, setForwarding] = useState<ForwardIntent | null>(null)
   // The most recent /updates push, so the open thread (if any) can react
   // to it. ThreadView compares the id against its own and only refetches
   // when they match, so one push never causes every thread to refetch.
@@ -68,16 +73,24 @@ export default function App() {
               id={selected}
               onSent={refresh}
               onDeleted={() => { setSelected(null); refresh() }}
+              onForward={(f) => { setComposing(false); setForwarding(f) }}
               updatedAt={threadUpdate && threadUpdate.id === selected ? threadUpdate.seq : null}
             />
           )
           : <p className="p-8 text-neutral-400">Select a conversation</p>}
       </main>
 
-      {composing && (
+      {(composing || forwarding) && (
+        // Keyed so that hitting Forward while a blank compose is open
+        // remounts the panel instead of retrofitting a `prev` onto a
+        // draft whose subject and recipients were typed for something
+        // else. The initial state of a forward composer is only correct
+        // on mount.
         <Compose
-          onClose={() => setComposing(false)}
-          onSent={() => { setComposing(false); refresh() }}
+          key={forwarding ? `forward:${forwarding.prev}` : 'compose'}
+          forward={forwarding}
+          onClose={() => { setComposing(false); setForwarding(null) }}
+          onSent={() => { setComposing(false); setForwarding(null); refresh() }}
         />
       )}
     </div>

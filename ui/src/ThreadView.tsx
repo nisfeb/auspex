@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { thread, send, markRead, deleteThread, ourShip, type Thread } from './api'
 import VerdictBadge from './VerdictBadge'
+import type { ForwardIntent } from './Compose'
 
 // The default reply audience.
 //
@@ -31,11 +32,15 @@ function defaultRecipients(th: Thread): string[] {
 }
 
 export default function ThreadView({
-  id, onSent, onDeleted, updatedAt,
+  id, onSent, onDeleted, onForward, updatedAt,
 }: {
   id: string
   onSent: () => void
   onDeleted: () => void
+  // Opens the composer as a forward: `prev` set to this thread's newest
+  // message and NO recipients. See ForwardIntent in Compose.tsx for why
+  // the audience is not carried across.
+  onForward: (f: ForwardIntent) => void
   // Set by App when a /updates push names this thread's id. An opaque,
   // monotonically increasing value (not a timestamp) that only changes
   // for the thread currently open, so it is safe as an effect dependency:
@@ -202,11 +207,28 @@ export default function ThreadView({
     <div className="p-8">
       <div className="mb-6 flex items-start gap-4">
         <h1 className="text-2xl">{t.messages[0].subject}</h1>
+        {/* Forward is a reply addressed elsewhere: same poke, `prev`
+            pointing into this chain, `to` naming someone new. The chain
+            it carries is the payload, and the recipient can verify every
+            author in it without ever having met them - which is why the
+            composer says so before the To field. */}
+        <button
+          type="button"
+          onClick={() => onForward({
+            prev: last.id,
+            subject: last.subject,
+            count: t.messages.length,
+          })}
+          title={`Hand this whole conversation to someone new. All ${t.messages.length} signed messages travel; the recipient can verify each author independently.`}
+          className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+        >
+          Forward
+        </button>
         <button
           type="button"
           onClick={onDelete}
           title="Remove this conversation from this ship. The only way to free a thread pinned at a capacity limit."
-          className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
+          className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
         >
           Delete
         </button>
