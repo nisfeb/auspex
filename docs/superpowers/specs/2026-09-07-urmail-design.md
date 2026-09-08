@@ -335,3 +335,149 @@ Thunderbird integration, and any bridge to internet email.
 
 Thunderbird in particular is explicitly not designed for. If it happens it is an
 adapter written against whatever API exists then.
+
+---
+
+# v2 — the mail client around the provenance layer
+
+v1 proved the hard part: signed chains, portable provenance, per-message
+verdicts. What it did not do is behave like a mail client. This section
+specifies eleven additions. None of them may weaken the v1 guarantees, and
+two of them touch signed data and therefore get the same care as the crypto.
+
+## The rule that governs all of it
+
+**Nothing here changes what is signed except attachments, and attachments are
+signed.** `unsigned` gains one field, `attachments`, carrying metadata and a
+content hash. Everything else — labels, archive state, read state, drafts,
+filters — is *local* state about a message, never part of it. Two ships can
+disagree about whether a thread is archived; they can never disagree about
+who signed it.
+
+## Attachments
+
+The chain travels whole on every send, so bytes must not live in the chain.
+
+```hoon
++$  attachment
+  $:  name=@t          ::  original filename
+      size=@ud         ::  bytes
+      mime=@t          ::  content type
+      hash=@uv         ::  (sham contents)
+  ==
+```
+
+`attachments=(list attachment)` goes **inside `unsigned`**, so it is covered by
+the signature and by `msg-id`. Swapping a file breaks the signature. The bytes
+live in a separate store:
+
+```hoon
+blobs=(map @uv @)    ::  hash to contents
+```
+
+- Sending stores the bytes locally, puts the hash in the message, signs, ships
+  the chain as before. The chain grows by ~100 bytes per attachment regardless
+  of file size.
+- Receiving stores the chain immediately. Bytes are **not** pushed.
+- Opening a message with an attachment the ship lacks pokes the sender with
+  `[%want-blob hash=@uv]`; they answer with `[%blob hash=@uv data=@]`.
+- **A received blob is accepted only if `(sham data)` equals the hash it was
+  requested under.** A ship that answers with different bytes is ignored. This
+  is the same discipline as message verification: the hash is the authority,
+  not the sender.
+- `max-blob` caps a single attachment. `max-blobs` caps total blob storage;
+  when full, the oldest unreferenced blobs are evicted. Blobs are a cache —
+  losing one loses a file, never a message or a signature.
+- A blob request is answerable by **anyone holding the bytes**, not only the
+  author, exactly as chains are forwardable by anyone. The hash makes the
+  courier irrelevant.
+
+## Labels, and folders as views over them
+
+Labels are local, per-thread, and never travel:
+
+```hoon
+labels=(map thread-id (set @tas))
+```
+
+A **folder** is not a separate concept. The sidebar shows views:
+
+| View | Definition |
+|---|---|
+| Inbox | not archived, and we are a participant |
+| Sent | any message in the thread is authored by us |
+| Archived | in `archived` |
+| Drafts | from `drafts` |
+| `<label>` | has that label |
+
+That is Gmail's model and it avoids a second taxonomy that would inevitably
+disagree with the first.
+
+## Archive
+
+```hoon
+archived=(set thread-id)
+```
+
+Archiving removes a thread from the Inbox view only. It is not deletion, it
+does not touch the chain, and a new message arriving in an archived thread
+**un-archives it** — otherwise mail silently disappears.
+
+## Read and unread
+
+`read` already exists. v2 adds the inverse action so a user can mark a thread
+unread again. Forged messages continue never to count toward unread.
+
+## Drafts
+
+```hoon
++$  draft  [id=@uv to=(set ship) subj=@t body=@t prev=(unit msg-id) at=@da]
+drafts=(map @uv draft)
+```
+
+Drafts are local and unsigned — a draft is not a message and must never be
+mistaken for one. Sending a draft signs it at that moment and deletes the
+draft. The UI saves on a debounce and on close.
+
+## Filters
+
+```hoon
++$  rule
+  $:  id=@uv
+      from=(unit ship)      ::  match sender
+      subject=(unit @t)     ::  substring match
+      add=(set @tas)        ::  labels to apply
+      archive=?             ::  skip the inbox
+  ==
+rules=(list rule)
+```
+
+Applied in `+receive` **after verification**, never before — a filter must not
+be able to suppress a `%forged` message, since that would let an attacker who
+learns your rules hide evidence. Filters may add labels and archive; they may
+not delete, and they may not mark read.
+
+## Search
+
+Substring match over subject, body and sender across stored threads, computed
+on demand. No index in v1: state is capped at `max-threads`, and a linear scan
+over that is acceptable and honest. Search covers `%forged` messages too and
+labels them in results — hiding them would be the same mistake as filtering
+them.
+
+## Pagination
+
+`/x/inbox` takes an offset and a limit. The agent returns a page plus a total,
+so the UI can render controls without fetching everything. Views other than
+Inbox paginate identically.
+
+## Recipient validation
+
+`@p` parsing happens in the UI before the poke, so a typo is caught at the
+keystroke rather than surfacing as a mark-parse failure with no explanation.
+The agent keeps its own validation — the UI is a convenience, not the boundary.
+
+## What v2 still does not do
+
+Rich text, threading collapse, keyboard shortcuts, contacts, spam
+classification, delivery receipts, and any bridge to internet email.
