@@ -145,6 +145,82 @@ export default function ThreadView({
   }
   if (!t) return null
 
+  const onDelete = async () => {
+    // Deleting drops evidence: the signed chain is the artifact, and a
+    // forged message in it is proof of an attempt. Worth a confirm.
+    if (!window.confirm(
+      'Delete this conversation and everything stored under it? '
+      + 'The signed chain, including any forged messages kept as evidence, '
+      + 'is removed from this ship. Other ships keep their own copies.',
+    )) return
+    try {
+      await deleteThread(id)
+      onDeleted()
+    } catch (e) {
+      console.error(e)
+      setSendError('Could not delete this conversation.')
+    }
+  }
+
+  // A THREAD THIS SHIP CANNOT READ A SINGLE MESSAGE OF.
+  //
+  // The nexus serves this rather than 404ing, deliberately: the copies
+  // are on disk, this build refuses them (see `unreadable`), and a 404
+  // would say "no such thread", which is a different and false thing.
+  // So `messages` is empty and every field below that reads from it —
+  // `messages[0].subject` for the heading, `last` for reply and forward
+  // — has nothing to read. Rendering that pane threw, and a throw during
+  // render unmounts the WHOLE React tree, so one such thread blanked the
+  // entire app rather than degrading one pane. main.tsx now carries a
+  // boundary so no render can do that again; this branch is why it does
+  // not have to.
+  //
+  // Reachable on any ship carrying pre-freeze mail, which is not
+  // hypothetical: ~wex holds three such threads.
+  //
+  // What the pane offers is the honest set: the count, why, and Delete —
+  // the only action that can act on messages nothing can read. There is
+  // no reply target, so there is no composer.
+  if (t.messages.length === 0) {
+    return (
+      <div className="p-8">
+        <div className="mb-6 flex items-start gap-4">
+          <h1 className="text-2xl text-neutral-500">Unreadable conversation</h1>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Remove this conversation from this ship. Other ships keep their own copies."
+            className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
+          >
+            Delete
+          </button>
+        </div>
+        <p className="rounded bg-neutral-100 p-3 text-sm text-neutral-700 ring-1 ring-neutral-300">
+          {t.unreadable === 0 && 'This conversation holds no message this ship can show.'}
+          {t.unreadable === 1 && (
+            <>
+              The only stored copy of this conversation is in a message format this
+              ship can no longer read. It is still on disk. It is not shown because
+              rewriting it into the current format would break the signature that
+              makes it evidence, and a message whose signature no longer matches its
+              own contents is one every other ship reads as forged.
+            </>
+          )}
+          {t.unreadable > 1 && (
+            <>
+              All {t.unreadable} stored copies of this conversation are in a message
+              format this ship can no longer read. They are still on disk. They are
+              not shown because rewriting one into the current format would break the
+              signature that makes it evidence, and a message whose signature no
+              longer matches its own contents is one every other ship reads as forged.
+            </>
+          )}
+        </p>
+        {sendError && <p className="mt-3 text-sm text-red-600">{sendError}</p>}
+      </div>
+    )
+  }
+
   // WHICH MESSAGE A REPLY OR FORWARD POINTS AT.
   //
   // Not simply the last one. `messages` is ordered by `sent`, which is a
@@ -192,23 +268,6 @@ export default function ThreadView({
     setRecipients(next)
     setPending('')
     return next
-  }
-
-  const onDelete = async () => {
-    // Deleting drops evidence: the signed chain is the artifact, and a
-    // forged message in it is proof of an attempt. Worth a confirm.
-    if (!window.confirm(
-      'Delete this conversation and everything stored under it? '
-      + 'The signed chain, including any forged messages kept as evidence, '
-      + 'is removed from this ship. Other ships keep their own copies.',
-    )) return
-    try {
-      await deleteThread(id)
-      onDeleted()
-    } catch (e) {
-      console.error(e)
-      setSendError('Could not delete this conversation.')
-    }
   }
 
   const onReply = async () => {

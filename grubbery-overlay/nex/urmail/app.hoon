@@ -595,7 +595,40 @@
 ::    while this is wanted only by the two read routes and once at
 ::    rise.
 ::
+::    TAKES THE THREAD'S BALL AND DIVES INTO msg/, exactly as
+::    +collect-slots does, and for the same reason: msg/ is where the
+::    copies are, and the sibling `meta` leaf is a $meta and not a
+::    $stored-msg. Counting from the thread ball counted meta too - it
+::    fails +read-stored the way a pre-freeze grub does, because that
+::    ladder answers one question and meta is not an answer to it - so
+::    every ordinary thread on the ship would have reported one
+::    unreadable copy it does not have. The two walks have to agree on
+::    what they are walking or the count is not of the same thing the
+::    listing shows.
+::
 ++  unreadable-in
+  |=  kid=ball:tarball
+  ^-  @ud
+  =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
+  ?~  sub  0
+  (unreadable-under u.sub)
+::
+::  +unreadable-under: the recursive half, over one node of the message
+::  tree and everything below it.
+::
+::    `here` and `below` are added. They were not: the recursion was one
+::    +roll whose accumulator starts at the BUNT of its own sample, so
+::    every level computed its own count and then threw it away by
+::    starting the children's fold at 0. The arm therefore answered 0
+::    for every thread on every ship, which made the whole
+::    unreadable-copy report dead: +serve-thread's `lost` was always 0,
+::    so a thread whose every copy is unreadable took the 404 branch
+::    that is meant for a thread that is not there, +inbox-json's
+::    placeholder row was unreachable, and the banner never rendered.
+::    A count that is structurally always zero is worse than no count,
+::    because the surfaces above it read it as good news.
+::
+++  unreadable-under
   |=  b=ball:tarball
   ^-  @ud
   =/  here=@ud
@@ -604,9 +637,12 @@
     |=  [c=[=sang:tarball gain=? bang=(unit tang)] acc=@ud]
     ?:  (is-boom:tarball sang.c)  +(acc)
     ?~((read-stored (sang-noun:tarball sang.c)) +(acc) acc)
-  %+  roll  ~(val by dir.b)
-  |=([kid=ball:tarball acc=@ud] (add acc (unreadable-in kid)))
+  =/  below=@ud
+    %+  roll  ~(val by dir.b)
+    |=([kid=ball:tarball acc=@ud] (add acc (unreadable-under kid)))
+  (add here below)
 ::
+
 ::  +chain-of: a thread's copies as one chain, WHOLE TREE INCLUDED.
 ::
 ::    This is the local view: opening a thread shows every branch of it,
