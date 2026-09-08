@@ -333,6 +333,30 @@
 ++  max-to       100          ::  recipients per message
 ++  max-copies   4            ::  copies (same id, distinct sig) per message
 ++  max-threads  10.000       ::  distinct threads this ship will hold
+::  +max-depth: the deepest ancestry a thread may hold.
+::
+::    Depth is not free and is NOT off the read path. A message is
+::    stored under its ancestry, so its road carries one ~34-byte
+::    segment per ancestor, and the nexus rebuilds those keys on every
+::    peek of the mail tree - which is every send, every read-mark,
+::    every delivery and every inbox listing. Cost is quadratic in
+::    depth, and max-chain alone would let ONE hostile linear chain pin
+::    a thread at depth 1.000 permanently: measured, 200 messages at
+::    depth 200 already cost ~1.8x the same 200 at depth 2, and 1.000
+::    extrapolates to minutes of writer time per read, forever, until
+::    the thread is deleted.
+::
+::    64 is deliberately far above any real conversation - sixty-four
+::    sequential replies with nobody branching - and far below where
+::    the quadratic bites. Like every other cap it REFUSES rather than
+::    truncates, because a chain that violates a limit is not partially
+::    trustworthy, and it is checked on the MERGED result too, since
+::    two chains each inside the cap can compose past it. The cost of
+::    that, stated plainly: a thread genuinely deeper than this accepts
+::    no further messages, exactly as the max-chain distinct-id cap
+::    already behaves, and for the same reason.
+::
+++  max-depth    64           ::  ancestors from root to leaf
 ::
 ::  the attachment limits.
 ::
@@ -1049,4 +1073,23 @@
   |=  c=chain
   ^-  @ud
   ~(wyt in (~(gas in *(set msg-id)) (turn c |=(m=msg (id unsigned.m)))))
+::
+::  +max-ancestry: the deepest root-to-leaf path a chain describes.
+::
+::    One +prev-map and one walk per distinct id, which is the work
+::    +ancestor-map already does to store the chain - so checking costs
+::    no more than accepting, and it is +ancestors that bounds the walk
+::    against a cycle.
+::
+++  max-ancestry
+  |=  c=chain
+  ^-  @ud
+  =/  ps  (prev-map c)
+  %+  roll  ~(tap by ps)
+  |=  [[i=msg-id *] acc=@ud]
+  =/  n  (lent (ancestors ps i))
+  ?:((gth n acc) n acc)
+::
+++  fits-depth
+  |=([c=chain m=@ud] (lte (max-ancestry c) m))
 --

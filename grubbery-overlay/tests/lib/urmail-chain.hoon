@@ -871,4 +871,18 @@
     (expect !>((under-any:urmail /r/a/b/slot ds)))
     (expect !>(!(under-any:urmail /other/slot ds)))
   ==
+::
+::  +max-ancestry is what the depth cap is measured against: the DEEPEST
+::  root-to-leaf path, not the message count. The branching thread is
+::  four messages and three deep.
+++  test-max-ancestry-is-the-deepest-path
+  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
+  ;:  weld
+    (expect-eq !>(3) !>((max-ancestry:urmail ~[r a a2 b])))
+    (expect-eq !>(1) !>((max-ancestry:urmail ~[r])))
+    (expect-eq !>(0) !>((max-ancestry:urmail ~)))
+    ::  the cap refuses at the boundary the way every other one does
+    (expect !>((fits-depth:urmail ~[r a a2 b] 3)))
+    (expect !>(!(fits-depth:urmail ~[r a a2 b] 2)))
+  ==
 --

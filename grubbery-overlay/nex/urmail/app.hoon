@@ -784,6 +784,10 @@
   ::  while looking successful here.
   ?.  (fits-length:uc new max-chain:uc)
     (reject root 'chain too long')
+  ::  and the same for depth, for the same reason: a reply past the cap
+  ::  would be stored here and refused by every recipient, silently.
+  ?.  (fits-depth:uc new max-depth:uc)
+    (reject root 'chain too deep')
   ::  the thread is already resolved: `tid` came from `prev`, which names
   ::  exactly one message, and a compose is by definition a new root.
   ::  Re-deriving it with +thread-key here would be slower AND wrong -
@@ -896,6 +900,13 @@
   ::  body-mime is a signed field a recipient cannot repair, so it is
   ::  bounded here where the chain is still refusable whole.
   ?.  (fits-body-mimes:uc c max-mime:uc)   (reject root 'bad body mime')
+  ::  DEPTH, refused before verification because it is the cheapest
+  ::  refusal and the walk is bounded. A message is stored under its
+  ::  ancestry and every peek of the mail tree rebuilds those keys, so
+  ::  depth is quadratic and is NOT off the read path - see +max-depth.
+  ::  This one bounds a single poke; the merged check below is what
+  ::  actually bounds what ends up on disk.
+  ?.  (fits-depth:uc c max-depth:uc)       (reject root 'chain too deep')
   ;<  fake=?  bind:m  fake-ship
   ;<  keys=(map [ship @ud] (unit pass))  bind:m
     (key-map fake ~(tap in (signers:uc c)) ~)
@@ -915,6 +926,12 @@
   ::  messages. The cost is recorded in the spec and not hidden.
   ?.  (lte (distinct-ids:uc new) max-chain:uc)
     (reject root 'too many messages')
+  ::  and the merged depth, since two chains each inside the cap can
+  ::  compose past it. Same reasoning as the distinct-id cap directly
+  ::  above, including the cost: a thread genuinely deeper than
+  ::  max-depth accepts nothing further.
+  ?.  (fits-depth:uc new max-depth:uc)
+    (reject root 'chain too deep')
   ::  an EXISTING thread always accepts - a reply must never be refused
   ::  because some unrelated thread filled the cap. Only a brand-new
   ::  thread id is capped.
