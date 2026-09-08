@@ -837,10 +837,13 @@ will ever see. Ids naming nothing are skipped rather than refused: a set is a
 client reporting what it just rendered, and a thread deleted in another tab
 between render and poke would otherwise fail the whole batch.
 
-**The client has no attachment control.** A message that carries a file renders
-with no sign of it, and no route exposes the blob actions the writer already
-implements (`%fetch-blob`, `%restrict-blob`, `%publish-blob`, and files on
-`%send`). That is a gap in the surface, not in the nexus.
+**The attachment surface is the one part of this table still being written.**
+The writer has implemented `%fetch-blob`, `%restrict-blob`, `%publish-blob` and
+files on `%send` since the attachments slice, and until this round no route
+reached any of them — a message carrying a file rendered with no sign of it.
+That work is in flight as this is written, so treat the table above as the
+surface at this commit and read `+handle-request` for the current one. The gap
+was always in the surface, never in the nexus.
 
 ---
 

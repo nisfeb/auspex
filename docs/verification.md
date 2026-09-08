@@ -200,8 +200,15 @@ them at all — see the spec's overlay import rule.
   with a web code should load `/apps/urmail` and open a branched thread on both
   ships before this is called done.**
 - **The unreadable-count row.** `+collect-unreadable` and the placeholder listing
-  row were added in the second review round and are covered by the ladder's
-  tests, but no transcript in this record shows one rendered in a browser.
+  row were added in the second review round, and no transcript in this record
+  shows one rendered in a browser. That caution turned out to be the right one:
+  the count arm answered **structurally zero for every thread on every ship**,
+  because its recursion restarted the accumulator at each level, so the
+  placeholder row was unreachable and a thread whose every copy is unreadable
+  took the 404 branch meant for a thread that is not there. Found and fixed in
+  the round this file was written in. **A count that is always zero is worse
+  than no count, because every surface above it reads it as good news** — and
+  nothing above it was ever driven to notice.
 - **`+deadline` is copied from lattice** rather than calling `with-timeout:io`,
   because the signature differs across grubbery generations in this fleet. Read,
   not measured.
