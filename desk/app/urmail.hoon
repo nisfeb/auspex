@@ -107,7 +107,7 @@
   =/  m=msg:sur       [u (sign-with:urmail (our-ring lyf) (digest:urmail u))]
   =/  old=chain:sur
     ?~  tid  ~
-    chain.(~(got by threads) u.tid)
+    chain:(~(got by threads) u.tid)
   =/  new=chain:sur   (merge:urmail old ~[m])
   =/  rid=thread-id:sur  (root:urmail new)
   =.  threads
