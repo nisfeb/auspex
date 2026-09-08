@@ -278,6 +278,11 @@ Storage is unbounded by design in v1 — see Deliberate limits.
 React, TypeScript, Vite, Tailwind. Three panes, Gmail's layout: thread list,
 thread view, compose.
 
+**The four bullets below describe the GALL surface and are superseded by
+`# v3`'s `## The web surface`.** The layout, the panes and the rule under
+them still hold; the transport does not. There is no scry, no channel poke
+and no agent update path on the nexus.
+
 - `GET /x/inbox` — thread ids, subjects, participants, unread flags, `last`.
 - `GET /x/thread/<id>` — a full chain with per-message verdicts.
 - SSE on the agent's update path for live inbox changes.
@@ -531,15 +536,83 @@ grub with a weir on it.
 /mail/draft/<id>                unsigned drafts
 /mail/rule/<id>                 filters
 /mail/idx                       derived: inbox order, search terms
+/beacon/rev                     the change beacon; nested, never at the root
+/app/index.html                 the built client: one shell, css inlined
+/app/app.js                     and one script
 /ui/main.sig                    binds /apps/urmail
 /ui/requests/<id>               one ephemeral fiber per HTTP request
-/ui/views/*.html                server-rendered pages
 ```
 
 Views are walks over this tree, not stored sets: Inbox is `meta` without
 `archived`, Sent is threads containing a message we authored, a label is the
 threads whose `meta` carries it. Pagination is a bounded tree listing. Search
 is a sweep, the same honest linear scan v2 specified.
+
+## The web surface
+
+This section replaces `/ui/views/*.html`. Earlier drafts of the tree above
+listed server-rendered pages, which is lattice's other serving mode; urmail
+takes the first of the two routes the release plan's Gate 3 sets out and
+serves the existing React client as grubs. That client already renders
+per-message verdict badges with `%forged` visually alarming, an honest
+copy count rather than a misleading message count, editable reply recipients
+with the blast radius stated above the Send button, and forward. Each of
+those took a review round. Rebuilding them as server-rendered views to be
+idiomatic would discard reviewed work to gain nothing the user can see.
+
+The client is two grubs, laid down by `+on-load` and served under the app's
+own route: a shell with its CSS inlined and one script. Assets carried in
+cords wedge every request fiber, which is why lattice ships one document plus
+one script and why this does too. The build refuses to emit a third file.
+
+Every route is owner-gated — urmail has no unauthenticated surface at all, no
+clearweb view and no public form — and every response, errors included, is
+JSON, so the client has one shape to parse.
+
+| Method | Route | |
+|---|---|---|
+| GET | `/apps/urmail` | the shell |
+| GET | `/apps/urmail/app.js` | the script |
+| GET | `/apps/urmail/api/whoami` | our own `@p` |
+| GET | `/apps/urmail/api/inbox` | the listing |
+| GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
+| POST | `/apps/urmail/api/send` | compose, reply and forward |
+| POST | `/apps/urmail/api/read` | mark one message read |
+| POST | `/apps/urmail/api/delete-thread` | remove a thread from this ship |
+
+A read peeks the tree from its own request fiber. A write pokes the writer and
+answers `ok`; nothing but the writer touches the tree. That split is what the
+per-request fibers are for: a send fans out to every recipient with a deadline
+each, and a render or a round trip placed on the writer would queue every
+other mutation on the ship behind it.
+
+`whoami` exists because the reply composer drops us from its own default
+recipient list, and the client is no longer configured with a ship name — it
+is served by the ship it talks to and asks that ship who it is. The old
+`VITE_SHIP` default was silent: aimed at one ship and authenticating as
+another, with nothing obviously wrong until every call failed.
+
+**Live updates are the beacon, not polling.** `/beacon/rev` is one small grub
+the writer bumps after each applied action, and grubbery's keep-SSE endpoint
+streams it. An open client refetches the listing and whatever thread it is
+showing. The beacon says *that* the tree changed, not which thread changed,
+so one event costs one thread refetch rather than one per thread. Polling was
+the fallback and is not needed: the platform already has the stream, and a
+poll interval short enough to feel live would be a request every second or
+two against a serialized pier.
+
+`count` on a listing row is **stored copies, not distinct messages**, and the
+client labels it that way. Up to `max-copies` copies of one message that
+differ in signature are kept deliberately — one genuine, the rest forged — so
+a forged copy cannot shadow a real one. A thread showing four may be one
+message and three forgeries. Calling that a message count would be a lie told
+by the safety mechanism.
+
+Verification is rendered **per message, never per thread**, on both surfaces.
+A listing row draws its sender and subject from the newest non-`%forged` copy
+and carries that copy's verdict, so provenance is visible before the thread is
+opened; the row also flags separately whether the thread holds a forged copy
+at all.
 
 ## Attachments over mesa
 
@@ -622,11 +695,19 @@ shape lattice uses to avoid index races: rise, then loop on `take-poke`, apply,
 bump, recurse. Every write goes through it. Nothing else mutates the tree.
 
 After each applied action the writer bumps a change beacon so open readers live-
-reload. **Marking a message read must not bump it.** Lattice learned this with
+reload. The beacon must be NESTED (`/beacon/rev`, not `/rev`): grubbery's
+keep-SSE does not stream a grub at the nexus root, and a beacon that never
+streams is a UI that looks live and is not.
+
+**Marking a message read must not bump it.** Lattice learned this with
 page history: every view recorded a visit, every visit bumped the beacon, and
 every open reader reloaded — a reload storm produced by nothing a reader could
 see. Read state is not content. In urmail the beacon bumps for new mail, sends,
 deletes, label and archive changes; never for read-marks.
+
+It is worse here than a storm. An open reader answers a bump by refetching
+the thread it is showing, and that refetch marks the thread read again. A
+beacon that moved on a read-mark would be a loop, not a burst.
 
 ## Which overlay libs may import, and what it costs
 
@@ -751,3 +832,67 @@ were considered and rejected. Everything else a mail client needs — labels,
 folders, archive, read state, drafts, filters, BCC records — is local, and two
 ships may disagree about all of it while still agreeing exactly on who signed
 what.
+
+
+---
+
+# Threads branch, and the tree should say so
+
+`prev` has always made a thread a **tree**: two people replying to the same
+message are siblings, and email threads branch constantly. The implementation
+does not reflect that. Messages are stored flat under `msg/<slot>`, `chain` is
+a sorted list, and `+chain-of` merges every slot in a thread into one sequence.
+
+This is not only a missed use of the platform. It is a leak.
+
+## What a chain is
+
+**A chain is a root-to-leaf path, not a whole thread.** That is what the
+original design meant by "a portable communication chain": the conversation
+leading to a message, which is exactly what a recipient needs to verify it and
+exactly what `prev` already describes.
+
+`+do-send` ships `+chain-of`, which is every message in the thread. So
+forwarding a message on one branch delivers the sibling branches too. If two
+participants have a side exchange and one of them forwards a different branch
+onward, the third party receives the side exchange. Nobody asked for that and
+the signatures make it permanent and attributable.
+
+Forwarding must ship **the path from the thread root to the forwarded
+message**, and nothing else. That path is a valid chain on its own: every
+`prev` in it resolves inside it, it contains the unique `prev=~` root, so
+`+thread-key` still files it correctly and every message still verifies
+independently. Smaller, correct, and it stops leaking.
+
+## Storage
+
+Store the branching, do not recompute it. Lattice already solved the shape
+problem this creates — a node that is both a message and a parent — with a
+fixed leaf under each key directory, so that `/a` and `/a/b` can both be
+entries.
+
+The same trick applies: each message id is a directory, its signed copies live
+under a fixed leaf inside it, and its replies are subdirectories keyed by their
+own ids. Then the path to a message *is* its ancestry, branches are sibling
+directories, and reading a chain is walking one path rather than sorting a set
+and chasing pointers through it.
+
+The exact layout is the implementer's call against the platform — depth costs
+something, and a flatter layout with a parent-to-children index is a legitimate
+alternative if deep paths prove expensive. What is not optional:
+
+- **Copies stay separated by signature.** Two copies of one message differing
+  in signature are distinct and both survive; the `[id sig]` anti-shadowing key
+  is untouched by this change and must remain so.
+- **`+prune` is unaffected** — it sheds copies of one message, which live at one
+  node.
+- **Thread identity is unchanged**: the root's id, derived from content.
+- Sibling order matters for display, never for identity. Two ships must still
+  derive the same thread id from the same messages.
+
+## The freeze holds
+
+**This changes no signed field.** `prev` already carries the entire branching
+structure; the tree is a better representation of information the format
+already has. Storage layout, what a forward transmits, and the shape of
+`+merge` are all local decisions. `unsigned` stays closed.
