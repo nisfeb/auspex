@@ -1,436 +1,272 @@
 # urmail — verification record
 
-> **Scope and staleness.** This records the **Gall agent** implementation, which
-> is complete: 37 library tests green, forward working end to end through the
-> UI, live on two ships. Counts below that say 31 predate the forward and
-> spec-gap work; the JSON encoders listed as uncovered now have tests.
->
-> urmail is being ported to a **grubbery nexus** (see the v3 section of the
-> spec). The Gall implementation stays as the reference until the nexus matches
-> it. This record will be rewritten against the nexus when that port lands, not
-> patched incrementally — a half-updated record reads as authoritative and is
-> worse than none, which this project has already learned once.
+Date: 2026-09-08. Subject: **the grubbery nexus**, which is the only urmail
+there is. The Gall build this file used to describe was deleted in `a0d82ca`;
+nothing here refers to it.
 
-This is a record of what was actually run and actually observed while building
-`urmail`, not a summary of the design. For the design itself, read
-`docs/superpowers/specs/2026-09-07-urmail-design.md`. For the task-by-task
-narrative and every controller ruling behind the decisions below, read
-`.superpowers/sdd/2026-09-07-urmail/progress.md` and the `task-N-report.md`
-files it links.
+This records what was actually run and actually observed. For the design, read
+`docs/superpowers/specs/2026-09-07-urmail-design.md`; for the release gates,
+`docs/release-plan.md`.
 
-Where a report's verbatim dojo transcript and the ledger's summary of it
-disagree in wording, this document follows the transcript. No disagreement
-in substance was found between the two while writing this — see "Sourcing
-notes" at the end.
+## The standard of evidence, and how to read this file
 
-## The headline gap: no agent-test harness exists
+Every claim below is filed under one of three headings, and the heading is the
+claim being made about the claim:
 
-**Update, 2026-09-08 (final fix round).** The gap this section describes is
-substantially closed, but not by building an agent harness — by moving the
-logic out of the agent. `+prune`, `+thread-key`, the verdict-freeze fold
-and the four input caps were pure functions of their arguments sitting in
-the agent by placement, not necessity. They now live in
-`desk/lib/urmail.hoon` (still free of `.^`, confirmed by `grep`), the agent
-keeps thin call sites, and the suite grew from 19 tests to **31**, green on
-both `~wex` and `~feb`. What follows describes why no `desk/tests/app/`
-exists and remains accurate; the "zero automated coverage" consequence
-below is superseded by "What the library tests now cover", further down.
+- **Live** — run on a ship and observed. A dojo transcript, a scry of the real
+  ball, or a browser driven against the ship.
+- **Inspected** — read off source (arvo, grubbery, or this repo) and reasoned
+  about. Not run. A reading is not evidence, and this project has already
+  shipped a test that passed the bug it existed to catch.
+- **Unevidenced** — stated somewhere as fact with nothing behind it here.
 
-`desk/tests/` contains exactly one file: `lib/urmail.hoon`, 31 tests, all
-passing (`-test /=urmail=/tests` → `ok=%.y`). There is no
-`desk/tests/app/`.
+**Everything is treated as unverified until it appears under Live.** That
+includes claims made confidently in the slice reports: this file re-files them
+by what the report actually shows, not by what it concludes.
 
-That's not an oversight. `desk/tests/app/urmail.hoon` was written once, in
-Task 5, and could not be made to build. `/+  *test-agent` — the vendored
-harness every agent-level test needs to import — fails to compile on this
-desk with a kernel-level `nest-fail`:
+**Sourcing.** The underlying transcripts are in the slice reports under
+`.superpowers/sdd/2026-09-07-urmail/` — `port-slice-1`, `nexus-slice-2`,
+`attachments-slice-3`, `branching-slice` and `ui-slice`. That directory is
+**gitignored**: it exists on this machine and in no clone. If it is lost, this
+file is what survives, which is why the entries below name what was seen rather
+than only where to look.
 
-```
--need.?(%~ [i=/ t=it(/)])
--have.[it(/) @p /]
-nest-fail
-```
+**Ships.** `~wex` (pier `/home/sneagan/software/wex`, HTTP 8081) and `~feb`
+(`/home/sneagan/software/feb`, 8080), both fake, both running the overlay synced
+from this repo into their own `%grubbery` desk. `~ricsul-bilwyt` was never
+touched. No pier was booted, killed or reset for any of this.
 
-The Task 5 implementer bisected this to the file itself, not to anything in
-`urmail`: a minimal `tests/app/` file containing only `/+  *test-agent` and a
-dummy arm fails identically, regardless of filename or directory
-(`tests/app/` vs `tests/lib/`), which rules out a name collision or a
-directory-specific code path. The controller independently reproduced the
-same failure via `-build-file /=urmail=/lib/test-agent/hoon` on `~wex`, and
-checked every other copy of `test-agent.hoon` reachable in the environment:
-`feb/mcp`'s copy is byte-identical to this desk's, but `feb/mcp` never
-imports it, so it's never actually built there either. **There is no
-408-compatible copy of `test-agent.hoon` anywhere in this environment.**
-Both dev ships (`~wex`, `~feb`) run `%base` at `[%zuse 408]`; the vendored
-harness needs 409. Bumping the dev ships was rejected — the user confirmed
-mid-project that 408 support is required — and patching a 453-line
-kernel-adjacent vendored file was judged disproportionate.
+---
 
-The ruling was to delete `desk/tests/app/urmail.hoon` rather than keep a
-permanently-red file in the suite (a red file that can never go green trains
-people to stop reading red, which is worse than having no test at all), and
-to replace what coverage it would have given with live dojo evidence
-instead. That live evidence exists — see below — but it is **live evidence,
-not a regression test**. Nothing will catch a future regression in it
-automatically.
+## Live
 
-**Consequence as of Task 8, now largely superseded:** every
-security-relevant property fixed in Task 5 — the `+thread-key` identity
-fix, the distinct-id and per-copy caps, the thread-count cap, the
-`%unverified`→`%verified`/`%forged` upgrade path, and the `+prune`
-shed-not-reject behavior — had zero automated test coverage. The final fix
-round moved all of those except the thread-count cap into
-`desk/lib/urmail.hoon` and covered them; see below.
+### The core mail loop
 
-**What still has no automated coverage**, because it genuinely needs a
-bowl or a live agent: the jael scry wrappers (`+our-life`, `+our-ring`,
-`+fake-ship`, `+peer-pass`, `+key-map`), the signing step in `+send`, the
-card emission, the `%urmail-update` fact, the `on-poke` source gate
-(`=(our.bowl src.bowl)`), the JSON encoders, the thread-count cap, and the
-sequencing of `+receive` itself. Those remain backed by live dojo evidence
-only.
+- **Compose signs and stores.** A `%send` on `~wex` wrote one copy at the
+  expected path with `verdict: verified`, and `/tr/last` recorded the thread id.
+- **Reply and forward are one action.** Both resolved `prev` to its containing
+  thread and filed into it; a forward addressed elsewhere carried the chain.
+- **Delivery verifies before storing.** A chain sent `~feb` → `~wex` arrived,
+  was verified on ingest, and was stored with per-copy verdicts.
+- **The third-party property, on the nexus, over real Ames.** A chain authored
+  by a ship neither party had spoken to, couriered by `~feb`, verified on
+  `~wex`. This is the claim the whole design exists to make and it is the one
+  most worth re-running after any change to the signing or key path.
+- **`[id sig]` anti-shadowing is the storage layout.** Two copies of one message
+  differing only in signature were both stored, at two slots under one node,
+  with two different verdicts. Neither overwrote the other.
+- **Redelivery is a no-op.** Re-poking a chain already held wrote nothing and
+  did not move the beacon.
+- **A foreign `%urmail-action` is refused**, while a chain from the same foreign
+  ship is accepted — the source check and the public poke grant doing exactly
+  what they are supposed to.
+- **The writer survives a rejection** and applies the next poke.
+- **`%read` touches `meta` and nothing else.** `%delete-thread` reclaims
+  capacity.
+- **Reload safety.** `|suspend` / `|revive` with mail, blobs and threads present
+  loses nothing; the `%fall` rows cover every dynamic path.
 
-## What the library tests now cover
+### Branching, and the leak that is now closed
 
-All 31 live in `desk/tests/lib/urmail.hoon` and exercise only pure code
-(`desk/lib/urmail.hoon` — no `.^`, confirmed by `grep`). They cover, in
-summary (see the file itself for exact assertions):
+- **The migration ran on live mail on both ships.** Threads stored flat under
+  `msg/<slot>` were re-placed under their ancestry; zero flat files afterwards,
+  every thread present, nothing refused. Read from `peek/tree`, which reflects
+  live grubs — `peek/kids` and `peek/subd` list tombstones and were not used for
+  any absence claim.
+- **The migration is idempotent.** A second full bounce wrote nothing: the
+  writer's trace still carried the outcome from before it, same tree, same
+  thread count (17 on `~wex`).
+- **A sibling branch does not travel.** The negative proof: a thread branched on
+  `~wex`, one branch forwarded to `~feb`, and the other branch's node is
+  *absent* from `~feb`'s tree. Re-proved after the seven review fixes, with a
+  new side message added to the unforwarded branch: still absent.
+- **The forwarded path verifies end to end** on the receiving ship.
 
-- Sign/verify round-trip, wrong-key rejection, wrong-message rejection
-  (Task 1).
-- `+digest` is exactly `(shaf %urmail (sham u))`, and is domain-separated
-  from an unsalted `(sham u)` and from a `%ames`-salted equivalent (Task 1
-  fix round).
-- `msg-id` covers every field of `unsigned`, including `prev` specifically
-  (Task 2) — the reviewer showed this is the one field not already implied
-  by the digest tests.
-- `+root`, `+participants`, `+merge` (dedupe within `new`, dedupe against
-  `old`, ordering by `sent`, keeping both copies of a signature-collision),
-  `+verify-chain` (missing key → `%unverified`, tampered body → `%forged`,
-  tampered `life` → `%unverified` not `%forged`, correct verdict under a
-  genuinely rotated life, verdict keyed on `[id sig]` not `id` alone), and
-  **the marquee test**, `test-third-party-verifies-forwarded-chain`: a
-  message signed by `~sampel-palnet` and a chain forwarded to
-  `~marbud-marbud`, who has never spoken to `~sampel-palnet`, verifies
-  correctly using only the `(map [ship @ud] (unit pass))` `+all-keys`
-  builds — no network, no second ship, no agent (Task 3).
+### The malformed-dart vector, and its reversal
 
-The opus review of Task 3 confirmed this suite is not vacuously green: a
-hard-coded `%verified` passes the marquee test but fails both tamper tests,
-and vice versa, so the suite is mutually non-vacuous.
+- **A malformed `%urmail-chain` used to destroy the next good message.** With
+  the wire marcs typed, grubbery's `+hydrate` failed the writer process before
+  any nexus code ran and `+rise-wait` consumed the following poke. Reproduced,
+  including `strange restart mark` once per malformed poke.
+- **It no longer does.** With the marcs as noun passthroughs and the clam in
+  `+apply` under `mule`: locally, the malformed poke is refused and the very
+  next poke applies; **remotely** — a foreign ship poking the public-granted
+  `/main.sig` — the message sent immediately after a malformed noun was applied
+  and stored. Zero `strange restart mark`. The remote case is the actual attack
+  and it is the one that was run.
+- A malformed `%urmail-action` behaves the same: refused, and a following
+  `%read` and `%send` both apply.
 
-Twelve more were added in the final fix round, against the logic moved out
-of the agent:
+### Attachments
 
-- `+prune`: sheds rather than rejects; never sheds a `%verified` copy;
-  ranks `%unverified` above `%forged` in the fill bucket; and the full
-  three-way ranking. Each ranking assertion is made in **both input
-  orders**, because `+add:ja` prepends and a single-order fixture passes
-  the broken code by luck — the first draft of these tests did exactly
-  that. Confirmed discriminating by reverting the fill to the old
-  `(skip ms verified)` form on `~wex` and watching two of them go red,
-  then restoring it and watching them go green.
-- `+thread-key`: identity from content rather than list order; identity
-  ignoring the attacker-chosen `sent` field; an established thread's
-  identity immutable against a poke carrying a fresh `prev=~` message;
-  and first contact tolerating a shadowed (junk-signed) root.
-- `+freeze`: a `%verified` or `%forged` verdict is never overwritten;
-  an `%unverified` one can still be upgraded.
-- The input caps as predicates, and `+distinct-ids` counting ids rather
-  than signed copies.
+- **Metadata inside the signature does not break the signature.** A message with
+  an attachment delivered `~wex` → `~feb` and rendered `verdict: verified` with
+  its `attachments` array present, both read out of the same `unsigned` the
+  verdict was computed over.
+- **The chain carries no bytes.** `~feb` held the message and an empty
+  `mail/blob`.
+- **The keen fetch works cross-ship**, answered from `~wex`'s farm at case 1.
+- **A blob whose bytes do not hash to the address is discarded.**
+- **Farm bindings survive `|suspend` / `|revive`.** `~feb` culled its copy of a
+  blob `~wex` had grown before two bounce cycles, then re-fetched it
+  successfully. `+republish-all` is insurance against a lost yoke, not routine
+  repair — and it does not raise a case by running again.
+- **Publishing an already-public blob bricks it, and the gate that prevents that
+  was verified** — the case-ladder behaviour was measured on the live pier, not
+  inferred from the kernel.
+- **Restriction withdraws.** After `%restrict-blob`, a keen for the blob misses.
+  The **grant** half did not run: no usergroup exists for it, and the writer
+  logged `withdrawn but ungranted` rather than attempting a `make` that would
+  crash it. That is the designed behaviour and the limit is real.
 
-**These tests still do not touch `desk/app/urmail.hoon`.** They cover the
-arms that used to live there. `+receive`'s sequencing, the thread-count
-cap, the scry wrappers and the JSON encoders remain agent-layer and
-uncovered.
+### The format refusal — for the pre-branching layout only
 
-## The three-ship provenance test: not run
+- `~feb` was rolled back to the slice-2 overlay, wrote a genuine `%0` grub, and
+  was carrying a `%1` grub from an earlier deploy. The frozen (`%2`) code was
+  deployed over both.
+- **Both grubs survived on disk, both rendered `unreadable`, neither was
+  labelled, rejected, counted or relabelled `%forged`.** The reload said nothing
+  about either: `/tr/last` still named the pre-upgrade send.
+- **Dropped before verification, proven rather than asserted:** a reply naming
+  either old message was refused `unknown prev` on both ships — the reader never
+  returns them, so their ids cannot resolve.
+- **A version-0 `$meta` upgraded in place** in the same reload, which is the
+  contrast the design rests on: local state migrates, signed state cannot.
 
-Task 8's brief asked for a booted third fake ship (`~c`), with a
-`~wex → ~feb → ~c` forward, so that `~c` — a ship with no prior contact with
-`~wex` — could be shown verifying `~wex`'s message. **This was not done.**
-The user was asked and had not started a third pier, and per standing
-constraint no agent boots or kills piers in the user's tmux. This step is
-skipped, not attempted-and-failed.
+**This transcript predates the branching slice and was produced against the flat
+`msg/<slot>` layout.** An old grub met by `+migrate-flat` is not exercised by it,
+and that is Gate 4's remaining debt. See `docs/release-plan.md`.
 
-What stands in its place, and why it's not merely "the same thing with fewer
-moving parts":
+### The web surface
 
-**Pure coverage (no network at all).** `test-third-party-verifies-forwarded-chain`
-(Task 3, still passing as of the current 19-test suite) proves the
-verification *logic* is sound for a genuine third party: `~marbud-marbud`
-verifies `~sampel-palnet`'s signature on a forwarded message using only a
-key map, never having exchanged a single byte with `~sampel-palnet`. This
-is the fallback the Task 8 brief itself names for a declined third ship, and
-it was already in place before Task 8 began.
+Driven from a real headless browser over CDP against the ships, in the UI slice:
 
-**Live coverage (real ships, real Ames, no automated test).** Task 5's fix
-round 2 produced something stronger for the live side: a chain whose
-`unsigned` payload names `from=~sampel-palnet` and `to={~palnet-sampel}` was
-signed using the fake-ship deterministic key derivation (`fake-ring:urmail`
-— the same mechanism `%deed` uses for fake ships, and the same mechanism the
-pure tests use; `~sampel-palnet` and `~palnet-sampel` were never booted
-piers, only cryptographic identities derived and used offline), then poked
-directly into `~wex` from `~feb`'s dojo using dojo's remote-sink syntax:
+- The inbox lists the real threads on the ship.
+- Per-message verdict badges render, including `%forged`.
+- Compose, reply and forward work through the UI; a message sent from `~feb`
+  appears on `~wex`.
+- **The beacon is live and silent on a read-mark** — the loop the design
+  refuses to build was checked for, not assumed.
+- The served assets are byte-identical to the committed build, and
+  `/apps/urmail/` with a trailing slash serves the same shell.
+- Unauthenticated, `/apps/urmail` and `/apps/lattice` both answer 403 on both
+  ships, while an unbound app answers eyre's own 307 — so the 403s are real
+  bindings and not a catch-all.
+
+### Neighbours and health
+
+- **Lattice is unharmed** on both ships throughout: it answers authenticated on
+  its own routes, its SPA included, after every urmail deploy.
+- CPU after the final round: `~wex` 7.9%, `~feb` 2.9% over multi-day uptimes —
+  no crashed-fiber respawn loop, which is the failure mode an absolute-road
+  mistake produces.
+- Deployed files byte-identical to `HEAD` on both ships, marcs included.
+
+### Tests
+
+`ok=%.y` on both ships, after the final round:
 
 ```
-~feb:dojo> =urm -build-file /=urmail=/lib/urmail/hoon
-~feb:dojo> =u [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'remote-boundary' 'stranger, remote' ~2026.1.2 ~]
-~feb:dojo> =m [u (sign-with:urm (fake-ring:urm ~sampel-palnet) (digest:urm u))]
-~feb:dojo> :~wex/urmail &urmail-chain ~[m]
->=
+-test /=grubbery=/tests/lib/urmail-chain ~     56 OK
+-test /=grubbery=/tests/lib/urmail-web   ~     15 OK
 ```
 
-`src.bowl` on that poke was `~feb` — a real, running, remote ship, over real
-Ames — and `~feb` is neither the message's sender, its recipient, nor `~wex`
-itself. `:urmail &dbug [%state '']` on `~wex` afterward showed the chain
-stored, `~sampel-palnet`'s message reading `%verified`,
-`participants={~sampel-palnet ~palnet-sampel}`, and `~wex` present in
-neither `participants` nor anywhere else in the chain. `~wex` accepted and
-correctly verified a message from a ship it has never had any relationship
-with, delivered by a courier that also has no relationship with the
-message's author or recipient.
+71 total. Both libs are import-free, which is the only reason `-test` can reach
+them at all — see the spec's overlay import rule.
 
-**What this proves and what it doesn't.** It proves: (a) signature
-verification is authoritative regardless of who delivers a chain — the
-courier is not checked and is not a participant, exactly the design's
-central claim; (b) this holds over real Ames between two genuinely
-independent, currently-running ships, not just inside one VM's pure test
-runner. It does **not** prove a chain traveling through *three sequential
-live hops* (author ship → forwarder ship → final ship, each a real running
-pier that must itself verify, re-sign nothing, and re-transmit correctly)
-behaves the same way, because `~sampel-palnet` and `~palnet-sampel` never
-ran as piers — only `~wex` and `~feb` did. A third booted pier would add
-one more real relay in the chain of custody; this configuration substitutes
-a cryptographically genuine but unbooted third identity instead. The
-controller's judgment, recorded in `progress.md`, is that this is a
-stronger demonstration of the property the design cares about (courier
-identity is irrelevant to verification) even though it is a different
-topology than the brief originally asked for. This document states both
-the judgment and the gap it doesn't close, rather than letting the stronger
-framing imply the untested topology also ran.
+---
 
-## What else was verified live, and how
+## Inspected
 
-All of the following comes from verbatim dojo transcripts in the named
-task reports; several were independently reproduced by the controller
-rather than accepted from the implementer's report alone (noted where true).
+- **Jael answers scries only at exactly `now`**, and **`%puby` has no fake-ship
+  branch**. Both read off `pkg/arvo/sys/vane/jael.hoon`. The consequences are
+  designed around rather than tested: the crypto split into pure gates and thin
+  wrappers, and the fake-ship key derivation that mirrors `%deed`.
+- **The `%puby` branch itself has never executed.** It is unreachable on a fake
+  ship, and every verdict observed anywhere in this record went through the
+  fake-ship derivation instead. **Verification against a real Azimuth key has
+  not been run on any ship.** This is the largest single gap in the record: it
+  is the production path for every verdict this product renders.
+- **A nexus cannot create a usergroup.** Read off `lib/nexus.hoon`'s
+  `$registry-action`, which carries `%register`, `%deregister`, `%how` and `%gc`
+  and no group-lifecycle op; the `%how` refusal for a group with no `who.ships`
+  grub *was* observed live, but the conclusion that no op exists is a reading.
+- **The JSON renderers after the branching change.** `+serve-thread` and
+  `+serve-inbox` were verified by reading rather than running in that slice: the
+  authenticated surface needs a login cookie the session could not obtain. They
+  share `+collect-slots` / `+collect-node` with the writer, which *was* exercised
+  end to end, and the renderers never look at a map's key. The pre-branching
+  versions of the same routes were driven live in the UI slice. **A reviewer
+  with a web code should load `/apps/urmail` and open a branched thread on both
+  ships before this is called done.**
+- **The unreadable-count row.** `+collect-unreadable` and the placeholder listing
+  row were added in the second review round and are covered by the ladder's
+  tests, but no transcript in this record shows one rendered in a browser.
+- **`+deadline` is copied from lattice** rather than calling `with-timeout:io`,
+  because the signature differs across grubbery generations in this fleet. Read,
+  not measured.
 
-**Task 1 — the `%vein` scry gate (the project's go/no-go check).**
-`(met 3 .^(@ %j /(scot %p our)/vein/...))` on `~wex` returned `65` — the
-byte length of a real suite-b ring, confirming userspace can reach a ship's
-own signing key before any `urmail` code was written.
+---
 
-**Task 4 — the agent goes live and signs its first real message.**
-After two blocked rounds (kelvin-list vs. kelvin-pin, then a 16-arm agent
-core that built but wouldn't install — both controller misreadings of the
-brief, both caught and fixed rather than worked around), `%urmail` reached
-`app status: running` on `~wex` and `:urmail &urmail-action [%send ...]`
-produced a stored, `%verified` message. The controller independently
-confirmed `+vats` showed `running` with kelvin `[%zuse 408] [%zuse 409]`,
-and independently confirmed that `~wex`'s ship-wide `+dbug` breakage (used
-throughout the project as `&dbug [%state '']` instead) is not a `urmail`
-defect — `:grubbery +dbug` fails identically on a known-good, unrelated app
-on the same ship.
+## Unevidenced
 
-**Task 5 — cross-ship send, reply, and 5-message dedup.** `~wex` sent to
-`~feb`; `~feb` replied via `prev` (the first live exercise of reply
-resolution — it worked on the first attempt); three more alternating
-replies produced a 5-message chain, `%verified` on both sides, with
-**identical thread-ids independently computed by both ships** from the same
-root message, and no growth beyond 5 despite each send re-shipping the
-entire accumulated chain both directions.
+- **The fresh-ship bootstrap.** The spec states that
+  `create_folder {path:'/apps', name:'urmail.urmail_app', nexus:'/urmail/app'}`
+  over the grubbery MCP installs the nexus, and names two specific failure modes
+  for the wrong arguments — an empty node for a bad `nexus`, `inert: no handler`
+  for a bad `name`. **No slice report shows either.** Every install in this
+  record went through the `lib/root.hoon` row instead. Treat the bootstrap
+  paragraph as a hypothesis until someone runs it on a fresh ship.
+- **Gate 4 for the shipping build.** See above.
+- **Attachments on the web surface.** No route exposes any blob action, so
+  nothing about the attachment UX has been verified, because none exists. Being
+  built now.
+- **The ten unbuilt mail-client features.** Labels, folders, archive,
+  mark-unread, sent, drafts, filters, search, pagination, recipient validation:
+  specified, not written, not verified.
 
-**Task 5 — non-participant courier acceptance, twice, closing a real gap
-between the two.** Round 1 poked a `~sampel-palnet → ~palnet-sampel` chain
-into `~wex` from `~wex`'s own dojo — this ruled out a missing
-participant-membership check but left `src.bowl` local (`~wex` itself),
-so it could not rule out the much more plausible regression
-`?>  =(our.bowl src.bowl)` (present nearby in the same code, gating a
-different poke type) accidentally firing here too. The controller caught
-this gap on review. Round 2 closed it by repeating the poke **from `~feb`'s
-dojo into `~wex`** (the transcript quoted above), which is genuinely remote
-and non-participant at once.
+---
 
-**Task 5 — oversized-chain rejection, distinct-copy cap, and the shed fix.**
-A 1,001-message chain against `max-chain=1,000` was rejected with the
-chain-length guard firing, and state was byte-identical before and after
-(reject, not partial-write). A round-2 fix introduced a *reject*-based
-per-message-id copy cap (`max-copies=4`), which the round-3 adversarial
-review found made the censorship attack from the design's own "deliberate
-limits" section *worse*, not better: landing four forged copies of a
-never-seen root at `max-copies` would permanently reject the genuine
-message when it later arrived, for the cost of four junk signatures instead
-of the thousand the raw length cap required. This was fixed by having
-`+prune` **shed** excess copies (never a `%verified` one) instead of
-rejecting the whole poke, and the exact freeze scenario was re-run live to
-confirm the fix: four forged copies landed first, then the genuine message
-was poked and **was accepted and read `%verified`**, with one of the forged
-copies silently shed to make room. `-test /=urmail=/tests` stayed green
-(`ok=%.y`, 19 `OK`) after every round on both ships, confirmed by the
-controller independently on `~wex`, not only from the implementer's report.
+## Known costs, verified as costs
 
-**Task 6 — the anti-shadowing property, visible in the JSON the UI
-consumes.** The controller ran `.^(json %gx /.../inbox/json)` and
-`/x/thread/<id>` scries directly against `~wex`'s live state, independent
-of the implementer's own report, and confirmed a four-copy thread (one
-genuine message plus three signature-tampered copies sharing its id)
-renders **one `verified` and three `forged` verdicts**, keyed on `[msg-id
-sig]` rather than collapsing to a single shared verdict for the id. The
-Task 5/6 fix work exists specifically so this does not collapse; this is
-the strongest single piece of end-to-end evidence in the project that it
-doesn't. `%fact` push (`%urmail-update`) was independently verified firing
-on both send and receive over a real eyre `/~/channel` subscription, not
-just by code inspection.
+These are not defects to be found later; they were measured and accepted, and
+the spec states each one.
 
-**Task 7 — the same property, rendered on screen.** Driving a real headless
-Chromium against `vite dev` proxying to `~wex`, the "shed-test" thread
-rendered as exactly 4 `<article>` elements: one green "verified" pill and
-three red, bold, ring-outlined "FORGED" pills, all sharing one message id
-and identical body text. A compose sent through the UI from `~wex` to
-`~feb` arrived on `~feb`'s own state with `"verdict":"verified"`, confirmed
-via a scry against `~feb` directly — a real signed delivery, not a local
-echo. The `/updates` push path was verified live end-to-end after a fix
-round: a thread left open in the UI against `~wex`, with no reload, went
-from 1 to 2 messages within about a second of a reply poked directly into
-`~feb`, both the open thread and the inbox list updating correctly off the
-same push. A stale-thread race (clicking thread A then B before A's slow
-scry resolved could render A's content under B's header) was found in
-review, "fixed" once ineffectively, and the second fix was confirmed with
-an actual reproduction — the broken code shown failing the race, the fixed
-code shown passing it, three runs — rather than by code-reading alone,
-per the coordinator's explicit instruction not to trust reasoning-only
-evidence here again.
+- **Depth is quadratic and is not off the read path.** Measured: 200 messages at
+  depth 200 cost ~1.8x the same 200 at depth 2. `max-depth` is 64 because of it,
+  and a thread genuinely deeper than that accepts nothing further.
+- **Writes queue behind the writer, including its fan-out.** Observed: a send
+  issued while the writer was fanning out to an unreachable ship took ~8s to
+  return. Reads never touch the writer.
+- **`+thread-key` and `+serve-inbox` are O(total stored messages).** The same
+  scan the design records; the upgrade path in both cases is an index grub.
+- **`+ancestor-map` is O(n²) map lookups** on a chain of *n* distinct ids,
+  recomputed per delivery. Bounded by `max-chain`.
+- **Empty node directories are not reaped.** A cull that empties a node leaves
+  the directory; nothing reads it and nothing is lost.
+- **The distinct-id cap rejects rather than sheds**, which is a per-thread
+  censorship vector requiring no crypto. Deferred deliberately, not overlooked.
 
-## What was checked only by inspection, not live reproduction
+---
 
-Recorded honestly by the Task 5 implementer and left as unclosed gaps, all
-in `desk/app/urmail.hoon` code, none with automated coverage:
+## Re-running any of this
 
-- The thread-count cap (`max-threads=10,000`) and the two capacity guards
-  guarding message-count and thread-count were never triggered live —
-  doing so would require creating on the order of 1,000–10,000 messages or
-  threads by hand through the dojo, judged impractical. They were verified
-  as simple, structurally identical arithmetic guards to the ones that
-  *were* live-tested (`max-chain`, `max-body`, `max-subj`, `max-to`).
-- The `%unverified`-can-upgrade-to-`%verified`/`%forged` fix was verified
-  by inspection only — reproducing it live would require controlling
-  jael's public-key snapshot mid-session (poke once before a key is known,
-  again after), which isn't stageable from a dojo session.
-- Two specific exploits named by the Task 5 Critical finding — a poke that
-  reorders a chain to duplicate a conversation under a fresh thread-id, and
-  a poke with a backdated signed `sent` that migrates an established thread
-  to a new id — were not reproduced as standalone adversarial pokes. The
-  fix (`+thread-key`, resolving identity by `[id sig]` content-membership
-  rather than list position or `sent`) was verified by tracing that no
-  remaining code path reads position or `sent` for identity, and by the
-  live copy-cap tests exercising the same "multiple roots in one poke"
-  shape as one of the two exploits, but not the exploits themselves,
-  byte-for-byte.
-- Moon and comet provenance is out of scope for v1 per the spec (both read
-  `%unverified` regardless of signature validity) and was not exercised at
-  all, live or otherwise — there is no moon or comet identity anywhere in
-  this project's dojo transcripts.
+```
+scripts/sync-overlay.sh /home/sneagan/software/wex/grubbery
+|commit %grubbery
+|suspend %grubbery
+|revive %grubbery
+-test /=grubbery=/tests/lib/urmail-chain ~
+-test /=grubbery=/tests/lib/urmail-web ~
+```
 
-## Deliberate limitations still open on this branch
+The bounce is not optional — a deploy recompiles the nexus but does not respawn
+long-lived fibers, which keep running old code silently. Never hotfix one file
+through the mount: it commits wholesale from a stale snapshot.
 
-These are recorded in the spec and sharpened by later reviews; none of them
-are secret and none of them were fixed in this project:
+## Staleness rule
 
-- **The distinct-id cap can still freeze a thread permanently with one
-  poke and no valid signatures.** Anyone who holds even one `[id sig]` pair
-  from a thread (a legitimate former participant, or anyone a chain was
-  ever forwarded to) can self-sign arbitrary additional distinct messages
-  into that thread — forged messages are stored and counted, no real
-  signature is required to inflate the count — up to the per-thread
-  distinct-id cap, after which the *reject*-based guard (kept as a reject,
-  by explicit ruling, because shedding a distinct non-root id would orphan
-  later `prev` pointers) rejects every further legitimate message forever.
-  The fix, named but not built, is a per-source quota rather than a global
-  per-thread cap.
-- **`+thread-key`'s lookup scans every stored message.** It resolves a
-  poke's thread by scanning for `[id sig]` membership across everything the
-  ship holds, with a `sham` per candidate — O(total stored messages) on the
-  only externally reachable poke. The upgrade path named is a
-  `[msg-id sig] → thread-id` index.
-- **A chain touching two existing threads gets conflated.** If a poked
-  chain's messages match content already stored under two distinct
-  thread-ids, `+thread-key` files everything under whichever match it finds
-  first rather than detecting or resolving the collision.
-- ~~**`+prune`'s fill bucket doesn't rank `%unverified` above
-  `%forged`.**~~ Fixed in the final fix round: the fill is now strictly
-  `%verified`, then `%unverified`, then `%forged`, with tests in both
-  input orders.
-
-Two further items, smaller and outside authenticity: `+merge`'s and
-`+prune`'s sort runs twice per poke (once in each), and shed `[id sig]`
-verdict entries are never garbage-collected from the `verdicts` map, so a
-single poke of junk-signature copies grows `verdicts` even though the
-stored chain itself stays bounded — inside the spec's stated "storage is
-unbounded" allowance, but worth knowing. `%delete-thread` does clear the
-`verdicts` and `read` entries for the thread it removes, so the residue is
-now bounded by whatever the user chooses to keep.
-
-Every capacity limit above is now *recoverable* rather than permanent:
-`[%delete-thread =thread-id]`, added in the final fix round and gated on
-`=(our.bowl src.bowl)`, removes a thread, its inbox entry, its verdicts
-and its read marks. A user whose thread is frozen at the distinct-id cap,
-or whose state is at `max-threads`, no longer has `|nuke` as the only
-remedy.
-
-## Sourcing notes
-
-Every dojo transcript and live-verification claim above is drawn directly
-from the report for the task that produced it (`task-1-report.md` through
-`task-7-report.md`), preferring the report's verbatim output over
-`progress.md`'s prose summary wherever the two could be compared. No
-substantive disagreement between a report and the ledger's summary of it
-was found. The one place the two differ is narrative framing, not fact:
-`progress.md`'s Task 8 ruling (recorded in full at the end of the ledger)
-describes the Task 5 non-participant proof as "on real ships... with a
-remote non-participant courier," which is accurate for the courier
-(`~feb`, a real running ship) but could be misread as claiming
-`~sampel-palnet` and `~palnet-sampel` also ran as piers. They did not — see
-"The three-ship provenance test: not run" above, which states this
-explicitly rather than let the stronger framing carry through unqualified.
-
-One test-count fact worth confirming rather than assuming: task-3-report.md
-records the suite growing from 14 to 19 tests across three in-task fix
-rounds, and task-4, task-5, and task-6 reports each independently confirm
-19 `OK` lines with no further growth or shrinkage for the remainder of the
-project. The current repository state matches: `desk/tests/lib/urmail.hoon`
-contains 19 `++  test-*` arms as of this writing.
-
-## Final fix round, 2026-09-08
-
-Seven review findings were closed on this branch after the document above
-was written. Full detail is in
-`.superpowers/sdd/2026-09-07-urmail/final-fix-report.md`; the live evidence
-is summarized here so this file stays the single record of what was run.
-
-- **Suite: 19 → 31 tests**, `ok=%.y` on `~wex` and on `~feb`.
-  `+vats %urmail` shows `app status: running` with matching `%cz` hashes
-  (`d4k4o`) on both ships.
-- **Reply audience is user-editable.** Driven live in headless Chromium
-  against `vite dev` proxying to `~wex`: the composer rendered the chips
-  `~palnet-sampel` and `~sampel-palnet`, `~sampel-palnet` was removed with
-  its × control, a reply was sent, and a scry of the thread on `~wex`
-  showed the new message's `to` as exactly `~[~palnet-sampel]`. The
-  removed ship did not receive the chain.
-- **The inbox list carries a verdict.** The same session rendered rows as
-  e.g. `~sampel-palnet | verified | + forged | 2 copies | post-refactor`,
-  drawn from the newest non-`%forged` copy, with `+ forged` flagging a
-  thread that also holds a signature-failed copy.
-- **`+send` enforces the receive-side limits.** A 100,001-byte body poked
-  through the dojo on `~wex` nacked with `urmail-body-too-long`; a normal
-  send in the same session succeeded.
-- **`%delete-thread` works from both the dojo and the UI.** Dojo: inbox
-  13 entries → 12, subject gone. UI: 13 rows → 12, selection cleared, the
-  deleted subject absent from the page.
-- **Compose still delivers cross-ship.** A message composed in the UI on
-  `~wex` arrived on `~feb` and scried there as `verdict: verified`.
-- **`+receive` still accepts a stranger's chain after the refactor.** A
-  `~sampel-palnet → ~palnet-sampel` chain carrying one genuine and one
-  junk-signed copy of the same message was poked into `~wex`; it filed
-  under a content-derived thread id, the summary was drawn from the
-  `verified` copy, and the row flagged `forged: true`.
+This file is rewritten, never patched incrementally. A half-updated record reads
+as authoritative and is worse than none, which this project has already learned
+once — the version of this file that described the Gall build outlived that
+build by three slices.
