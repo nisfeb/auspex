@@ -1,5 +1,16 @@
 # urmail — verification record
 
+> **Scope and staleness.** This records the **Gall agent** implementation, which
+> is complete: 37 library tests green, forward working end to end through the
+> UI, live on two ships. Counts below that say 31 predate the forward and
+> spec-gap work; the JSON encoders listed as uncovered now have tests.
+>
+> urmail is being ported to a **grubbery nexus** (see the v3 section of the
+> spec). The Gall implementation stays as the reference until the nexus matches
+> it. This record will be rewritten against the nexus when that port lands, not
+> patched incrementally — a half-updated record reads as authoritative and is
+> worse than none, which this project has already learned once.
+
 This is a record of what was actually run and actually observed while building
 `urmail`, not a summary of the design. For the design itself, read
 `docs/superpowers/specs/2026-09-07-urmail-design.md`. For the task-by-task
