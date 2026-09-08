@@ -1,6 +1,22 @@
 /-  sur=urmail
 /+  *test, urmail
 |%
+::  +forge: build a genuinely signed message as any ship, using the fake-ship
+::  key derivation. This is what lets the third-party forward case be tested
+::  with no network and no second ship.
+++  forge
+  |=  [who=ship to=(set ship) subj=@t body=@t sent=@da prev=(unit msg-id:sur)]
+  ^-  msg:sur
+  =/  u=unsigned:sur  [who 1 to subj body sent prev]
+  [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
+::
+++  all-keys
+  |=  who=(list ship)
+  ^-  (map ship (unit pass))
+  %-  malt
+  %+  turn  who
+  |=(w=ship [w `(fake-pass:urmail w)])
+::
 ::  a signature made with a ship's key verifies against that ship's key
 ++  test-sign-verify-roundtrip
   =/  who   ~sampel-palnet
@@ -57,4 +73,95 @@
     (expect !>(!=(d (digest:urmail base(to (sy ~[~sampel-palnet]))))))
     (expect !>(!=(d (digest:urmail base(prev `0v1)))))
   ==
+::
+::  THE MARQUEE TEST. ~sampel writes to ~palnet; ~palnet forwards the chain
+::  to ~marbud, who has never spoken to ~sampel. ~marbud verifies ~sampel's
+::  signature anyway. This is the one thing a chat app cannot do.
+++  test-third-party-verifies-forwarded-chain
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'from sampel' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  =/  keys  (all-keys ~[~sampel-palnet ~palnet-sampel])
+  %+  expect-eq
+    !>  ~[%verified %verified]
+    !>  (turn (verify-chain:urmail keys ~[a b]) |=([* v=verdict:sur] v))
+::
+::  a tampered body flips the verdict to %forged, not %unverified
+++  test-tampered-body-is-forged
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'real' ~2026.1.1 ~)
+  =/  bad=msg:sur  a(body.unsigned 'tampered')
+  =/  keys  (all-keys ~[~sampel-palnet])
+  %+  expect-eq
+    !>  ~[%forged]
+    !>  (turn (verify-chain:urmail keys ~[bad]) |=([* v=verdict:sur] v))
+::
+::  a tampered life flips the verdict too, since life is inside the digest
+++  test-tampered-life-is-forged
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'real' ~2026.1.1 ~)
+  =/  bad=msg:sur  a(life.unsigned 7)
+  =/  keys  (all-keys ~[~sampel-palnet])
+  %+  expect-eq
+    !>  ~[%forged]
+    !>  (turn (verify-chain:urmail keys ~[bad]) |=([* v=verdict:sur] v))
+::
+::  no key available means %unverified, never %forged. Moons land here.
+++  test-missing-key-is-unverified
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'real' ~2026.1.1 ~)
+  %+  expect-eq
+    !>  ~[%unverified]
+    !>  (turn (verify-chain:urmail (malt ~[[~sampel-palnet ~]]) ~[a]) |=([* v=verdict:sur] v))
+::
+::  merging the same chain twice is a no-op: double delivery must not
+::  duplicate messages
+++  test-merge-dedupes
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  ~[a b]
+    !>  (merge:urmail ~[a b] ~[a b])
+::
+::  merge keeps messages in sent order regardless of arrival order
+++  test-merge-orders-by-sent
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  ~[a b]
+    !>  (merge:urmail ~[b] ~[a])
+::
+::  the root of a chain is the id of its first message, and every ship
+::  computes the same one because the root message is byte-identical
+++  test-root-is-first-message-id
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  (id:urmail unsigned.a)
+    !>  (root:urmail ~[a b])
+::
+::  participants is the union of from and to across the whole chain, so a
+::  ship added by a forward is a participant
+++  test-participants-includes-forward-recipient
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd'  'two'
+        ~2026.1.2  `(id:urmail unsigned.a)
+    ==
+  %+  expect-eq
+    !>  (sy ~[~sampel-palnet ~palnet-sampel ~marbud-marbud])
+    !>  (participants:urmail ~[a b])
 --
