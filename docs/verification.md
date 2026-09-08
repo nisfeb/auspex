@@ -179,6 +179,23 @@ them at all — see the spec's overlay import rule.
 ## Inspected
 
 - **Jael answers scries only at exactly `now`**, and **`%puby` has no fake-ship
+
+**Live, 2026-09-08, `~martyr-sanryg` (real planet), by the user in the dojo:**
+
+```
+> .^(@ud %j /=life=/~zod)
+6
+> .^((unit [@ud @]) %j /=puby=/~zod/6)
+[~ [1 2.224.943.983…]]
+```
+
+The `%puby` scry returns a key on a real ship; the annotation `(unit
+[crypto-suite=@ud =pass])` matches a live return; crypto-suite `1` is suite
+`%b`, the same suite the fake-ship derivation uses, so `com:nu:cric:crypto`
+handles real and fake keys identically. What this does not yet prove: that a
+real Azimuth `pass` verifies a signature from the same ship's real `%vein`
+ring. That is one further dojo sequence on a real ship, pending.
+
   branch**. Both read off `pkg/arvo/sys/vane/jael.hoon`. The consequences are
   designed around rather than tested: the crypto split into pure gates and thin
   wrappers, and the fake-ship key derivation that mirrors `%deed`.
