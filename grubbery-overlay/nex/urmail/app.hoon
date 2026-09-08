@@ -912,6 +912,13 @@
   ::  would be stored here and refused by every recipient, silently.
   ?.  (fits-depth:uc new max-depth:uc)
     (reject root 'chain too deep')
+  ::  and the same for signers. A thread can only exceed the cap through
+  ::  our own sends, since delivery refuses such a chain on arrival, so
+  ::  this is unreachable in practice - which is the point: it fails
+  ::  LOUDLY here, at the one moment a human is looking, instead of
+  ::  succeeding locally and being discarded by every recipient.
+  ?.  (fits-signers:uc new max-signers:uc)
+    (reject root 'too many signers')
   ::  the thread is already resolved: `tid` came from `prev`, which names
   ::  exactly one message, and a compose is by definition a new root.
   ::  Re-deriving it with +thread-key here would be slower AND wrong -
@@ -1074,6 +1081,19 @@
   ::  This one bounds a single poke; the merged check below is what
   ::  actually bounds what ends up on disk.
   ?.  (fits-depth:uc c max-depth:uc)       (reject root 'chain too deep')
+  ::  DISTINCT SIGNERS, and this one is refused HERE - above the two
+  ::  binds below - because those two binds are the cost it bounds.
+  ::  +key-map does one scry to /sys/scry per distinct [ship life], so
+  ::  an unbounded signer set turned one remote poke into up to
+  ::  max-chain internal round trips on the writer, which is the ship's
+  ::  single serialisation point for mail; +verify-chain then pays an
+  ::  ed25519 verify per message on top, and a forged signature costs
+  ::  exactly what a real one does. Every cap above is cheaper than the
+  ::  work it protects, and this is the only one that protects work
+  ::  measured in round trips rather than in bytes. See +max-signers for
+  ::  why the number is 128 and for the per-source rate budget this
+  ::  deliberately does not attempt.
+  ?.  (fits-signers:uc c max-signers:uc)   (reject root 'too many signers')
   ;<  fake=?  bind:m  fake-ship
   ;<  keys=(map [ship @ud] (unit pass))  bind:m
     (key-map fake ~(tap in (signers:uc c)) ~)

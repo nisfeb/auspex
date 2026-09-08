@@ -885,4 +885,33 @@
     (expect !>((fits-depth:urmail ~[r a a2 b] 3)))
     (expect !>(!(fits-depth:urmail ~[r a a2 b] 2)))
   ==
+::
+::  the signer cap counts the DISTINCT KEY SET, not the messages, because
+::  what it bounds is one scry per distinct [ship life] on the write path
+::  - see +max-signers. So many messages from few senders are cheap and
+::  must pass, and few messages from many senders are expensive and must
+::  be refusable at exactly the same message count.
+++  test-signer-cap-counts-keys-not-messages
+  =/  a1  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  a2  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'two' ~2026.1.2 ~)
+  =/  a3  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'three' ~2026.1.3 ~)
+  =/  b   (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'hi' 'four' ~2026.1.4 ~)
+  =/  c   (forge ~marbud-marbud (sy ~[~sampel-palnet]) 'hi' 'five' ~2026.1.5 ~)
+  ::  a signer is [ship life], not a ship: the same ship at a second life
+  ::  is a second key and a second scry, so it counts twice. A message
+  ::  signed under life 3 stays verifiable after the sender rotates,
+  ::  which is why `life` travels at all.
+  =/  a-later  a1(life.unsigned 2)
+  ;:  weld
+    ::  three messages, one signer: the cap is not a message count
+    (expect !>((fits-signers:urmail ~[a1 a2 a3] 1)))
+    ::  three messages, three signers, refused at two
+    (expect !>((fits-signers:urmail ~[a1 b c] 3)))
+    (expect !>(!(fits-signers:urmail ~[a1 b c] 2)))
+    ::  an empty chain names nobody and costs nothing
+    (expect !>((fits-signers:urmail ~ 0)))
+    ::  the same ship at two lives is two keys and two scries
+    (expect !>(!(fits-signers:urmail ~[a1 a-later] 1)))
+    (expect !>((fits-signers:urmail ~[a1 a-later] 2)))
+  ==
 --

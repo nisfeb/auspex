@@ -22,8 +22,8 @@ grubbery-overlay/
                                the shapes the tree persists.
   lib/urmail-web.hoon          the JSON request decoders: the one part of
                                the HTTP path no Hoon type has checked
-  tests/lib/urmail-chain.hoon  the ported chain suite
-  tests/lib/urmail-web.hoon    13 tests on the decoders, most of them on
+  tests/lib/urmail-chain.hoon  the ported chain suite, 57 tests
+  tests/lib/urmail-web.hoon    15 tests on the decoders, most of them on
                                what a malformed body does
   nex/urmail/app.hoon          the nexus: /main.sig, the mail tree, and
                                the web surface under /ui
@@ -150,6 +150,11 @@ while an event runs, so verify each echo before sending the next):
 -test /=grubbery=/tests/lib/urmail-chain ~
 -test /=grubbery=/tests/lib/urmail-web ~
 ```
+
+The two counts above go stale the moment someone adds an arm and forgets this
+file, which has already happened once. What the suites actually hold is
+`grep -c '^++  test-' tests/lib/urmail-*.hoon`; check it against the OK lines
+the dojo prints rather than against this paragraph.
 
 The bounce is not optional once a fiber runs here: pushing source recompiles the
 nexus but does not respawn long-lived fibers, which keep running old code

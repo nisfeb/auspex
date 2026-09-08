@@ -362,6 +362,42 @@
 ::    already behaves, and for the same reason.
 ::
 ++  max-depth    64           ::  ancestors from root to leaf
+::  +max-signers: distinct [ship life] pairs one delivered chain may name.
+::
+::    THIS IS THE ONE CAP THAT BOUNDS WORK OFF THIS SHIP. Every other
+::    limit here bounds bytes or nodes; this one bounds ROUND TRIPS. The
+::    nexus verifies a chain against real keys, and a key comes from a
+::    scry to /sys/scry per distinct [ship life] - see +key-map. Nothing
+::    bounded how many of those one poke could ask for, so the ceiling
+::    was max-chain: a single junk chain from any ship on the network
+::    could name a thousand distinct signers and buy a thousand
+::    sequential internal round trips, plus a thousand ed25519 verifies
+::    and a deep peek of the whole mail tree, on the ship's SINGLE
+::    serialisation point for mail. /main.sig is granted to the `public`
+::    usergroup by design - that is what makes delivery from any ship
+::    work - so the price of that was one poke, and a forged signature
+::    costs exactly what a real one does.
+::
+::    128, and the number is chosen against max-to rather than against
+::    what a conversation looks like. A real thread has a few dozen
+::    distinct authors at the outside. But one message may already name
+::    max-to (100) recipients, so a thread in which every named
+::    recipient replies once is a hundred signers and is legitimate
+::    under the caps as they stand; 128 clears that with room for the
+::    key rotations that make one ship two entries here, since a signer
+::    is [ship life] and not a ship. Refusing at 64 would have refused
+::    mail the rest of this file admits, and a refusal is permanent -
+::    the chain is rejected whole, every later poke of that thread with
+::    it, and the user never gets the mail. The DoS argument does not
+::    distinguish 64 from 128; the correctness argument does.
+::
+::    DEFERRED, AND SAID PLAINLY: this caps one poke, not a sender. A
+::    peer willing to send a thousand pokes still buys a thousand times
+::    this. The real answer is a per-source rate budget on /main.sig,
+::    which is a scheduling problem and not a predicate; this is the
+::    cheap 80% and is not a substitute for it.
+::
+++  max-signers  128          ::  distinct [ship life] pairs per chain
 ::
 ::  the attachment limits.
 ::
@@ -1062,6 +1098,17 @@
 ::
 ++  fits-recipients
   |=([c=chain m=@ud] (levy c |=(x=msg (lte ~(wyt in to.unsigned.x) m))))
+::
+::  +fits-signers: how many distinct keys verifying this chain would cost.
+::
+::    Not a per-message predicate like its neighbours - it counts the
+::    SET, because that is what the caller pays for: one scry per
+::    distinct [ship life], however many messages share it. A thousand
+::    messages from one sender is one key; a thousand messages from a
+::    thousand senders is a thousand round trips. See +max-signers.
+::
+++  fits-signers
+  |=([c=chain m=@ud] (lte ~(wyt in (signers c)) m))
 ::
 ::  the body's own mime type, checked exactly as an attachment's is:
 ::  length-capped AND control-free, refused at the boundary because a
