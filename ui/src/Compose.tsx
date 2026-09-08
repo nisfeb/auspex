@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { send } from './api'
+import { useEffect, useRef, useState } from 'react'
+import {
+  deleteDraft, isShip, newId, saveDraft, send, sendDraft, type Draft,
+} from './api'
 
 // What a Forward control hands the composer: the message the new message
 // will point `prev` at, the subject to base the forwarded one on, and how
@@ -23,45 +25,152 @@ export interface ForwardIntent {
   count: number
 }
 
+// How long the composer sits still before it saves. Long enough that
+// typing does not poke the writer per keystroke — the writer is the
+// ship's single serialisation point for mail — and short enough that a
+// closed tab loses a sentence rather than a message.
+const DEBOUNCE = 1500
+
 export default function Compose({
-  onClose, onSent, forward,
+  onClose, onSent, onDraftsChanged, forward, resume,
 }: {
   onClose: () => void
   onSent: () => void
+  // Drafts are their own view, so the panel tells the app when it has
+  // written one rather than leaving the sidebar count stale.
+  onDraftsChanged: () => void
   forward?: ForwardIntent | null
+  // Reopening an existing draft: the panel adopts its id, so saving
+  // overwrites that draft rather than laying a second one.
+  resume?: Draft | null
 }) {
-  const [to, setTo] = useState('')
-  const [subject, setSubject] = useState(forward ? `fwd: ${forward.subject}` : '')
-  const [body, setBody] = useState('')
+  const [to, setTo] = useState(resume ? resume.to.join(', ') : '')
+  const [subject, setSubject] = useState(
+    resume ? resume.subj : forward ? `fwd: ${forward.subject}` : '',
+  )
+  const [body, setBody] = useState(resume ? resume.body : '')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState<string | null>(null)
+
+  // The draft this panel owns. Minted once, on mount, and never changed:
+  // a new id per save would lay one grub per keystroke burst and leave
+  // the user a folder full of half-sentences.
+  const draftId = useRef(resume ? resume.id : newId())
+  // Whether anything has actually been written under that id yet, so
+  // closing an untouched composer does not delete a draft that never
+  // existed and does not poke the writer for nothing.
+  const written = useRef(!!resume)
+  // The latest field values, for the save-on-close path: an effect
+  // cleanup closes over the values it was created with, and the last
+  // keystroke before a close is exactly the one that would be lost.
+  const latest = useRef({ to, subject, body })
+  latest.current = { to, subject, body }
+
+  const ships = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean)
+  // RECIPIENT VALIDATION, IN THE CLIENT, BEFORE THE POKE. The nexus keeps
+  // its own — this is a convenience and never the boundary — but a typo
+  // caught at the keystroke is a typo the user can fix, and the same typo
+  // surfacing later as a refusal is not.
+  const bad = ships(to).filter((s) => !isShip(s))
+
+  const store = async () => {
+    const { to: t, subject: s, body: b } = latest.current
+    if (!t.trim() && !s.trim() && !b.trim()) return
+    try {
+      await saveDraft({
+        id: draftId.current,
+        // Only well-formed ships go into a draft: the nexus parses `to`
+        // as a set of @p and would refuse the whole save otherwise,
+        // which would silently stop autosaving the moment a half-typed
+        // name was in the field.
+        to: ships(t).filter(isShip),
+        subj: s,
+        body: b,
+        prev: forward ? forward.prev : resume ? resume.prev : null,
+      })
+      written.current = true
+      onDraftsChanged()
+      setSaved(new Date().toLocaleTimeString())
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  // Save on a debounce while typing, and once more on close. Both, not
+  // either: the debounce covers a browser that goes away, and the close
+  // covers the keystrokes inside the last window.
+  useEffect(() => {
+    const h = setTimeout(() => { void store() }, DEBOUNCE)
+    return () => { clearTimeout(h) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [to, subject, body])
+
+  const closeAndSave = async () => {
+    await store()
+    onClose()
+  }
 
   const onSend = async () => {
     setSending(true)
     setError(null)
     try {
-      const ships = to.split(',').map((s) => s.trim()).filter(Boolean)
-      // `prev` is the only thing that makes this a forward rather than a
-      // compose. The nexus resolves it to its containing thread and ships
-      // that whole chain; there is no separate forward action.
-      await send(ships, subject, body, forward ? forward.prev : null)
+      const list = ships(to)
+      const wrong = list.filter((s) => !isShip(s))
+      if (wrong.length > 0) {
+        setError(`Not a ship name: ${wrong.join(', ')}`)
+        setSending(false)
+        return
+      }
+      if (written.current) {
+        // SIGN THE DRAFT AND DELETE IT, in one action at the writer.
+        // Saving first means the message that goes out is exactly the
+        // one on disk, and the writer deletes the draft only if the
+        // send actually happened — a refused send leaves it intact.
+        await saveDraft({
+          id: draftId.current,
+          to: list,
+          subj: subject,
+          body,
+          prev: forward ? forward.prev : resume ? resume.prev : null,
+        })
+        await sendDraft(draftId.current)
+      } else {
+        // `prev` is the only thing that makes this a forward rather than
+        // a compose. The nexus resolves it to its containing thread and
+        // ships the path leading to it; there is no separate forward
+        // action.
+        await send(list, subject, body, forward ? forward.prev : null)
+      }
+      onDraftsChanged()
       onSent()
     } catch (e) {
       // Leave the panel open with the draft intact — a failed send (an
       // unreachable ship, a malformed @p the route's parser rejects)
       // should not look identical to a successful one.
       console.error(e)
-      setError('Could not send. Check the recipient and try again.')
+      setError(e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.')
     } finally {
       setSending(false)
     }
   }
 
+  const discard = async () => {
+    if (written.current) {
+      try { await deleteDraft(draftId.current) } catch (e) { console.error(e) }
+      onDraftsChanged()
+    }
+    onClose()
+  }
+
   return (
     <div className="fixed bottom-0 right-8 w-[32rem] rounded-t-lg border border-neutral-300 bg-white shadow-2xl">
       <header className="flex items-center justify-between bg-neutral-800 px-4 py-2 text-sm text-white">
-        {forward ? 'Forward' : 'New message'}
-        <button onClick={onClose} aria-label="Close">×</button>
+        {forward ? 'Forward' : resume ? 'Draft' : 'New message'}
+        <span className="flex items-center gap-3">
+          {saved && <span className="text-xs text-neutral-400">saved {saved}</span>}
+          <button onClick={closeAndSave} aria-label="Close">×</button>
+        </span>
       </header>
       <div className="p-4">
         {/* Forwarding transfers evidence rather than quoting text: the
@@ -94,8 +203,15 @@ export default function Compose({
           value={to} onChange={(e) => setTo(e.target.value)}
           placeholder="~sampel-palnet, ~palnet-sampel"
           aria-label={forward ? 'Forward to' : 'To'}
-          className="mb-2 w-full border-b border-neutral-200 py-2 text-sm outline-none"
+          className={`mb-1 w-full border-b py-2 text-sm outline-none
+            ${bad.length ? 'border-red-400' : 'border-neutral-200'}`}
         />
+        {bad.length > 0 && (
+          <p className="mb-2 text-xs text-red-600">
+            {bad.length === 1 ? 'Not a ship name: ' : 'Not ship names: '}
+            {bad.join(', ')}
+          </p>
+        )}
         <input
           value={subject} onChange={(e) => setSubject(e.target.value)}
           maxLength={1000}
@@ -117,10 +233,18 @@ export default function Compose({
         <div className="flex items-center gap-3">
           <button
             onClick={onSend}
-            disabled={!to.trim() || sending}
+            disabled={!to.trim() || bad.length > 0 || sending}
             className="rounded-full bg-blue-600 px-6 py-2 text-white disabled:opacity-40"
           >
             {sending ? 'Sending…' : forward ? 'Forward' : 'Send'}
+          </button>
+          <button
+            type="button"
+            onClick={discard}
+            title="Throw this away. Nothing here has been signed, so nothing but the text is lost."
+            className="text-sm text-neutral-500 hover:text-red-600"
+          >
+            Discard
           </button>
           {error && <span className="text-sm text-red-600">{error}</span>}
         </div>

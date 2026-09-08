@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { thread, send, markRead, deleteThread, ourShip, type Message, type Thread } from './api'
+import {
+  deleteThread, isShip, markRead, markUnread, ourShip, send, setArchived, setLabel,
+  thread, type Message, type Thread,
+} from './api'
 import VerdictBadge from './VerdictBadge'
 import type { ForwardIntent } from './Compose'
 
@@ -43,7 +46,7 @@ function fileSize(bytes: number): string {
 }
 
 export default function ThreadView({
-  id, onSent, onDeleted, onForward, updatedAt,
+  id, onSent, onDeleted, onForward, onFiled, updatedAt,
 }: {
   id: string
   onSent: () => void
@@ -52,6 +55,11 @@ export default function ThreadView({
   // message and NO recipients. See ForwardIntent in Compose.tsx for why
   // the audience is not carried across.
   onForward: (f: ForwardIntent) => void
+  // Called after a label, an archive or an unread mark: none of those
+  // move the change beacon - they alter a thread in ways no other ship
+  // can see - so the tab that made the change is the one that has to
+  // refresh the listing and the sidebar.
+  onFiled: () => void
   // Bumped by App on every change-beacon event. An opaque, monotonically
   // increasing value (not a timestamp), so it is safe as an effect
   // dependency: each event triggers exactly one refetch of the thread on
@@ -172,6 +180,60 @@ export default function ThreadView({
     }
   }
 
+  // FILING CONTROLS. Every one of these is local state: a label, an
+  // archive flag and a read mark never travel, are never signed, and no
+  // other ship holding this same conversation can see any of them. They
+  // do not move the change beacon either, which is why each one calls
+  // onFiled to refresh what this tab is showing rather than waiting for
+  // a push that will never come.
+  const file = async (go: Promise<void>) => {
+    try {
+      await go
+      const th = await thread(id)
+      if (idRef.current === id && th !== null) setT(th)
+      onFiled()
+    } catch (e) {
+      console.error(e)
+      setSendError(e instanceof Error ? e.message : 'Could not file this conversation.')
+    }
+  }
+
+  const onArchive = () => file(setArchived(id, !t.archived))
+
+  const onLabel = (l: string, add: boolean) => file(setLabel(id, l, add))
+
+  const addLabel = () => {
+    const l = (window.prompt(
+      'Label this conversation. Labels are local: they never travel, and no other'
+      + ' ship can see them. Lowercase letters, digits and hyphens.',
+    ) ?? '').trim()
+    if (!l) return
+    if (!/^[a-z][a-z0-9-]*$/.test(l)) {
+      setSendError('A label is a lowercase term: a-z, 0-9 and hyphens, starting with a letter.')
+      return
+    }
+    void onLabel(l, true)
+  }
+
+  // MARK UNREAD, the exact inverse of the read mark opening the thread
+  // laid down. Forged copies are excluded from both directions for the
+  // same reason they never count toward unread: a message whose
+  // signature failed has no business bolding an inbox row.
+  const onUnread = async () => {
+    const ids = t.messages.filter((m) => m.verdict !== 'forged').map((m) => m.id)
+    try {
+      await markUnread(ids)
+      onFiled()
+      // Leave the thread: staying would re-run the effect that marks it
+      // read again, and the user would watch the mark they just set
+      // undo itself.
+      onDeleted()
+    } catch (e) {
+      console.error(e)
+      setSendError('Could not mark this unread.')
+    }
+  }
+
   // A THREAD THIS SHIP CANNOT READ A SINGLE MESSAGE OF.
   //
   // The nexus serves this rather than 404ing, deliberately: the copies
@@ -273,6 +335,17 @@ export default function ThreadView({
   const commitPending = (): string[] => {
     const v = pending.trim().replace(/,$/, '')
     if (!v) return recipients
+    // RECIPIENT VALIDATION, BEFORE THE POKE. The nexus parses `to` as a
+    // set of @p and refuses the whole send on a bad one, so a typo here
+    // would surface as a refusal with nothing pointing at the field that
+    // caused it. Checked at the keystroke instead, where it is still a
+    // typo. The nexus keeps its own check; this is a convenience and
+    // never the boundary.
+    if (!isShip(v)) {
+      setSendError(`${v} is not a ship name.`)
+      return recipients
+    }
+    setSendError(null)
     if (recipients.includes(v)) { setPending(''); return recipients }
     const next = [...recipients, v]
     setRecipients(next)
@@ -335,6 +408,32 @@ export default function ThreadView({
         >
           Forward
         </button>
+        {/* ARCHIVE IS NOT DELETE, and the two sit side by side, so the
+            difference has to be on the buttons rather than only in a
+            document. Archiving takes a thread out of the Inbox view and
+            nothing else: the chain is untouched, every signature still
+            stands, it is still searchable, and a new message arriving in
+            it brings it straight back. */}
+        <button
+          type="button"
+          onClick={onArchive}
+          title={t.archived
+            ? 'Put this back in the inbox.'
+            : 'Take this out of the inbox. Nothing is deleted, nothing is unsigned, and'
+              + ' a new message in this conversation brings it back on its own.'}
+          className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+        >
+          {t.archived ? 'Unarchive' : 'Archive'}
+        </button>
+        <button
+          type="button"
+          onClick={onUnread}
+          title="Mark every message here unread and go back to the list. Messages whose
+            signature failed are left alone: a forgery never counts toward unread."
+          className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+        >
+          Mark unread
+        </button>
         <button
           type="button"
           onClick={onDelete}
@@ -342,6 +441,34 @@ export default function ThreadView({
           className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
         >
           Delete
+        </button>
+      </div>
+      {/* Labels, and the button that adds one. A FOLDER IS A LABEL: there
+          is no separate place a conversation can be filed, so this row is
+          the whole of this thread's filing. None of it travels. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {t.labels.map((l) => (
+          <span
+            key={l}
+            className="flex items-center gap-1 rounded-full bg-blue-50 py-1 pl-3 pr-2 text-xs text-blue-800"
+          >
+            {l}
+            <button
+              type="button"
+              onClick={() => { void onLabel(l, false) }}
+              aria-label={`Remove the label ${l}`}
+              className="px-1 text-blue-500 hover:text-red-600"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          onClick={addLabel}
+          className="rounded-full px-3 py-1 text-xs text-neutral-500 ring-1 ring-neutral-300 hover:text-blue-700"
+        >
+          + label
         </button>
       </div>
       {/* Messages stored on this ship that this build cannot read. The

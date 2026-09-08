@@ -56,6 +56,8 @@ export interface Thread {
   // breaks the signature that makes it evidence. Reported so a thread
   // that renders short says why instead of just looking empty.
   unreadable: number
+  archived: boolean
+  labels: string[]
 }
 
 export interface InboxEntry {
@@ -80,6 +82,10 @@ export interface InboxEntry {
   // NO readable message — it still gets a row, because a thread silently
   // vanishing from the listing is the failure this field exists to stop.
   unreadable: number
+  // Local state, on the row so the list can show it without a request
+  // per thread. Neither field is signed and neither travels.
+  archived: boolean
+  labels: string[]
 }
 
 // Everything below is a same-origin fetch under one prefix.
@@ -151,7 +157,8 @@ export const whoami = async () => {
   ourShip = ship
 }
 
-export const inbox = () => get<InboxEntry[]>('/api/inbox')
+// The listing is always a PAGE now: a page of rows plus the total of the
+// view they came from. See `pageOf` below, which every caller uses.
 
 // A deleted (or never-known) thread is a 404, which is the honest status
 // for it, and the view already distinguishes "no longer exists" from a
@@ -245,3 +252,128 @@ export const subscribeChanges = (onChange: () => void) => {
   read()
   return () => { stopped = true; ac?.abort() }
 }
+
+// ── the mail-client layer ───────────────────────────────────────────
+//
+// Everything below is LOCAL STATE. None of it is signed, none of it
+// travels, and two ships holding the same thread may disagree about all
+// of it. That is the whole reason `unsigned` could be frozen: every
+// feature here is a decision about the right-hand column.
+
+// A view is a predicate over the one listing walk, not a stored set.
+// Inbox is "we are a participant OR the chain arrived direct" and not
+// archived; Sent is authorship; Archived is the flag; a label is the
+// label. Drafts is a different shape entirely and has its own route,
+// because a draft has no sender, no verdict and no participants and
+// inventing them is exactly the confusion drafts are kept out of the
+// thread tree to prevent.
+export type View = 'inbox' | 'sent' | 'archived' | 'all' | 'label'
+
+// The listing response. `total` counts the whole view, `threads` is one
+// page of it, so the UI can render controls without fetching everything.
+export interface Page {
+  total: number
+  offset: number
+  limit: number
+  view: string
+  threads: InboxEntry[]
+}
+
+export interface Draft {
+  id: string
+  to: string[]
+  subj: string
+  body: string
+  prev: string | null
+  at: number
+}
+
+export interface Rule {
+  id: string
+  from: string | null
+  subject: string | null
+  add: string[]
+  archive: boolean
+}
+
+// A @p, checked in the browser before the poke.
+//
+// The nexus keeps its own validation - this is a convenience, never the
+// boundary - but a typo caught at the keystroke is a typo the user can
+// fix, and the same typo surfacing as a refusal from a route that
+// already answered ok is not. Deliberately structural rather than a
+// dictionary of syllables: the client does not carry the syllable
+// tables, and a name that is shaped wrong is the mistake people
+// actually make.
+const SYL = '(?:[a-z]{6}|[a-z]{3})'
+const SHIP_RE = new RegExp(`^~(?:${SYL}(?:-${SYL})*)$`)
+
+export const isShip = (s: string): boolean => {
+  if (!SHIP_RE.test(s)) return false
+  const parts = s.slice(1).split('-')
+  // A galaxy or star is one syllable pair or one syllable; everything
+  // longer is planet, moon or comet, and those come in PAIRS of pairs.
+  // ~sampel-palnet is two, ~sampel-palnet-sampel-palnet is four; three
+  // is not a ship name.
+  if (parts.length === 1) return true
+  return parts.length % 2 === 0
+}
+
+export const pageOf = (
+  view: View,
+  opts: { label?: string; q?: string; offset?: number; limit?: number } = {},
+) => {
+  const p = new URLSearchParams({ view })
+  if (opts.label) p.set('label', opts.label)
+  if (opts.q) p.set('q', opts.q)
+  if (opts.offset) p.set('offset', String(opts.offset))
+  if (opts.limit) p.set('limit', String(opts.limit))
+  return get<Page>(`/api/inbox?${p.toString()}`)
+}
+
+// Local state, so none of these move the change beacon: they alter a
+// thread in ways no other ship can see, and a bump would cost every open
+// tab a full listing plus a thread refetch for a change it cannot
+// observe. The caller refreshes what it changed.
+export const setLabel = (threadId: string, label: string, add: boolean) =>
+  post('/api/label', { 'thread-id': threadId, label, add })
+
+export const setArchived = (threadId: string, archived: boolean) =>
+  post('/api/archive', { 'thread-id': threadId, archived })
+
+export const markUnread = (ids: string[]) =>
+  ids.length === 0 ? Promise.resolve() : post('/api/unread', { 'msg-ids': ids })
+
+export const drafts = () => get<Draft[]>('/api/drafts')
+
+// The id is minted HERE. A draft id is local, means nothing on any other
+// ship and never appears in a signature; the route answers as soon as
+// the writer takes the poke, so a server-minted id could never be told
+// to the client that needs it to save the same draft again.
+export const newId = (): string => {
+  const b = new Uint8Array(15)
+  crypto.getRandomValues(b)
+  // @uv is base-32 over 0-9a-v, rendered in dot-separated groups of five
+  // after a leading group. Five random digits per group is plenty for an
+  // id that only has to be unique within one ship's drafts.
+  const d = '0123456789abcdefghijklmnopqrstuv'
+  const g = (n: number) => [...b.slice(n, n + 5)].map((x) => d[x % 32]).join('')
+  return `0v${g(0)}.${g(5)}.${g(10)}`
+}
+
+export const saveDraft = (d: Omit<Draft, 'at'>) =>
+  post('/api/draft', { id: d.id, to: d.to, subj: d.subj, body: d.body, prev: d.prev })
+
+export const deleteDraft = (id: string) => post('/api/draft-delete', { id })
+
+// Signs it at this moment and deletes it. A refused send leaves the
+// draft where it was - the nexus gates the delete on the send actually
+// having happened, so a message is never destroyed at the moment the
+// ship declines to carry it.
+export const sendDraft = (id: string) => post('/api/draft-send', { id })
+
+export const rules = () => get<Rule[]>('/api/rules')
+
+export const saveRule = (r: Rule) => post('/api/rule', r)
+
+export const deleteRule = (id: string) => post('/api/rule-delete', { id })

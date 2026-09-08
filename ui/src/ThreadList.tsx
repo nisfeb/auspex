@@ -1,32 +1,27 @@
 import type { InboxEntry } from './api'
 import VerdictBadge from './VerdictBadge'
 
+// The rows only. The search box and the pager live in App, which owns
+// the page this list is one screenful of — so the list never has to know
+// what view produced it.
 export default function ThreadList({
   entries, error, selected, onSelect,
 }: {
   entries: InboxEntry[]
-  // Distinct from an empty inbox: a failed fetch (unreachable ship) reads
-  // differently than "no mail yet", so the user can tell the two apart.
+  // Distinct from an empty view: a failed fetch (unreachable ship) reads
+  // differently than "nothing here", so the user can tell the two apart.
   error: string | null
   selected: string | null
   onSelect: (id: string) => void
 }) {
   if (error) {
-    return (
-      <div className="w-96 shrink-0 border-r border-neutral-200 p-4 text-sm text-red-600">
-        {error}
-      </div>
-    )
+    return <div className="flex-1 p-4 text-sm text-red-600">{error}</div>
   }
   if (entries.length === 0) {
-    return (
-      <div className="w-96 shrink-0 border-r border-neutral-200 p-4 text-sm text-neutral-400">
-        No mail yet.
-      </div>
-    )
+    return <div className="flex-1 p-4 text-sm text-neutral-400">Nothing here.</div>
   }
   return (
-    <ul className="w-96 shrink-0 overflow-y-auto border-r border-neutral-200">
+    <ul className="flex-1 overflow-y-auto">
       {entries.map((e) => (
         <li key={e.id}>
           <button
@@ -70,6 +65,27 @@ export default function ThreadList({
                 <div className="truncate text-sm">{e.subject}</div>
                 <div className="truncate text-xs text-neutral-500">{e.snippet}</div>
               </>
+            )}
+            {/* Local state, shown on the row so a thread's filing is
+                visible without opening it. Neither is signed and neither
+                travels: another ship holding this conversation sees none
+                of it. */}
+            {(e.labels.length > 0 || e.archived) && (
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                {e.archived && (
+                  <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500">
+                    archived
+                  </span>
+                )}
+                {e.labels.map((l) => (
+                  <span
+                    key={l}
+                    className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-800"
+                  >
+                    {l}
+                  </span>
+                ))}
+              </div>
             )}
           </button>
         </li>
