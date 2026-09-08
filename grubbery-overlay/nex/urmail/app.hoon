@@ -2672,7 +2672,11 @@
   ^-  (unit @ud)
   =/  v=(unit @t)  (arg args k)
   ?~  v  ~
-  (rush u.v dem:ag)
+  ::  dim, not dem. +dem:ag is the DOT-GROUPED decimal parser - it reads
+  ::  9.999 and refuses 9999, so an offset past the first thousand
+  ::  threads would silently fall back to 0 and hand the client page one
+  ::  while it believed it was on page five hundred.
+  (rush u.v dim:ag)
 ::
 ::  +in-view: is this thread in the named view, under this query?
 ::
