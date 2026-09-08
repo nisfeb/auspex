@@ -216,25 +216,38 @@
 ::    it in the marc instead would re-validate every stored grub against
 ::    the live type on read, booming every message the day the type moves.
 ::
-::  +read-stored: %1 grubs only, and a %0 grub is REFUSED rather than
-::  upgraded.
+::  +read-stored: %2 grubs only. %0 and %1 are REFUSED, not upgraded.
 ::
-::    $stored-msg went to version 1 when `unsigned` gained attachments.
-::    A %0 grub is recognisable - its head is 0 - but it cannot be
+::    $stored-msg went to 1 when `unsigned` gained attachments and to 2
+::    when it gained body-mime and was frozen. An old grub is
+::    recognisable - its head is its version - but it cannot be
 ::    migrated: msg-id and the signature both cover the shape, so
-::    rewriting a %0 message into the %1 shape would leave a message
-::    whose signature no longer matches its own contents, which every
-::    peer would then read as %forged. Turning genuine mail into apparent
-::    forgeries is strictly worse than refusing it, so the ladder has no
-::    %0 branch and the format change is recorded as a break. The only
-::    real migration is to carry every historical shape and its digest
-::    forever, and that is deferred until the format is declared stable.
+::    rewriting an old message into the new shape leaves a message whose
+::    signature no longer matches its own contents, which every peer
+::    would then read as %forged. Turning genuine mail into apparent
+::    forgeries is worse than refusing it.
+::
+::    So an old grub is DROPPED HERE, before verification: it never
+::    reaches +verify-chain, is never labelled, is never counted, and
+::    renders as "unreadable" through the marc. The version was bumped
+::    rather than reused so a %1 grub is refused as cleanly as a %0 one
+::    instead of clamming into the new shape by accident.
+::
+::    $unsigned is now frozen, so this is the last such break. Nothing
+::    may be added to it again.
 ::
 ++  read-stored
   |=  n=*
   ^-  (unit stored-msg:uc)
   =/  res  (mule |.(;;(stored-msg:uc n)))
   ?:(?=(%& -.res) `p.res ~)
+::
+::  +read-meta: the local-state ladder, which DOES upgrade in place.
+::
+::    Nothing in meta is covered by a signature, so a %0 meta becomes a
+::    %1 with direct=%.n and no bcc record and misrepresents nothing.
+::    That is the contrast with +read-stored above, and it is the whole
+::    reason local state is kept out of `unsigned`.
 ::
 ++  read-meta
   |=  [root=path t=thread-id:uc]
@@ -243,8 +256,12 @@
   ;<  vw=view:nexus  bind:m  (peek:io [%& %& (tdir root t) %meta] ~)
   ?.  ?=([%file *] vw)  (pure:m *meta:uc)
   ?:  (is-boom:tarball sang.vw)  (pure:m *meta:uc)
-  =/  res  (mule |.(;;(meta:uc (sang-noun:tarball sang.vw))))
-  (pure:m ?:(?=(%& -.res) p.res *meta:uc))
+  =/  n  (sang-noun:tarball sang.vw)
+  =/  r1  (mule |.(;;(meta:uc n)))
+  ?:  ?=(%& -.r1)  (pure:m p.r1)
+  =/  r0  (mule |.(;;(meta-0:uc n)))
+  ?:  ?=(%| -.r0)  (pure:m *meta:uc)
+  (pure:m [%1 read.p.r0 archived.p.r0 labels.p.r0 | ~])
 ::
 ++  read-idx
   |=  root=path
@@ -519,7 +536,7 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?-  -.a
-    %send           (do-send root to.a subj.a body.a prev.a files.a)
+    %send           (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
     %read           (do-read root msg-id.a)
     %delete-thread  (do-delete root thread-id.a)
     %fetch-blob     (do-fetch-blob root hash.a from.a)
@@ -544,8 +561,10 @@
           to=(set ship)
           subj=@t
           body=@t
+          body-mime=@t
           prev=(unit msg-id:uc)
           files=(list file:uc)
+          bcc=(set ship)
       ==
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
@@ -553,8 +572,10 @@
     (reject root 'body too long')
   ?.  (lte (met 3 subj) max-subj:uc)
     (reject root 'subject too long')
-  ?.  (lte ~(wyt in to) max-to:uc)
+  ?.  (lte (add ~(wyt in to) ~(wyt in bcc)) max-to:uc)
     (reject root 'too many recipients')
+  ?.  (text-ok:uc body-mime max-mime:uc)
+    (reject root 'bad body mime')
   ?.  (files-ok:uc files)
     (reject root 'bad attachment')
   ::  the store bound counts only the files we would actually ADD.
@@ -588,7 +609,13 @@
   ::  Building it here, from the bytes actually stored, is what makes
   ::  `size` and `hash` agree with what a fetcher will re-measure.
   =/  as=(list attachment:uc)  (turn files describe:uc)
-  =/  u=unsigned:uc  [our lyf to subj body now prev as]
+  ::  the chain names `to` and NOTHING ELSE. bcc affects delivery only:
+  ::  the blind-copied ships get the same canonical bytes, the same
+  ::  msg-id and the same thread, and see the visible recipients, which
+  ::  is what BCC means. Nothing about them is signed, and no hashed
+  ::  commitment to them is signed either - that would leak that a BCC
+  ::  exists while staying testable against any guessed ship.
+  =/  u=unsigned:uc  [our lyf to subj body body-mime now prev as]
   =/  mg=msg:uc     [u (sign-with:uc rng (digest:uc u))]
   =/  old=chain:uc  ?~(tid ~ (chain-of (~(gut by loaded) u.tid ~)))
   =/  new=chain:uc  (merge:uc old ~[mg])
@@ -613,11 +640,15 @@
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  ~  bind:m  (write-msg root rid mg %verified)
   ;<  ~  bind:m  (mark-read root rid (id:uc u))
+  ::  record who we blind-copied, LOCALLY, so our own Sent view is
+  ::  accurate. This never travels and is not part of any signature.
+  ;<  ~  bind:m  (record-bcc root rid (id:uc u) bcc)
   ;<  ~  bind:m  (touch-idx root rid)
   ;<  ~  bind:m  (note root 'send' & (scot %uv rid))
-  ::  ship the WHOLE chain to every recipient. A ship added at message
-  ::  forty receives one through forty, each independently verifiable.
-  (fan-out root new ~(tap in (~(del in to) our)))
+  ::  ship the WHOLE chain to every recipient, visible and blind alike.
+  ::  A ship added at message forty receives one through forty, each
+  ::  independently verifiable.
+  (fan-out root new ~(tap in (~(del in (~(uni in to) bcc)) our)))
 ::
 ++  do-read
   |=  [root=path mid=msg-id:uc]
@@ -689,6 +720,9 @@
   ::  what it can later make us try to fetch. Rejected, not truncated:
   ::  the metadata is inside the signature, so trimming it would forge.
   ?.  (fits-attachments:uc c max-attach:uc)  (reject root 'too many attachments')
+  ::  body-mime is a signed field a recipient cannot repair, so it is
+  ::  bounded here where the chain is still refusable whole.
+  ?.  (fits-body-mimes:uc c max-mime:uc)   (reject root 'bad body mime')
   ;<  fake=?  bind:m  fake-ship
   ;<  keys=(map [ship @ud] (unit pass))  bind:m
     (key-map fake ~(tap in (signers:uc c)) ~)
@@ -720,6 +754,7 @@
   =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  ~  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
+  ;<  ~  bind:m  (mark-direct root rid)
   ;<  ~  bind:m  (touch-idx root rid)
   (note root 'deliver' & (scot %uv rid))
 ::
@@ -1143,7 +1178,7 @@
   |=  [root=path t=thread-id:uc mg=msg:uc v=verdict:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  (put-file [%& %& (mdir root t) (slot (id:uc unsigned.mg) sig.mg)] [/urmail %msg] [%1 mg v])
+  (put-file [%& %& (mdir root t) (slot (id:uc unsigned.mg) sig.mg)] [/urmail %msg] [%2 mg v])
 ::
 ++  want-slots
   |=  [c=chain:uc vs=(map [msg-id:uc @ux] verdict:uc)]
@@ -1153,7 +1188,7 @@
   |=  mg=msg:uc
   ^-  [@ta stored-msg:uc]
   =/  i=msg-id:uc  (id:uc unsigned.mg)
-  [(slot i sig.mg) [%1 mg (~(gut by vs) [i sig.mg] %unverified)]]
+  [(slot i sig.mg) [%2 mg (~(gut by vs) [i sig.mg] %unverified)]]
 ::
 ::  +sync-slots: make the thread's grubs equal `want`.
 ::
@@ -1193,6 +1228,38 @@
   ?~  xs  (pure:m ~)
   ;<  ~  bind:m  (put-file [%& %& dir -.i.xs] [/urmail %msg] +.i.xs)
   (put-slots dir t.xs)
+::
+::  +record-bcc: the sender's own note of who it blind-copied.
+::
+::    Keyed by the message, kept in the thread's local meta, and never
+::    shipped. An empty set writes nothing, so an ordinary send does not
+::    grow the grub.
+::
+++  record-bcc
+  |=  [root=path t=thread-id:uc i=msg-id:uc bcc=(set ship)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?:  =(~ bcc)  (pure:m ~)
+  ;<  mt=meta:uc  bind:m  (read-meta root t)
+  %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
+  mt(bcc (~(put by bcc.mt) i bcc))
+::
+::  +mark-direct: this thread reached us through a DELIVERY POKE.
+::
+::    The Inbox view is threads we participate in, and a BCC'd recipient
+::    is in neither `from` nor `to` - without this their mail would be
+::    invisible. Inbox is participant OR direct. Set on delivery only,
+::    never on our own sends, and idempotent so a redelivery does not
+::    rewrite meta.
+::
+++  mark-direct
+  |=  [root=path t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mt=meta:uc  bind:m  (read-meta root t)
+  ?:  direct.mt  (pure:m ~)
+  %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
+  mt(direct &)
 ::
 ++  mark-read
   |=  [root=path t=thread-id:uc i=msg-id:uc]

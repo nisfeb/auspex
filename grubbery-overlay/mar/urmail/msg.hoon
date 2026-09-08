@@ -33,6 +33,13 @@
         ['to' [%a (turn ~(tap in to.u) |=(w=ship `^json`[%s (scot %p w)]))]]
         ['subject' [%s subj.u]]
         ['body' [%s body.u]]
+        ::  the SIGNED rendering instruction. A renderer must match it
+        ::  against a fixed allow-list and fall back to plain text for
+        ::  anything else, and must never pass it into a header: the
+        ::  signature proves the author chose it, not that it is safe,
+        ::  and it arrives pre-signed inside a chain any ship may
+        ::  deliver. Empty means text/plain.
+        ['bodyMime' [%s body-mime.u]]
         ['sent' (time:enjs:format sent.u)]
         ['prev' ?~(prev.u ~ [%s (scot %uv u.prev.u)])]
         ::  attachments are INSIDE `unsigned`, so what is rendered here is

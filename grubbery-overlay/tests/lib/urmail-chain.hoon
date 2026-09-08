@@ -29,7 +29,7 @@
           as=(list attachment:sur)
       ==
   ^-  msg:sur
-  =/  u=unsigned:sur  [who 1 to subj body sent prev as]
+  =/  u=unsigned:sur  [who 1 to subj body '' sent prev as]
   [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
 ::
 ::  +forge hardcodes life 1, so the map is keyed on [w 1] for every ship
@@ -64,7 +64,7 @@
 ::  tested directly rather than reimplemented by its callers.
 ++  test-digest-is-salted-sham
   =/  u=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   %+  expect-eq
     !>  (shaf %urmail (sham u))
     !>  (digest:urmail u)
@@ -75,7 +75,7 @@
 ::  and it is mandatory per the spec.
 ++  test-digest-domain-separated
   =/  u=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   ;:  weld
     (expect !>(!=((digest:urmail u) (sham u))))
     (expect !>(!=((digest:urmail u) (shaf %ames (sham u)))))
@@ -86,7 +86,7 @@
 ::  without coordinating.
 ++  test-msg-id-covers-every-field
   =/  base=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   =/  d  (digest:urmail base)
   ;:  weld
     (expect !>(!=(d (digest:urmail base(body 'other')))))
@@ -99,6 +99,10 @@
     ::  attachments are inside `unsigned`, so the id covers them too and
     ::  swapping a file cannot leave the signature standing.
     (expect !>(!=(d (digest:urmail base(attachments ~[['f' 3 'text/plain' 0v2]])))))
+    ::  the rendering instruction is part of the message: "render me as
+    ::  HTML" and "render me as plain text" are different messages, and
+    ::  an intermediary must not be able to switch which one is read.
+    (expect !>(!=(d (digest:urmail base(body-mime 'text/html')))))
   ==
 ::
 ::  THE MARQUEE TEST. ~sampel writes to ~palnet; ~palnet forwards the chain
@@ -232,7 +236,7 @@
 ++  test-verifies-under-rotated-life
   =/  who  ~sampel-palnet
   =/  u=unsigned:sur
-    [who 2 (sy ~[~palnet-sampel]) 'subj' 'body' ~2026.1.1 ~ ~]
+    [who 2 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   =/  m=msg:sur
     [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
   =/  keys  (malt ~[[[who 2] `(fake-pass:urmail who)]])
@@ -532,7 +536,28 @@
     (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 cr 'b')) 128)))
     (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 del 'b')) 128)))
     (expect !>(!(fits-attachments:urmail ~[bad] 16)))
+    ::  body-mime is checked exactly the same way, and for the same
+    ::  reason: it is signed, so a recipient cannot repair it, and it is
+    ::  headed for a render boundary.
+    %-  expect  !>
+    %-  not-fits-mime
+    %-  forge-mime  crlf
   ==
+::
+::  helpers for the assertion above, kept out of the ;: so the tall
+::  forms do not have to fit inside a list element.
+++  forge-mime
+  |=  bm=@t
+  ^-  chain:sur
+  :_  ~
+  =/  u=unsigned:sur
+    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 's' 'b' bm ~2026.1.1 ~ ~]
+  [u (sign-with:urmail (fake-ring:urmail ~sampel-palnet) (digest:urmail u))]
+::
+++  not-fits-mime
+  |=  c=chain:sur
+  ^-  ?
+  !(fits-body-mimes:urmail c max-mime:urmail)
 ::
 ::  the eviction order: blobs no stored message mentions, oldest first.
 ::  A referenced blob is never evictable however old, and %delete-thread

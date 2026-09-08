@@ -68,6 +68,23 @@
 ::    `prev` is what makes a flat list a chain. A reply points at the
 ::    message it answers; a forward points into the chain it carries.
 ::
+::    `body-mime` says how to read `body`; empty means 'text/plain', so
+::    a sender that does not care writes nothing. It is SIGNED because
+::    the rendering instruction is part of the message: one that says
+::    "render me as HTML" and one that says "render me as plain text"
+::    are different messages, and an intermediary must not be able to
+::    change which one you read.
+::
+::    IT IS HOSTILE INPUT AT THE RENDER BOUNDARY. A signature proves the
+::    author CHOSE the value, never that it is safe, and it arrives
+::    pre-signed inside a chain any ship may deliver. A renderer must
+::    match it against a fixed allow-list and fall back to plain text
+::    for anything else; it must never pass the value into a header or
+::    a Content-Type. Length and control bytes are refused here, at the
+::    boundary, because a recipient cannot repair the field without
+::    destroying the signature that makes the message evidence - the
+::    same reasoning as `mime` on an attachment.
+::
 ::    `attachments` is INSIDE here, so it is covered by the signature and
 ::    by msg-id. Swapping a file breaks the signature. That placement is
 ::    also a WIRE BREAK: msg-id is (sham unsigned), so every message
@@ -85,10 +102,22 @@
       to=(set ship)
       subj=@t
       body=@t
+      body-mime=@t
       sent=@da
       prev=(unit msg-id)
       attachments=(list attachment)
   ==
+::
+::  AND THAT IS THE WHOLE OF IT. $unsigned is FROZEN. Nothing may be
+::  added without breaking every message in existence, because a
+::  signature covers a shape and rewriting the shape produces messages
+::  every peer reads as forged. Reply-to, expiry and multi-parent were
+::  considered and rejected; BCC is deliberately absent, because the
+::  chain proves authorship and not delivery, which is exactly why a
+::  forwarded chain works at all. Everything else a mail client needs -
+::  labels, folders, archive, read state, drafts, filters, BCC records -
+::  is LOCAL, and two ships may disagree about all of it while still
+::  agreeing exactly on who signed what.
 ::
 +$  msg    [=unsigned sig=@ux]
 +$  chain  (list msg)
@@ -113,8 +142,23 @@
 ::    it. It is local-only like the rest, and it is the only way bytes
 ::    ever enter this ship's blob store from the user side.
 ::
+::    %send's `bcc` affects DELIVERY ONLY. The chain names `to` and
+::    nothing else; the blind-copied ships get the same canonical bytes,
+::    the same msg-id and the same thread as everyone else, and see the
+::    visible recipients, which is what BCC means. Replying reveals
+::    them, because a reply is signed and lists its own `to` - BCC's
+::    behaviour everywhere.
+::
 +$  action
-  $%  [%send to=(set ship) subj=@t body=@t prev=(unit msg-id) files=(list file)]
+  $%  $:  %send
+          to=(set ship)
+          subj=@t
+          body=@t
+          body-mime=@t
+          prev=(unit msg-id)
+          files=(list file)
+          bcc=(set ship)
+      ==
       [%read =msg-id]
       [%delete-thread =thread-id]
       [%fetch-blob hash=@uv from=ship]
@@ -220,18 +264,25 @@
 ::    differing in signature are distinct grubs with distinct verdicts.
 ::    That is the [id sig] keying, expressed as storage layout.
 ::
-::    Version 1, not 0. Version 0 held the seven-field $unsigned, which
-::    this slice replaced with the eight-field one that carries
-::    attachments. A %0 grub can be RECOGNISED (its head is 0) but it
-::    cannot be upgraded: msg-id and the signature both cover the shape,
-::    so rewriting a %0 message into the %1 shape would produce a
-::    message whose signature no longer matches its own contents and
+::    Version 2, and versions 0 and 1 are REFUSED rather than upgraded.
+::    %0 held the seven-field $unsigned, %1 the eight-field one that
+::    added attachments, %2 the nine-field frozen one that adds
+::    body-mime. An old grub can be RECOGNISED - its head is its version
+::    - but it cannot be migrated: msg-id and the signature both cover
+::    the shape, so rewriting an old message into the new shape produces
+::    a message whose signature no longer matches its own contents and
 ::    which every peer would then read as %forged. Turning genuine mail
-::    into apparent forgeries is worse than refusing it, so +read-stored
-::    refuses a %0 grub outright and the format change is recorded as a
-::    break rather than papered over.
+::    into apparent forgeries is worse than refusing it. So the ladder
+::    has no branch for either old version and both breaks are recorded
+::    as breaks rather than papered over.
 ::
-+$  stored-msg  [%1 =msg =verdict]
+::    The version is bumped rather than reused precisely so that a %1
+::    grub is refused as cleanly as a %0 one, instead of clamming into
+::    the new shape by accident.
+::
+::    This is the LAST such break. $unsigned is frozen above.
+::
++$  stored-msg  [%2 =msg =verdict]
 ::
 ::  $meta: local state about a thread, at /mail/thread/<tid>/meta.
 ::  Never signed, never travels: two ships may disagree about any of it.
@@ -241,7 +292,33 @@
 ::  $~ and not $_: $_ produces a mold that IGNORES its input and always
 ::  returns the default, which would make the read-back flag a constant.
 ::
-+$  meta  [%0 read=(set msg-id) archived=$~(%.n ?) labels=(set @tas)]
+::    `direct` is set when a chain arrived through a DELIVERY POKE, and
+::    it exists for BCC. The Inbox view is threads we participate in,
+::    and a BCC'd recipient is in neither `from` nor `to` - their mail
+::    would be invisible. Inbox is therefore participant OR direct.
+::
+::    `bcc` is the sender's own record of who it blind-copied, keyed by
+::    the message it sent, so its Sent view is accurate. IT NEVER
+::    TRAVELS and it is not signed. Signing the set would not be BCC,
+::    and signing a hashed commitment to it would leak that a BCC
+::    exists while remaining testable against any guessed ship - privacy
+::    it cannot deliver, which is the same class of overstatement as
+::    calling blob restriction access control.
+::
+::    Version 1, and version 0 IS upgraded in place. None of this is
+::    covered by a signature, so supplying defaults misrepresents
+::    nothing - the contrast with $stored-msg above is the whole point
+::    of keeping local state out of `unsigned`.
+::
++$  meta
+  $:  %1
+      read=(set msg-id)
+      archived=$~(%.n ?)
+      labels=(set @tas)
+      direct=$~(%.n ?)
+      bcc=(map msg-id (set ship))
+  ==
++$  meta-0  [%0 read=(set msg-id) archived=$~(%.n ?) labels=(set @tas)]
 ::
 ::  $mail-idx: the derived inbox order, at /mail/idx. Newest first.
 ::
@@ -764,6 +841,13 @@
 ::
 ++  fits-recipients
   |=([c=chain m=@ud] (levy c |=(x=msg (lte ~(wyt in to.unsigned.x) m))))
+::
+::  the body's own mime type, checked exactly as an attachment's is:
+::  length-capped AND control-free, refused at the boundary because a
+::  recipient cannot repair a signed field.
+::
+++  fits-body-mimes
+  |=([c=chain m=@ud] (levy c |=(x=msg (text-ok body-mime.unsigned.x m))))
 ::
 ::  distinct message ids, not messages: +merge deliberately keeps several
 ::  signed copies of one id, and the state-capacity bound counts messages
