@@ -82,14 +82,21 @@ export interface InboxEntry {
   unreadable: number
 }
 
-// urmail is a grubbery NEXUS, not a gall agent, so there is no Eyre scry
-// path, no `urmail-action` poke and no channel subscription. The nexus
-// binds /apps/urmail and answers a small JSON API under it, and this app
-// is served from that same route as two grubs (the shell and this script).
-// Everything below is therefore a same-origin fetch carrying the session
-// cookie Eyre already set — no @urbit/http-api, no ship name to configure,
-// and no way to point the client at the wrong ship by forgetting an env
-// var (which the previous VITE_SHIP default made silently possible).
+// Everything below is a same-origin fetch under one prefix.
+//
+// The nexus binds /apps/urmail and answers a small JSON API beneath it,
+// and this app is served from that same route as two grubs — the shell
+// and this script. So the browser already holds the session cookie Eyre
+// set for the ship that served the page, every call is same-origin, and
+// there is no ship name anywhere in this client: it asks the ship it was
+// served by who it is (see `whoami`). A client configured with a ship
+// name can be aimed at one ship while authenticating against another,
+// with nothing obviously wrong until every call fails; this one cannot
+// be, because it has nothing to aim.
+//
+// Every route here is owner-gated and answers JSON on every path,
+// errors included, which is why `jsonOf` below can read a reason off a
+// failure instead of showing a bare status code.
 const BASE = '/apps/urmail'
 
 class ApiError extends Error {

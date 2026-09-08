@@ -6,7 +6,7 @@ import type { ForwardIntent } from './Compose'
 // The default reply audience.
 //
 // NOT `thread.participants`. That set is the union of `from` and `to`
-// across every message the agent holds for this thread, INCLUDING ones
+// across every message the ship holds for this thread, INCLUDING ones
 // nobody authenticated. Filing into an existing thread needs only the
 // root message's unsigned bytes and no valid signature — a junk-signed
 // copy of the root has the same msg-id, so `+thread-key` files it into
@@ -84,10 +84,9 @@ export default function ThreadView({
   //
   // The effect below re-runs on `updatedAt`, which App bumps for every
   // change-beacon event — and the writer bumps the beacon on EVERY
-  // delivery, including a delivery the attacker sent. Re-seeding there
-  // is worse on the nexus than it was on the agent, because the beacon
-  // does not name a thread: any inbound mail at all would re-run this
-  // effect for whatever thread is open. Re-seeding would throw
+  // delivery, including a delivery the attacker sent. The beacon does not
+  // name a thread, so ANY inbound mail at all re-runs this effect for
+  // whatever thread happens to be open; a re-seed here would throw
   // away the user's removals and restore the attacker-inclusive default,
   // at a moment of the attacker's choosing, including the window between
   // the removal and the click on Send. Worse, the same effect leaves the
@@ -99,8 +98,8 @@ export default function ThreadView({
   // refetch itself still runs on every push: only the seed is gated.
   const seededFor = useRef<string | null>(null)
 
-  // The stale-thread race: click thread A, then click B before A's scry
-  // resolves. React runs A's effect cleanup and B's effect setup back to
+  // The stale-thread race: click thread A, then click B before A's
+  // request resolves. React runs A's effect cleanup and B's effect setup back to
   // back, synchronously, with no microtask in between — so a *hoisted*
   // ref re-armed at the top of every invocation is reset to "not stale"
   // by B's setup before A's in-flight network response ever lands, and
