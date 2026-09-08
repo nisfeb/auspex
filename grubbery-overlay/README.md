@@ -18,15 +18,54 @@ re-syncing culls urmail out of clay.
 grubbery-overlay/
   lib/urmail-chain.hoon        the pure core: types + signing, verification,
                                the three verdicts, +merge, +prune,
-                               +thread-key, +freeze, the input caps.
-                               Ported unchanged from the desk's
-                               lib/urmail.hoon + sur/urmail.hoon.
+                               +thread-key, +freeze, the input caps, and
+                               the shapes the tree persists.
   tests/lib/urmail-chain.hoon  31 tests, ported unchanged
+  nex/urmail/app.hoon          the nexus: /main.sig, the mail tree
+  mar/urmail/{msg,meta,idx}    the PERSISTED marcs -> gub/mar/urmail/
+  mar-gub/urmail-{chain,action} the WIRE marcs -> gub/mar/ (top level)
 ```
 
-`nex/urmail/`, `mar/urmail/`, `mar-clay/` and `mar-core/` are not here yet —
-the nexus and its marcs are later slices. `sync-overlay.sh` already maps them,
-so those slices only have to drop files in.
+`mar-clay/` and `mar-core/` are still unused; `sync-overlay.sh` maps them for
+later slices.
+
+## The two marc rules, which point opposite ways
+
+**Persisted marcs are noun passthroughs.** A marc written `|_ s=stored-msg:uc`
+re-validates every stored grub against the live type on every read, so the day
+the type gains a field, every message already on disk booms and every reader
+falls back to the bunt. For mail that is data loss. The shape check lives in
+the nexus instead, as a `;;` ladder under `mule` — newest shape first, a later
+version added above the default and upgraded in place.
+
+**Wire marcs are typed**, because they are never read back off disk and a
+malformed chain from a hostile ship should fail at the boundary.
+
+**Wire marcs live at the top of `gub/mar`, not under `gub/mar/urmail/`.** Both
+surfaces a peer pokes through — `sur/grub`'s `%grub-cmd` and a dojo poke —
+flatten a blot to its bare mark name, so a blot with a path prefix is
+unaddressable from either. The `urmail-` prefix is what keeps a top-level file
+in that shared tree from shadowing grubbery's own; `sync-overlay.sh` refuses to
+run without it, exactly as it does for `gub/lib`.
+
+## Installing the nexus: one row this overlay does NOT write
+
+A nexus cannot install itself. The directory that carries one is identified by
+its *neck*, a directory-level mark fixed when the directory is made, and
+nothing reachable at runtime can set one — grubbery's HTTP `PUT /dir` and
+`sur/grub`'s `%make-dir` both lay a neck-less directory. The only mechanism the
+distribution provides is a row in **grubbery's own** `lib/root.hoon`, which is
+how lattice and mcp are installed:
+
+```hoon
+[%fall %| /apps/'urmail.urmail_app' [`[`[/urmail %app] ~ %.n ~] ~]]
+```
+
+`sync-overlay.sh` greps for that row and prints it when it is missing, but will
+not write the file. An overlay that silently edits its host's sources is
+exactly how a 28-line `lib/obelisk-ast.hoon` once clobbered grubbery's real
+1208-line one. The consequence is real and is not hidden: **the row is outside
+this repo and a grubbery pull reverts it.** Re-add it, then `|commit %grubbery`.
 
 ## Two rules this tree obeys
 
