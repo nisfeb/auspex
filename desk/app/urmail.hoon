@@ -123,6 +123,12 @@
 ::    otherwise-legitimate first contact outright, which is a self-inflicted
 ::    denial of the very chain this arm exists to accept.
 ::
+::    Not fixing, recorded rather than dropped: the `hits` scan below is
+::    O(total stored messages) with a `sham` per message, on the only
+::    externally reachable poke. Bounded by max-threads/max-chain, but
+::    large. Upgrade path: a (map [msg-id @ux] thread-id) index in state.
+::    This is a performance concern, not an authenticity one.
+::
 ++  thread-key
   |=  c=chain:sur
   ^-  thread-id:sur
@@ -133,12 +139,57 @@
     |=  [t=thread-id:sur th=thread:sur]
     %+  lien  chain.th
     |=(o=msg:sur (~(has in keys) [(id:urmail unsigned.o) sig.o]))
+  ::  not fixing: a chain touching two existing threads conflates them here,
+  ::  and p.i.hits picks whichever comes first in map-traversal order. This
+  ::  predates +thread-key (the same pattern already existed in +send's own
+  ::  `hits` lookup) and is equally reachable before and after this fix.
+  ::  Upgrade path: reject chains whose keys match more than one thread,
+  ::  rather than silently picking one. Also availability/correctness of
+  ::  filing, not authenticity - a wrongly-filed message is still exactly
+  ::  as verified or forged as it was.
   ?^  hits  p.i.hits
   =/  roots  (skim c |=(m=msg:sur ?=(~ prev.unsigned.m)))
   =/  root-ids
     (~(gas in *(set msg-id:sur)) (turn roots |=(m=msg:sur (id:urmail unsigned.m))))
   ?.  =(1 ~(wyt in root-ids))  ~|(%urmail-no-unique-root !!)
   (snag 0 ~(tap in root-ids))
+::
+::  +prune: enforce the per-id copy bound by SHEDDING, never by rejecting.
+::
+::    Rejecting the merged result is a censorship primitive: an attacker who
+::    lands max-copies forged copies of a chain's genuine root at a ship
+::    that has never seen the thread mints that thread under the genuine
+::    (content-derived) id, holding it full of junk. When the real chain
+::    later arrives from any participant, the count is max-copies+1, a
+::    reject would nack it, and because every +send ships the whole chain,
+::    every subsequent message in that thread would be rejected forever -
+::    for the cost of a few junk-signed messages. It also reinstates, at
+::    the state layer, precisely the shadowing +merge exists to prevent:
+::    junk arriving first would permanently exclude the genuine copy.
+::
+::    Shed the excess instead, and never shed a %verified copy: +merge is
+::    keyless and must keep everything it's handed, but the agent knows the
+::    verdicts by the time it prunes, so it can enforce anti-shadowing with
+::    that knowledge instead of by raw arrival order.
+::
+++  prune
+  |=  [c=chain:sur vs=(map [msg-id:sur @ux] verdict:sur)]
+  ^-  chain:sur
+  =/  groups=(jar msg-id:sur msg:sur)
+    %+  roll  c
+    |=  [m=msg:sur acc=(jar msg-id:sur msg:sur)]
+    (~(add ja acc) (id:urmail unsigned.m) m)
+  =/  kept=chain:sur
+    %-  zing
+    %+  turn  ~(tap by groups)
+    |=  [i=msg-id:sur ms=(list msg:sur)]
+    ^-  chain:sur
+    ?:  (lte (lent ms) max-copies)  ms
+    =/  ver  |=(m=msg:sur =(%verified (~(gut by vs) [i sig.m] %unverified)))
+    =/  good  (scag max-copies (skim ms ver))
+    (weld good (scag (sub max-copies (lent good)) (skip ms ver)))
+  ::  re-sort: grouping by id destroyed +merge's ordering
+  (merge:urmail ~ kept)
 ::
 ::  +send: compose, reply, and forward are all this.
 ::
@@ -198,15 +249,17 @@
   ^-  (quip card _state)
   ?:  =(~ c)  `state
   ::  reject rather than truncate. A chain that violates a limit is not
-  ::  partially trustworthy.
-  ?>  ~|  %urmail-chain-too-long
-      (lte (lent c) max-chain)
-  ?>  ~|  %urmail-body-too-long
-      %-  levy  :_  |=(m=msg:sur (lte (met 3 body.unsigned.m) max-body))  c
-  ?>  ~|  %urmail-subject-too-long
-      %-  levy  :_  |=(m=msg:sur (lte (met 3 subj.unsigned.m) max-subj))  c
-  ?>  ~|  %urmail-too-many-recipients
-      %-  levy  :_  |=(m=msg:sur (lte ~(wyt in to.unsigned.m) max-to))    c
+  ::  partially trustworthy. This governs the INCOMING poke only - once a
+  ::  chain has been verified and merged, excess state capacity is a
+  ::  different question with a different answer; see +prune below.
+  ~|  %urmail-chain-too-long
+  ?>  (lte (lent c) max-chain)
+  ~|  %urmail-body-too-long
+  ?>  %-  levy  :_  |=(m=msg:sur (lte (met 3 body.unsigned.m) max-body))  c
+  ~|  %urmail-subject-too-long
+  ?>  %-  levy  :_  |=(m=msg:sur (lte (met 3 subj.unsigned.m) max-subj))  c
+  ~|  %urmail-too-many-recipients
+  ?>  %-  levy  :_  |=(m=msg:sur (lte ~(wyt in to.unsigned.m) max-to))    c
   ::  verify before storing anything
   =/  vs  (verify-chain:urmail (key-map c) c)
   ::  thread identity is never (root:urmail c) - see +thread-key. `c` is
@@ -216,36 +269,30 @@
   =/  old=thread:sur
     (~(gut by threads) rid *thread:sur)
   =/  new=chain:sur  (merge:urmail chain.old c)
-  ::  per-poke caps do not bound a thread's growth: +merge keeps copies that
-  ::  share an id but differ in signature, so an attacker can re-send one
-  ::  message with N junk signatures across N pokes, each individually legal.
-  ::  A raw length cap on the merged result is itself a censorship primitive,
-  ::  though: an attacker floods one message with junk-signed copies up to
-  ::  max-chain, and every legitimate reply after that is silently rejected
-  ::  forever, because the count an attacker inflates (total messages) is not
-  ::  the count that matters (distinct messages). Cap the number of distinct
-  ::  ids instead - an attacker cannot inflate that, since ids are content
-  ::  hashes - and bound copies-per-id separately. Keeping up to max-copies
-  ::  copies preserves the anti-shadowing property +merge exists for, while
-  ::  a junk-sig flood still trips the bound on the attacker's own poke.
-  =/  counts=(map msg-id:sur @ud)
-    %+  roll  new
-    |=  [m=msg:sur acc=(map msg-id:sur @ud)]
-    =/  i  (id:urmail unsigned.m)
-    (~(put by acc) i +((~(gut by acc) i 0)))
-  ?>  ~|(%urmail-too-many-messages (lte ~(wyt by counts) max-chain))
-  ?>  ~|(%urmail-too-many-copies (levy ~(val by counts) |=(n=@ud (lte n max-copies))))
+  ::  the distinct-id count is a genuine state-capacity limit and stays a
+  ::  reject - bounded state wins over availability here for v1. It is not
+  ::  airtight: ids are hashes of attacker-CHOSEN content, so anyone
+  ::  holding a single [id sig] already part of a thread (any past
+  ::  participant, or anyone the chain was ever forwarded to) can self-sign
+  ::  enough distinct junk into that same thread to hit this cap and freeze
+  ::  it - unforgeable ids don't stop an authorized signer from minting
+  ::  many of them. Real fix is a per-source quota; not attempted here.
+  ::  Not fixed this round: availability, not authenticity.
+  =/  ids  (~(gas in *(set msg-id:sur)) (turn new |=(m=msg:sur (id:urmail unsigned.m))))
+  ~|  %urmail-too-many-messages
+  ?>  (lte ~(wyt in ids) max-chain)
   ::  the per-thread caps above bound one thread; nothing else bounds how
   ::  many threads this ship will hold, and %urmail-chain is the only
   ::  externally reachable poke, so a fresh single-message chain per poke
   ::  mints unbounded state with no rate limit. An existing thread always
   ::  accepts - a reply must never be rejected because some unrelated thread
-  ::  filled the cap - only a brand-new thread-id is capped.
-  ?>  ~|  %urmail-too-many-threads
-      ?|((~(has by threads) rid) (lth ~(wyt by threads) max-threads))
-  =.  threads
-    %+  ~(put by threads)  rid
-    [new (participants:urmail new) (last-sent:urmail new)]
+  ::  filled the cap - only a brand-new thread-id is capped. Not fixed this
+  ::  round: an attacker can still pre-seed up to max-threads junk, self-
+  ::  signed, single-message threads ahead of any genuine ones and
+  ::  permanently deny new conversations once full. Availability tradeoff,
+  ::  accepted for v1, same rationale as the distinct-id limitation above.
+  ~|  %urmail-too-many-threads
+  ?>  ?|((~(has by threads) rid) (lth ~(wyt by threads) max-threads))
   ::  a verdict is keyed [id sig], so the two copies of one id that +merge
   ::  deliberately keeps are labeled separately and never collide here.
   ::  %unverified freezes only against another %unverified: it is not a
@@ -254,11 +301,20 @@
   ::  fetched the key. %verified and %forged are definitive for a fixed
   ::  [id sig] - the digest and the key are both fixed - so they can never
   ::  disagree with each other, and freezing only those two is safe.
-  =.  verdicts
+  ::
+  ::    Folded in before +prune, not after: +prune needs the verdict for
+  ::    every message in `new`, including ones already stored from a
+  ::    previous poke, not just the ones this poke happened to verify.
+  =/  vs2=_verdicts
     %+  roll  vs
     |=  [[k=[msg-id:sur @ux] v=verdict:sur] acc=_verdicts]
     ?:  ?=(?(%verified %forged) (~(gut by acc) k %unverified))  acc
     (~(put by acc) k v)
+  =/  pruned=chain:sur  (prune new vs2)
+  =.  threads
+    %+  ~(put by threads)  rid
+    [pruned (participants:urmail pruned) (last-sent:urmail pruned)]
+  =.  verdicts  vs2
   =.  inbox  [rid (skip inbox |=(t=thread-id:sur =(t rid)))]
   `state
 --
