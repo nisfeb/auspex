@@ -115,11 +115,15 @@
 ::
 ++  verify-chain
   |=  [keys=(map [ship @ud] (unit pass)) c=chain:sur]
-  ^-  (list [msg-id:sur verdict:sur])
+  ^-  (list [[msg-id:sur @ux] verdict:sur])
   %+  turn  c
   |=  m=msg:sur
-  ^-  [msg-id:sur verdict:sur]
-  :-  (id unsigned.m)
+  ^-  [[msg-id:sur @ux] verdict:sur]
+  ::  the verdict is keyed on [id sig], not id alone. +merge deliberately
+  ::  keeps two copies of one id that differ in signature; keying a verdict
+  ::  on the id would collapse %verified and %forged into whichever was
+  ::  written first, reinstating the shadowing attack at the state layer.
+  :-  [(id unsigned.m) sig.m]
   =/  k  (~(get by keys) [from.unsigned.m life.unsigned.m])
   ?~  k  %unverified
   ?~  u.k  %unverified

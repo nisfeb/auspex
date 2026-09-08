@@ -214,4 +214,15 @@
   %+  expect-eq
     !>  ~[%verified]
     !>  (turn (verify-chain:urmail keys ~[m]) |=([* v=verdict:sur] v))
+::
+::  the verdict's key names one specific signed copy. Two copies sharing an
+::  id but differing in signature must get separate, correctly-paired
+::  verdicts - if they collapsed, a forged copy could mask a genuine one.
+++  test-verdict-keyed-on-id-and-sig
+  =/  a    (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  bad  a(sig 0x0)
+  =/  keys  (all-keys ~[~sampel-palnet])
+  %+  expect-eq
+    !>  ~[[[(id:urmail unsigned.a) sig.a] %verified] [[(id:urmail unsigned.a) 0x0] %forged]]
+    !>  (verify-chain:urmail keys ~[a bad])
 --
