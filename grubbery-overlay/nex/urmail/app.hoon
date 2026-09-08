@@ -14,6 +14,19 @@
 ::                                 overwrite the other.
 ::    /mail/thread/<tid>/meta      local state: read marks, archive, labels.
 ::                                 Never signed, never travels.
+::    /mail/blob/<hash>            ATTACHMENT BYTES, content-addressed.
+::                                 The message carries name/size/mime/hash
+::                                 inside `unsigned`; the bytes live here
+::                                 and are published into gall's remote-scry
+::                                 farm at /urmail/blob/<hash>, where any
+::                                 ship holding the hash may %keen them.
+::                                 The hash is the authority and the
+::                                 courier is irrelevant, so a blob whose
+::                                 bytes do not hash to the name they came
+::                                 under is discarded without comment.
+::    /mail/blobvis                per-blob permission: %public (the
+::                                 default, in the farm) or %restricted
+::                                 (withdrawn from it, weir-gated).
 ::    /mail/idx                    the derived inbox order, newest first.
 ::    /tr/last                     the last writer outcome, as json. Fiber
 ::                                 prints go to the raw console and are
@@ -64,6 +77,15 @@
           ::  with no source file gets a BOOM sang, so this names
           ::  [/urmail %idx], which mar/urmail/idx.hoon is.
           [%fall %& [/mail %idx] [[/urmail %idx] *mail-idx:uc]]
+          ::  /mail/blob: the blob store. Covered for the same reason
+          ::  /mail/thread is - the %fall %| on /mail already copies the
+          ::  subtree, and this row is what CREATES the directory on a
+          ::  first load, since +store-blob only writes leaves into it.
+          [%fall %| /mail/blob empty-dir:loader]
+          ::  /mail/blobvis: one small grub for every blob's visibility,
+          ::  deliberately not a field beside the bytes: changing who may
+          ::  read a quarter-megabyte file must not rewrite the file.
+          [%fall %& [/mail %blobvis] [[/urmail %blobvis] *blob-index:uc]]
           ::  /tr: the writer's trace. Covered so the last outcome survives
           ::  a reload, which is the case where you most want to read it.
           [%fall %| /tr empty-dir:loader]
@@ -101,6 +123,9 @@
 ++  thread-dir  |=(root=path ^-(path (weld root /mail/thread)))
 ++  tdir        |=([root=path t=thread-id:uc] ^-(path (weld (thread-dir root) /[(scot %uv t)])))
 ++  mdir        |=([root=path t=thread-id:uc] ^-(path (weld (tdir root t) /msg)))
+++  blob-dir    |=(root=path ^-(path (weld root /mail/blob)))
+++  blob-rail   |=([root=path h=@uv] ^-(road:tarball [%& %& (blob-dir root) (scot %uv h)]))
+++  vis-rail    |=(root=path ^-(road:tarball [%& %& (mail-dir root) %blobvis]))
 ::  +slot: the grub name of one SIGNED COPY.
 ::
 ::    (sham [id sig]), not a positional index. The spec writes this leaf as
@@ -161,6 +186,20 @@
 ::    it in the marc instead would re-validate every stored grub against
 ::    the live type on read, booming every message the day the type moves.
 ::
+::  +read-stored: %1 grubs only, and a %0 grub is REFUSED rather than
+::  upgraded.
+::
+::    $stored-msg went to version 1 when `unsigned` gained attachments.
+::    A %0 grub is recognisable - its head is 0 - but it cannot be
+::    migrated: msg-id and the signature both cover the shape, so
+::    rewriting a %0 message into the %1 shape would leave a message
+::    whose signature no longer matches its own contents, which every
+::    peer would then read as %forged. Turning genuine mail into apparent
+::    forgeries is strictly worse than refusing it, so the ladder has no
+::    %0 branch and the format change is recorded as a break. The only
+::    real migration is to carry every historical shape and its digest
+::    forever, and that is deferred until the format is declared stable.
+::
 ++  read-stored
   |=  n=*
   ^-  (unit stored-msg:uc)
@@ -186,6 +225,43 @@
   ?:  (is-boom:tarball sang.vw)  (pure:m *mail-idx:uc)
   =/  res  (mule |.(;;(mail-idx:uc (sang-noun:tarball sang.vw))))
   (pure:m ?:(?=(%& -.res) p.res *mail-idx:uc))
+::
+::  +read-blob: one attachment's bytes, ~ when we do not hold them.
+::
+++  read-blob
+  |=  [root=path h=@uv]
+  =/  m  (fiber:fiber:nexus ,(unit octs))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
+  ?.  ?=([%file *] vw)  (pure:m ~)
+  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
+  =/  res  (mule |.(;;(stored-blob:uc (sang-noun:tarball sang.vw))))
+  ?:(?=(%| -.res) (pure:m ~) (pure:m `octs.p.res))
+::
+++  read-blobvis
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,blob-index:uc)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (vis-rail root) ~)
+  ?.  ?=([%file *] vw)  (pure:m *blob-index:uc)
+  ?:  (is-boom:tarball sang.vw)  (pure:m *blob-index:uc)
+  =/  res  (mule |.(;;(blob-index:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%& -.res) p.res *blob-index:uc))
+::
+::  +count-blobs: how many blobs this ship holds. Bounds the store.
+::
+::    The bound cannot be weaponised: bytes only ever enter through a
+::    LOCAL action (%send's files, or %fetch-blob), never through a
+::    delivered chain, which carries metadata and no bytes at all.
+::
+++  count-blobs
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,@ud)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (blob-dir root)] ~)
+  ?.  ?=([%ball *] vw)  (pure:m 0)
+  ?~  fil.ball.vw  (pure:m 0)
+  (pure:m ~(wyt by contents.u.fil.ball.vw))
 ::
 ::  +read-threads: every stored thread, as slot maps.
 ::
@@ -329,9 +405,12 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?-  -.a
-    %send           (do-send root to.a subj.a body.a prev.a)
+    %send           (do-send root to.a subj.a body.a prev.a files.a)
     %read           (do-read root msg-id.a)
     %delete-thread  (do-delete root thread-id.a)
+    %fetch-blob     (do-fetch-blob root hash.a from.a)
+    %restrict-blob  (do-restrict root hash.a ships.a)
+    %publish-blob   (do-publish root hash.a)
   ==
 ::
 ::  +do-send: compose, reply and forward are all this.
@@ -347,7 +426,13 @@
 ::    point where a human can still do something about it.
 ::
 ++  do-send
-  |=  [root=path to=(set ship) subj=@t body=@t prev=(unit msg-id:uc)]
+  |=  $:  root=path
+          to=(set ship)
+          subj=@t
+          body=@t
+          prev=(unit msg-id:uc)
+          files=(list file:uc)
+      ==
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?.  (lte (met 3 body) max-body:uc)
@@ -356,6 +441,11 @@
     (reject root 'subject too long')
   ?.  (lte ~(wyt in to) max-to:uc)
     (reject root 'too many recipients')
+  ?.  (files-ok:uc files)
+    (reject root 'bad attachment')
+  ;<  held=@ud  bind:m  (count-blobs root)
+  ?.  (lte (add held (lent files)) max-blobs:uc)
+    (reject root 'blob store full')
   ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
   ::  message's full contents, so it names exactly one message and
@@ -374,7 +464,12 @@
   ;<  now=@da   bind:m  bowl-now
   ;<  lyf=@ud   bind:m  (our-life our)
   ;<  rng=ring  bind:m  (our-ring lyf)
-  =/  u=unsigned:uc  [our lyf to subj body now prev]
+  ::  the metadata goes INSIDE `unsigned`, so it is covered by the
+  ::  signature and by msg-id. Swapping a file breaks the signature.
+  ::  Building it here, from the bytes actually stored, is what makes
+  ::  `size` and `hash` agree with what a fetcher will re-measure.
+  =/  as=(list attachment:uc)  (turn files describe:uc)
+  =/  u=unsigned:uc  [our lyf to subj body now prev as]
   =/  mg=msg:uc     [u (sign-with:uc rng (digest:uc u))]
   =/  old=chain:uc  ?~(tid ~ (chain-of (~(gut by loaded) u.tid ~)))
   =/  new=chain:uc  (merge:uc old ~[mg])
@@ -390,6 +485,12 @@
   ::  overlap with another thread would file this send into that thread.
   ::  Nothing here is attacker-supplied, so no identity fixing is needed.
   =/  rid=thread-id:uc  ?^(tid u.tid (id:uc u))
+  ::  store and publish the bytes BEFORE the message goes out. A
+  ::  recipient that fetches the instant the chain lands must find the
+  ::  blob bound, and a keen at an unbound spur PARKS rather than
+  ::  failing, so the ordering is the difference between a fast fetch
+  ::  and a fetch that waits out our deadline.
+  ;<  ~  bind:m  (store-files root files)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  ~  bind:m  (write-msg root rid mg %verified)
   ;<  ~  bind:m  (mark-read root rid (id:uc u))
@@ -464,6 +565,11 @@
   ?.  (fits-bodies:uc c max-body:uc)       (reject root 'body too long')
   ?.  (fits-subjects:uc c max-subj:uc)     (reject root 'subject too long')
   ?.  (fits-recipients:uc c max-to:uc)     (reject root 'too many recipients')
+  ::  a delivered chain carries attachment METADATA and never bytes, so
+  ::  this bounds what a hostile peer can make us store per message and
+  ::  what it can later make us try to fetch. Rejected, not truncated:
+  ::  the metadata is inside the signature, so trimming it would forge.
+  ?.  (fits-attachments:uc c max-attach:uc)  (reject root 'too many attachments')
   ;<  fake=?  bind:m  fake-ship
   ;<  keys=(map [ship @ud] (unit pass))  bind:m
     (key-map fake ~(tap in (signers:uc c)) ~)
@@ -498,13 +604,258 @@
   ;<  ~  bind:m  (touch-idx root rid)
   (note root 'deliver' & (scot %uv rid))
 ::
+::  ── blobs ───────────────────────────────────────────────────────────
+::
+::  +store-files: put each attached file in the store and publish it.
+::
+++  store-files
+  |=  [root=path fs=(list file:uc)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  fs  (pure:m ~)
+  ;<  ~  bind:m  (store-blob root octs.i.fs)
+  ::  recursion by ARM NAME. A $ with arguments inside a ;< continuation
+  ::  cannot find the trap.
+  (store-files root t.fs)
+::
+::  +store-blob: write one blob's bytes and bind them in the farm.
+::
+::    GATED ON NOT ALREADY HOLDING IT, and that gate is what keeps the
+::    fetch path simple. gall assigns a spur's case itself
+::    (+grow:of-farm in sys/lull): an unbound, never-culled spur takes
+::    case 1, and every later %grow at the same spur takes the next key
+::    up. A remote fetcher cannot discover a case - gall's %w care, the
+::    only read that answers one, is gated on `=(our ship)` - so it has
+::    to construct the path from the hash alone and therefore has to be
+::    able to assume case 1. Growing only when the grub is absent means
+::    a re-send of a file we still hold, or a re-fetch of one, does not
+::    bump the case. See +keen-blob for the one thing that does.
+::
+++  store-blob
+  |=  [root=path =octs]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  h=@uv  (blob-hash:uc octs)
+  ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
+  ?:  ex  (pure:m ~)
+  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%0 octs])
+  (publish-blob h octs)
+::
+::  +publish-blob: bind the bytes in gall's remote-scry farm.
+::
+::    This is the whole permission story for a public blob. A %keen is
+::    the kernel scry farm and the only permissionless channel on this
+::    platform: peeks and keeps are weir-gated, and a cross-ship peek
+::    between un-granted peers HANGS rather than failing, while a keen at
+::    a bound spur is answered by the publisher's kernel without waking
+::    %grubbery at all. So "the hash is the authority, the courier is
+::    irrelevant" is not a policy urmail enforces - it is what the
+::    transport already is.
+::
+::    gall's farm is a FLAT namespace shared by every nexus in this yoke
+::    (lattice grows at /pub/page/...), hence the /urmail prefix.
+::
+++  publish-blob
+  |=  [h=@uv =octs]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  (grow:io (blob-spur:uc h) [blob-page-mark:uc octs])
+::
+::  ── the blob fetch ──────────────────────────────────────────────────
+::
+::  +mesa-agent: the gall agent whose scry farm holds the bindings.
+::  urmail is a NEXUS inside %grubbery, so the spurs live under
+::  %grubbery's yoke, not under an agent named %urmail. A fiber cannot
+::  read its own `dap`, so this is a constant and it must track the
+::  desk's agent name.
+::
+++  mesa-agent  ^-(@ta %grubbery)
+::
+::  +blob-timeout: how long ONE keen waits. keen:io carries no deadline
+::  of its own - ames holds an unanswerable request forever - so this is
+::  the only bound. A namespace read is answered from a cache or from the
+::  publisher's kernel with no agent in the loop, so a keen that is slow
+::  is a keen that is not coming.
+::
+++  blob-timeout  ^-(@dr ~s10)
+::
+::  +max-case-probe: how far up the case ladder to look.
+::
+::    Case 1 is the answer for a blob the publisher grew once and never
+::    culled, which is every ordinary blob (+store-blob only grows when
+::    the grub is absent). The ladder exists for the one operation that
+::    burns a case: %restrict-blob culls the spur, and gall's +ap-cull
+::    parks the culled case as a high-water mark so nothing ever re-binds
+::    at or below it. A blob restricted and later re-published therefore
+::    answers at case 2, not 1, permanently. Probing a few cases up is
+::    the fetcher's whole defence against that, and it costs one timeout
+::    per miss, paid only by a blob that has actually been restricted.
+::
+++  max-case-probe  ^-(@ud 3)
+::
+::  +keen-blob: a peer's blob bytes, ~ on any failure.
+::
+++  keen-blob
+  |=  [who=ship h=@uv case=@ud]
+  =/  m  (fiber:fiber:nexus ,(unit octs))
+  ^-  form:m
+  ?:  (gth case max-case-probe)  (pure:m ~)
+  ;<  got=(unit octs)  bind:m  (keen-blob-at who h case)
+  ?^  got  (pure:m got)
+  (keen-blob who h +(case))
+::
+::  +keen-blob-at: one %keen, at one case.
+::
+::    ~ on every failure: our own deadline, an unbound spur, a mark we do
+::    not understand, a noun that is not octs. On our deadline firing,
+::    %yawn the request - ames otherwise holds an unanswerable keen
+::    forever, one parked request per miss.
+::
+++  keen-blob-at
+  |=  [who=ship h=@uv case=@ud]
+  =/  m  (fiber:fiber:nexus ,(unit octs))
+  ^-  form:m
+  =/  pax=path  (blob-keen-path:uc mesa-agent h case)
+  ;<  res=(unit (unit page))  bind:m
+    ((deadline ,(unit page)) blob-timeout (keen:io who pax))
+  ?~  res
+    ;<  ~  bind:m  (yawn:io who pax)
+    (pure:m ~)
+  ?~  u.res  (pure:m ~)
+  =/  pag=page  u.u.res
+  ?.  =(blob-page-mark:uc p.pag)  (pure:m ~)
+  =/  got  (mule |.(;;(octs q.pag)))
+  ?:(?=(%| -.got) (pure:m ~) (pure:m `p.got))
+::
+::  +do-fetch-blob: fetch one attachment's bytes on demand.
+::
+::    Receiving a chain stores it immediately; bytes are never pushed.
+::    This is the pull, and it is deliberately an explicit action rather
+::    than something delivery triggers: a chain from a stranger naming a
+::    hundred attachments must not make this ship go fetch them.
+::
+::    THE ACCEPTANCE RULE, and the only thing that matters here: a blob
+::    whose contents do not hash to the address it was fetched under is
+::    DISCARDED. Not stored, not shown, not held against the sender.
+::    `who` is a hint about where to look and nothing more - any ship
+::    holding the bytes may serve them, and the hash proves them.
+::
+++  do-fetch-blob
+  |=  [root=path h=@uv who=ship]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  have=(unit octs)  bind:m  (read-blob root h)
+  ?^  have  (note root 'fetch-blob' & 'already held')
+  ;<  held=@ud  bind:m  (count-blobs root)
+  ?.  (lth held max-blobs:uc)
+    (reject root 'blob store full')
+  ;<  got=(unit octs)  bind:m  (keen-blob who h 1)
+  ?~  got  (reject root 'blob fetch missed')
+  ::  bound what a hostile publisher can hand back before we measure it
+  ?.  (lte p.u.got max-blob:uc)
+    (reject root 'blob too large')
+  ?.  (gte p.u.got (met 3 q.u.got))
+    (reject root 'blob malformed')
+  ?.  (blob-ok:uc u.got h)
+    (reject root 'blob hash mismatch')
+  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%0 u.got])
+  ::  we hold the bytes now, so we can serve them: a blob request is
+  ::  answerable by ANYONE holding the bytes, not only the author,
+  ::  exactly as a chain is forwardable by anyone.
+  ;<  ~  bind:m  (publish-blob h u.got)
+  (note root 'fetch-blob' & (scot %uv h))
+::
+::  ── per-attachment permission ───────────────────────────────────────
+::
+::  +do-restrict: withdraw a blob from the permissionless namespace.
+::
+::    A restricted blob is culled out of the scry farm, which is the only
+::    thing that actually stops an un-granted ship reading it: the farm
+::    has no weir on it at all. What remains is the grubbery peek road,
+::    which is deny-by-default for foreign ships and opens only through a
+::    usergroup, so the named ships are granted by adding this blob's own
+::    road to a group at /urmail/<hash>.
+::
+::    THE GROUP IS NOT CREATED HERE, and that is a platform limit rather
+::    than a choice. $registry-action carries no group-lifecycle op, so a
+::    nexus can only grant into a group that already exists; laying the
+::    group's own grubs by hand would mean a +make under
+::    /sys/ames/usergroups, and a veto there arrives as a %fail that
+::    crashes this writer - the one thing it must never do, because
+::    +rise-wait would then eat the next legitimate poke. So the grant is
+::    attempted and skipped quietly when the group is absent.
+::
+++  do-restrict
+  |=  [root=path h=@uv ships=(set ship)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  have=(unit octs)  bind:m  (read-blob root h)
+  ?~  have  (reject root 'no such blob')
+  ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
+  =/  cur=blob-vis:uc  (~(gut by vis.ix) h [%public ~])
+  ::  cull ONLY from public. cull-farm is not idempotent: +farm-top's %gw
+  ::  lookup crashes on the emptied plot a previous cull left.
+  ;<  ~  bind:m  (unpublish-if-public cur h)
+  ;<  ~  bind:m
+    %^  put-file  (vis-rail root)  [/urmail %blobvis]
+    ix(vis (~(put by vis.ix) h [%restricted ships]))
+  ;<  ~  bind:m  (grant-blob root h)
+  (note root 'restrict-blob' & (scot %uv h))
+::
+++  unpublish-if-public
+  |=  [cur=blob-vis:uc h=@uv]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?.  ?=(%public -.cur)  (pure:m ~)
+  (cull-farm:io (blob-spur:uc h))
+::
+::  +do-publish: put a restricted blob back in the permissionless
+::  namespace. It re-binds at a HIGHER case than 1, because the cull
+::  parked a high-water mark; +max-case-probe is what covers that.
+::
+++  do-publish
+  |=  [root=path h=@uv]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  have=(unit octs)  bind:m  (read-blob root h)
+  ?~  have  (reject root 'no such blob')
+  ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
+  ;<  ~  bind:m
+    %^  put-file  (vis-rail root)  [/urmail %blobvis]
+    ix(vis (~(del by vis.ix) h))
+  ;<  ~  bind:m  (publish-blob h u.have)
+  (note root 'publish-blob' & (scot %uv h))
+::
+::  +grant-blob: give the named ships a peek road on one blob.
+::
+::    Per-attachment permission, expressed as one usergroup per content
+::    address. %how replaces this prefix's roads in THAT group wholesale,
+::    so a group per blob is also what keeps two restricted attachments
+::    from overwriting each other's grant.
+::
+++  grant-blob
+  |=  [root=path h=@uv]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  grp=path  /urmail/[(scot %uv h)]
+  =/  gdir=path  (weld /sys/ames/usergroups/urmail /[(cat 3 (scot %uv h) '.grp')])
+  ;<  ok=?  bind:m  (peek-exists:io [%& %& gdir %'who.ships'])
+  ?.  ok
+    %-  trace:io
+    :_  ~
+    :-  %leaf
+    "urmail: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
+  ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
+  %+  reg-how:io  grp
+  [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
+::
 ::  ── slot writing ────────────────────────────────────────────────────
 ::
 ++  write-msg
   |=  [root=path t=thread-id:uc mg=msg:uc v=verdict:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  (put-file [%& %& (mdir root t) (slot (id:uc unsigned.mg) sig.mg)] [/urmail %msg] [%0 mg v])
+  (put-file [%& %& (mdir root t) (slot (id:uc unsigned.mg) sig.mg)] [/urmail %msg] [%1 mg v])
 ::
 ++  want-slots
   |=  [c=chain:uc vs=(map [msg-id:uc @ux] verdict:uc)]
@@ -514,7 +865,7 @@
   |=  mg=msg:uc
   ^-  [@ta stored-msg:uc]
   =/  i=msg-id:uc  (id:uc unsigned.mg)
-  [(slot i sig.mg) [%0 mg (~(gut by vs) [i sig.mg] %unverified)]]
+  [(slot i sig.mg) [%1 mg (~(gut by vs) [i sig.mg] %unverified)]]
 ::
 ::  +sync-slots: make the thread's grubs equal `want`.
 ::

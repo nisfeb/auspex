@@ -35,6 +35,20 @@
         ['body' [%s body.u]]
         ['sent' (time:enjs:format sent.u)]
         ['prev' ?~(prev.u ~ [%s (scot %uv u.prev.u)])]
+        ::  attachments are INSIDE `unsigned`, so what is rendered here is
+        ::  covered by the signature above it. A reader comparing the two
+        ::  is checking the same bytes the verdict was computed over.
+        :-  'attachments'
+        :-  %a
+        %+  turn  attachments.u
+        |=  a=attachment:uc
+        ^-  ^json
+        %-  pairs:enjs:format
+        :~  ['name' [%s name.a]]
+            ['size' (numb:enjs:format size.a)]
+            ['mime' [%s mime.a]]
+            ['hash' [%s (scot %uv hash.a)]]
+        ==
         ['verdict' [%s verdict.s]]
     ==
   --
