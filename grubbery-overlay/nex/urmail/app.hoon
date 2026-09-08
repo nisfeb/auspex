@@ -2199,6 +2199,40 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  req=(unit send-req:uw)  (de-send:uw u.jon)
   ?~  req  (send-err eyre-id 400 'bad send')
+  ::  THE CAPS, CHECKED HERE, WHERE THE ANSWER CAN STILL BE NO.
+  ::
+  ::    This route pokes the writer and answers as soon as the writer
+  ::    takes the poke, because waiting for the apply would hold the
+  ::    connection across a fan-out that carries a twenty-second
+  ::    deadline per recipient. The cost of that split was a lie: a
+  ::    send +do-send refuses wrote its reason to /tr/last and returned,
+  ::    while the route had already answered 200 {"ok":true}. A body one
+  ::    byte over max-body was a composed message silently destroyed,
+  ::    with no draft to recover it - and the composer's own maxLength
+  ::    cannot catch it, because that counts UTF-16 units and the cap
+  ::    counts BYTES.
+  ::
+  ::    "No delivery receipts" is a deliberate limit about REMOTE
+  ::    delivery. This was the ship refusing its owner's own message and
+  ::    saying yes, which is a different thing entirely.
+  ::
+  ::    Every cap that depends only on the request is checked here, from
+  ::    the same lib arms +do-send uses, so the two cannot drift. The
+  ::    writer still checks them all: this route is not the only caller,
+  ::    and a check on the boundary is not a substitute for a check at
+  ::    the point of use.
+  ::    `from`, `life`, `sent` and the signature are bunted: not one of
+  ::    the three predicates below reads them, and inventing values the
+  ::    writer will overwrite would be the drift this shares arms to
+  ::    avoid.
+  =/  one=chain:uc
+    ~[[[*@p 0 to.u.req subj.u.req body.u.req '' *@da prev.u.req ~] 0x0]]
+  ?.  (fits-bodies:uc one max-body:uc)
+    (send-err eyre-id 400 'body too long')
+  ?.  (fits-subjects:uc one max-subj:uc)
+    (send-err eyre-id 400 'subject too long')
+  ?.  (fits-recipients:uc one max-to:uc)
+    (send-err eyre-id 400 'too many recipients')
   ::  body-mime='' is 'text/plain', which is what this composer produces
   ::  and the only thing the client renders. files=~ and bcc=~: bytes
   ::  enter the blob store through their own action, and neither an
