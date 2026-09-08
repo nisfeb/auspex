@@ -1,12 +1,29 @@
 import type { InboxEntry } from './api'
 
 export default function ThreadList({
-  entries, selected, onSelect,
+  entries, error, selected, onSelect,
 }: {
   entries: InboxEntry[]
+  // Distinct from an empty inbox: a failed fetch (unreachable ship) reads
+  // differently than "no mail yet", so the user can tell the two apart.
+  error: string | null
   selected: string | null
   onSelect: (id: string) => void
 }) {
+  if (error) {
+    return (
+      <div className="w-96 shrink-0 border-r border-neutral-200 p-4 text-sm text-red-600">
+        {error}
+      </div>
+    )
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="w-96 shrink-0 border-r border-neutral-200 p-4 text-sm text-neutral-400">
+        No mail yet.
+      </div>
+    )
+  }
   return (
     <ul className="w-96 shrink-0 overflow-y-auto border-r border-neutral-200">
       {entries.map((e) => (

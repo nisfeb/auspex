@@ -1,5 +1,18 @@
 # React + TypeScript + Vite
 
+## Running against a ship
+
+`npm run dev` proxies to `http://localhost:8081` (`~wex`) by default. Point it
+at a different ship's HTTP port with `SHIP_URL`, e.g.
+`SHIP_URL=http://localhost:8080 npm run dev` for `~feb`.
+
+Separately, `src/api.ts` sets `api.ship` from `VITE_SHIP`, which **defaults
+to `'wex'`** when unset. There is no `.env` file, so this default is silent:
+if you point `SHIP_URL` at a different ship and forget `VITE_SHIP`, the app
+still authenticates as `~wex` against the wrong ship's channel and nothing
+will look obviously wrong until pokes and scries fail. Set both together,
+e.g. `SHIP_URL=http://localhost:8080 VITE_SHIP=feb npm run dev`.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

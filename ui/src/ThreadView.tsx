@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { thread, send, markRead, type Thread, type Verdict } from './api'
 
 const badge: Record<Verdict, string> = {
@@ -13,24 +13,57 @@ const label: Record<Verdict, string> = {
   forged: 'FORGED',
 }
 
-export default function ThreadView({ id, onSent }: { id: string; onSent: () => void }) {
+export default function ThreadView({
+  id, onSent, updatedAt,
+}: {
+  id: string
+  onSent: () => void
+  // Set by App when a /updates push names this thread's id. Only ever
+  // changes for the thread currently open, so it is safe as an effect
+  // dependency: it triggers exactly the refetches that matter, not one
+  // per push for every thread.
+  updatedAt?: number | null
+}) {
   const [t, setT] = useState<Thread | null>(null)
   const [notFound, setNotFound] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [reply, setReply] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+
+  // Guards against the stale-thread race: click thread A, then click B
+  // before A's scry resolves. Without this, A's response can land after
+  // B's and overwrite it with setT, showing A's messages under B's
+  // header and selection. Shared with onReply below, whose post-send
+  // refetch has the same shape (lower risk, since it only overwrites its
+  // own thread's later state, but the fix is identical).
+  const staleRef = useRef(false)
 
   useEffect(() => {
+    staleRef.current = false
     setT(null)
     setNotFound(false)
+    setLoadError(null)
+    setSendError(null)
     thread(id).then((th) => {
+      if (staleRef.current) return
       if (th === null) {
         setNotFound(true)
         return
       }
       setT(th)
-      th.messages.filter((m) => !m.read).forEach((m) => markRead(m.id))
-    }).catch(console.error)
-  }, [id])
+      th.messages.filter((m) => !m.read).forEach((m) => markRead(m.id).catch(console.error))
+    }).catch((e) => {
+      if (staleRef.current) return
+      console.error(e)
+      setLoadError('Could not load this conversation.')
+    })
+    return () => { staleRef.current = true }
+  }, [id, updatedAt])
 
+  if (loadError) {
+    return <p className="p-8 text-red-600">{loadError}</p>
+  }
   if (notFound) {
     return <p className="p-8 text-neutral-400">This conversation no longer exists.</p>
   }
@@ -38,10 +71,20 @@ export default function ThreadView({ id, onSent }: { id: string; onSent: () => v
   const last = t.messages[t.messages.length - 1]
 
   const onReply = async () => {
-    await send(t.participants, `re: ${last.subject}`, reply, last.id)
-    setReply('')
-    onSent()
-    thread(id).then((th) => { if (th !== null) setT(th) })
+    setSending(true)
+    setSendError(null)
+    try {
+      await send(t.participants, `re: ${last.subject}`, reply, last.id)
+      setReply('')
+      onSent()
+      const th = await thread(id)
+      if (!staleRef.current && th !== null) setT(th)
+    } catch (e) {
+      console.error(e)
+      setSendError('Could not send that reply. Try again.')
+    } finally {
+      setSending(false)
+    }
   }
 
   return (
@@ -71,13 +114,16 @@ export default function ThreadView({ id, onSent }: { id: string; onSent: () => v
         placeholder="Reply"
         className="h-28 w-full rounded border border-neutral-300 p-3"
       />
-      <button
-        onClick={onReply}
-        disabled={!reply.trim()}
-        className="mt-2 rounded-full bg-blue-600 px-6 py-2 text-white disabled:opacity-40"
-      >
-        Send
-      </button>
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          onClick={onReply}
+          disabled={!reply.trim() || sending}
+          className="rounded-full bg-blue-600 px-6 py-2 text-white disabled:opacity-40"
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+        {sendError && <span className="text-sm text-red-600">{sendError}</span>}
+      </div>
     </div>
   )
 }
