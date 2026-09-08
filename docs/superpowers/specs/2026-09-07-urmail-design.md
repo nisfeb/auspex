@@ -587,6 +587,28 @@ every open reader reloaded — a reload storm produced by nothing a reader could
 see. Read state is not content. In urmail the beacon bumps for new mail, sends,
 deletes, label and archive changes; never for read-marks.
 
+## Which overlay libs may import, and what it costs
+
+The overlay's `lib/` is rsynced to **both** `gub/lib` and the desk's `/lib`.
+Those two build with different runes — the nexus side uses `/<`, ford on the
+desk side does not understand it — so a lib's imports decide where it can be
+built:
+
+- **Import-free libs build in both**, and are therefore the only ones
+  `-test /=grubbery=/tests/lib/... ~` can reach. Lattice's own libs are mostly
+  import-free for exactly this reason.
+- **Libs using `/<` build only from the nexus.** They are still copied to the
+  desk `/lib` but never built there, so nothing complains. They cannot be unit
+  tested.
+
+The rule that follows: **anything worth testing goes in an import-free lib, and
+the nexus glue may import freely.** That is the same discipline that kept the
+v1 core free of scries and made this port cheap — logic in testable pure files,
+platform coupling in a thin layer above it. Keep it.
+
+`lib/urmail-chain.hoon` is import-free and carries all 31 tests. It stays that
+way.
+
 ## What ports unchanged
 
 `lib/urmail.hoon` and `sur/urmail.hoon` have no Gall dependency — 944 lines
