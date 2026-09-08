@@ -77,10 +77,12 @@
 ::    /beacon/rev                  the change beacon. Open readers keep-SSE
 ::                                 this one small grub and refetch when it
 ::                                 moves. Bumped on every mutation EXCEPT a
-::                                 read-mark, and bumped from inside
-::                                 +do-send rather than after it so a
-::                                 local reader never waits on a remote
-::                                 ship - see +self-bumped.
+::                                 read-mark, on a refused poke and on a
+::                                 redelivery that wrote nothing; and
+::                                 bumped from inside +do-send rather
+::                                 than after it, so a local reader
+::                                 never waits on a remote ship. +apply
+::                                 answers which is which.
 ::    /tr/last                     the last writer outcome, as json. Fiber
 ::                                 prints go to the raw console and are
 ::                                 invisible to every tool that can reach
@@ -193,11 +195,15 @@
         ;<  ~  bind:m  (migrate-flat root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
-        ;<  ~  bind:m  (apply root from sage)
-        ::  bump the change beacon so open readers refetch. Two actions
-        ::  are excluded and for opposite reasons - see +self-bumped.
+        ::  +apply answers whether the tree actually changed, and that
+        ::  answer - not the shape of the poke - is what moves the
+        ::  beacon. Anyone may poke this writer, so a bump on a refusal
+        ::  or on a redelivery that wrote nothing would be free remote
+        ::  amplification: one bump costs every open client a full
+        ::  inbox listing plus a thread refetch. See +apply.
+        ;<  changed=?  bind:m  (apply root from sage)
         ;<  ~  bind:m
-          ?:  (self-bumped sage)  (pure:m ~)
+          ?.  changed  (pure:m ~)
           (bump-beacon root)
         $
       ::  /fetch/*: one EPHEMERAL fiber per blob fetch. It keens, pokes
@@ -614,12 +620,16 @@
 ::
 ::  +reject: refuse a poke without crashing the writer. See the header.
 ::
+::    Returns %.n, because every arm under +apply answers the writer's
+::    one question - DID ANYTHING CHANGE - and a refusal never did.
+::
 ++  reject
   |=  [root=path why=@t]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (trace:io ~[leaf+"urmail: rejected: {(trip why)}"])
-  (note root 'reject' | why)
+  ;<  ~  bind:m  (note root 'reject' | why)
+  (pure:m |)
 ::
 ::  ── permissions ─────────────────────────────────────────────────────
 ::
@@ -650,9 +660,27 @@
 ::
 ::  ── the writer ──────────────────────────────────────────────────────
 ::
+::  +apply: one poke. ANSWERS WHETHER THE TREE ACTUALLY CHANGED.
+::
+::    That answer is the beacon's gate, and it has to come from here
+::    rather than from re-reading the poke, because only the arms below
+::    know. Delivery is granted to the `public` usergroup, so ANY ship
+::    may poke this writer; if a bump followed every poke, a chain
+::    refused in microseconds - or a redelivery of a chain we already
+::    hold - would move /beacon/rev, and each move costs every open
+::    client a full inbox listing, which is O(total stored messages),
+::    plus a refetch of whatever thread it is showing. That is remote
+::    amplification bought for nothing.
+::
+::    %send answers %.n despite changing everything: it has already
+::    bumped from inside +do-send, before its fan-out, so that a local
+::    reader never waits on a remote ship. %read answers %.n because a
+::    read-mark is not content and a bump would make an open reader
+::    refetch, which marks it read again - a loop, not a burst.
+::
 ++  apply
   |=  [root=path =from:fiber:nexus =sage:tarball]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ::  a chain from ANYONE. src is deliberately not checked against the
   ::  participants: the signatures are the authority, not the courier.
@@ -660,7 +688,7 @@
     (deliver root !<(chain:uc q.sage))
   ?.  ?|(=([/ %urmail-action] p.sage) =([/urmail %blob-in] p.sage))
     ::  an unknown blot. Ignore it rather than crash - see the header.
-    (pure:m ~)
+    (pure:m |)
   ;<  our=@p  bind:m  bowl-our
   ::  +get-poke-src reads the SHIP off the transport, never the payload.
   ::  ~ is a fiber inside this nexus; our own ship arrives named, because
@@ -679,7 +707,7 @@
 ::
 ++  act
   |=  [root=path a=action:uc]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?-  -.a
     %send           (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
@@ -720,7 +748,7 @@
           files=(list file:uc)
           bcc=(set ship)
       ==
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?.  (lte (met 3 body) max-body:uc)
     (reject root 'body too long')
@@ -818,18 +846,22 @@
   ::  the fan-out carries a send-timeout deadline PER RECIPIENT: bumping
   ::  after it made one unreachable ship delay every open tab on this
   ::  ship by up to twenty seconds each, for a change already committed.
-  ::  A local reader must never wait on a remote ship. The writer's loop
-  ::  skips its own bump for a %send precisely so this one is the only
-  ::  one - see +self-bumped.
+  ::  A local reader must never wait on a remote ship. This arm answers
+  ::  %.n below so the writer's loop does not bump a second time, which
+  ::  is what keeps a send to exactly one bump.
   ;<  ~  bind:m  (bump-beacon root)
   ::  ship the PATH to every recipient, visible and blind alike. A ship
   ::  added at message forty receives the forty on this path, each
   ::  independently verifiable, and nothing off it.
-  (fan-out root new ~(tap in (~(del in (~(uni in to) bcc)) our)))
+  ;<  ~  bind:m  (fan-out root new ~(tap in (~(del in (~(uni in to) bcc)) our)))
+  ::  %.n: the beacon is already moved, above. The writer's loop must
+  ::  not move it a second time, which would cost every open reader a
+  ::  pointless refetch of a thread it already has.
+  (pure:m |)
 ::
 ++  do-read
   |=  [root=path mid=msg-id:uc]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   =/  hits
@@ -837,7 +869,13 @@
     |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
     (lien ~(val by ss) |=(s=stored-msg:uc =((id:uc unsigned.msg.s) mid)))
   ?~  hits  (reject root 'unknown message')
-  (mark-read root p.i.hits mid)
+  ;<  ~  bind:m  (mark-read root p.i.hits mid)
+  ::  %.n ALWAYS. Read state is not content: lattice learned this with
+  ::  page history, where every visit bumped and every open reader
+  ::  reloaded. It is worse here, because a reader answers a bump by
+  ::  refetching the thread it is showing and that refetch marks it read
+  ::  again - a loop, not a burst.
+  (pure:m |)
 ::
 ::  +do-delete: the escape hatch. Every capacity limit here is otherwise
 ::  permanent: a thread pinned at the distinct-id cap has no other remedy.
@@ -846,7 +884,7 @@
 ::
 ++  do-delete
   |=  [root=path t=thread-id:uc]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   =/  road=road:tarball  [%& %| (tdir root t)]
   ;<  ~  bind:m  (cull-if-there road)
@@ -854,7 +892,8 @@
   ;<  ~  bind:m
     %^  put-file  [%& %& (mail-dir root) %idx]  [/urmail %idx]
     ix(inbox (skip inbox.ix |=(o=thread-id:uc =(o t))))
-  (note root 'delete-thread' & (scot %uv t))
+  ;<  ~  bind:m  (note root 'delete-thread' & (scot %uv t))
+  (pure:m &)
 ::
 ::  +cull-if-there: cull a road that may not exist, soft. Its own arm rather
 ::  than a ?: at the call site, because the two branches would be fibers of
@@ -881,9 +920,9 @@
 ::
 ++  deliver
   |=  [root=path c=chain:uc]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ?:  =(~ c)  (pure:m ~)
+  ?:  =(~ c)  (pure:m |)
   ::  reject rather than truncate. A chain that violates a limit is not
   ::  partially trustworthy. This governs the INCOMING poke only; once
   ::  merged, excess capacity is a different question with a different
@@ -943,10 +982,19 @@
   =/  vs2  (freeze:uc (verdicts-of ss) vs)
   =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
   ;<  ~  bind:m  (ensure-thread root rid)
-  ;<  ~  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
-  ;<  ~  bind:m  (mark-direct root rid)
+  ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
+  ;<  fresh=?  bind:m  (mark-direct root rid)
+  ::  A REDELIVERY THAT WROTE NOTHING CHANGES NOTHING, and must not
+  ::  look like it did. Delivery is granted to the `public` usergroup,
+  ::  so any ship may re-poke a chain we already hold; without this it
+  ::  would reorder the inbox and move the beacon every time, for free.
+  =/  changed=?  ?|(wrote fresh)
+  ?.  changed
+    ;<  ~  bind:m  (note root 'deliver' & 'no change')
+    (pure:m |)
   ;<  ~  bind:m  (touch-idx root rid)
-  (note root 'deliver' & (scot %uv rid))
+  ;<  ~  bind:m  (note root 'deliver' & (scot %uv rid))
+  (pure:m &)
 ::
 ::  ── blobs ───────────────────────────────────────────────────────────
 ::
@@ -1191,10 +1239,12 @@
 ::
 ++  do-fetch-blob
   |=  [root=path h=@uv who=ship]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
-  ?^  have  (note root 'fetch-blob' & 'already held')
+  ?^  have
+    ;<  ~  bind:m  (note root 'fetch-blob' & 'already held')
+    (pure:m |)
   ;<  ~  bind:m  (ensure-dir (weld root /fetch))
   ::  the id is derived from [hash ship], so asking twice for the same
   ::  blob from the same peer overwrites one request rather than
@@ -1202,7 +1252,11 @@
   =/  id=@ta  (scot %uv (sham [h who]))
   ;<  ~  bind:m
     (put-file [%& %& (weld root /fetch) id] [/urmail %fetchreq] [%0 h who])
-  (note root 'fetch-blob' & 'queued')
+  ::  %.n: a queued request is not something any reader renders. The
+  ::  bump that matters is +take-blob's, when the bytes actually land
+  ::  and the attachment becomes readable.
+  ;<  ~  bind:m  (note root 'fetch-blob' & 'queued')
+  (pure:m |)
 ::
 ::  +run-fetch: the ephemeral fetch fiber. Runs OFF the writer.
 ::
@@ -1242,7 +1296,7 @@
 ::
 ++  take-blob
   |=  [root=path b=blob-in:uc]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there [%& %& (weld root /fetch) id.b])
   ?~  res.b  (reject root 'blob fetch missed')
@@ -1264,7 +1318,8 @@
   ::  exactly as a chain is forwardable by anyone. That is also why
   ::  restriction is unpublishing and not revocation - see $blob-vis.
   ;<  ~  bind:m  (publish-blob hash.b u.res.b |)
-  (note root 'fetch-blob' & (scot %uv hash.b))
+  ;<  ~  bind:m  (note root 'fetch-blob' & (scot %uv hash.b))
+  (pure:m &)
 ::
 ::  ── per-attachment permission ───────────────────────────────────────
 ::
@@ -1288,7 +1343,7 @@
 ::
 ++  do-restrict
   |=  [root=path h=@uv ships=(set ship)]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
   ?~  have  (reject root 'no such blob')
@@ -1301,7 +1356,8 @@
     %^  put-file  (vis-rail root)  [/urmail %blobvis]
     ix(vis (~(put by vis.ix) h [%restricted ships]))
   ;<  ~  bind:m  (grant-blob root h)
-  (note root 'restrict-blob' & (scot %uv h))
+  ;<  ~  bind:m  (note root 'restrict-blob' & (scot %uv h))
+  (pure:m &)
 ::
 ++  unpublish-if-public
   |=  [cur=blob-vis:uc h=@uv]
@@ -1316,7 +1372,7 @@
 ::
 ++  do-publish
   |=  [root=path h=@uv]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
   ?~  have  (reject root 'no such blob')
@@ -1332,12 +1388,14 @@
   ::  it has not first established is unbound.
   =/  cur=blob-vis:uc  (~(gut by vis.ix) h [%public ~])
   ?.  ?=(%restricted -.cur)
-    (note root 'publish-blob' & 'already public')
+    ;<  ~  bind:m  (note root 'publish-blob' & 'already public')
+    (pure:m |)
   ;<  ~  bind:m
     %^  put-file  (vis-rail root)  [/urmail %blobvis]
     ix(vis (~(del by vis.ix) h))
   ;<  ~  bind:m  (publish-blob h u.have &)
-  (note root 'publish-blob' & (scot %uv h))
+  ;<  ~  bind:m  (note root 'publish-blob' & (scot %uv h))
+  (pure:m &)
 ::
 ::  +grant-blob: give the named ships a peek road on one blob.
 ::
@@ -1449,7 +1507,7 @@
           have=(map path stored-msg:uc)
           want=(map path stored-msg:uc)
       ==
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   =/  dir=path  (mdir root t)
   =/  wn=(set path)  (node-dirs:uc ~(tap in ~(key by want)))
@@ -1460,12 +1518,18 @@
   =/  puts=(list [pk=path st=stored-msg:uc])
     %+  skip  ~(tap by want)
     |=([pk=path st=stored-msg:uc] =(`st (~(get by have) pk)))
+  =/  gone=(list path)
+    %+  skip  ~(tap in ~(key by have))
+    |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
+  =/  dead=(list path)  (minimal-dirs:uc stale)
   ;<  ~  bind:m  (ensure-nodes dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
   ;<  ~  bind:m  (put-slots dir puts)
-  ;<  ~  bind:m  (cull-dirs dir (minimal-dirs:uc stale))
-  %+  cull-slots  dir
-  %+  skip  ~(tap in ~(key by have))
-  |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
+  ;<  ~  bind:m  (cull-dirs dir dead)
+  ;<  ~  bind:m  (cull-slots dir gone)
+  ::  the answer +deliver needs: did this emit a single dart? A
+  ::  redelivery of a chain we already hold emits none, and must not be
+  ::  allowed to look like new mail.
+  (pure:m ?|(?=(^ puts) ?=(^ dead) ?=(^ gone)))
 ::
 ::  recursion by ARM NAME, not by $. A $ with arguments inside a ;<
 ::  continuation cannot find the trap (-find.$.+2).
@@ -1542,7 +1606,7 @@
   ::  pre-tree grub is and what a tree grub can never be.
   ?.  (lien ~(tap in ~(key by ss)) |=(pk=path =(1 (lent pk))))
     (pure:m ~)
-  ;<  ~  bind:m
+  ;<  *  bind:m
     (sync-slots root t ss (want-slots (chain-of ss) (verdicts-of ss)))
   (note root 'migrate' & (scot %uv t))
 ::
@@ -1571,12 +1635,14 @@
 ::
 ++  mark-direct
   |=  [root=path t=thread-id:uc]
-  =/  m  (fiber:fiber:nexus ,~)
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  ?:  direct.mt  (pure:m ~)
-  %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
-  mt(direct &)
+  ?:  direct.mt  (pure:m |)
+  ;<  ~  bind:m
+    %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
+    mt(direct &)
+  (pure:m &)
 ::
 ++  mark-read
   |=  [root=path t=thread-id:uc i=msg-id:uc]
@@ -1800,34 +1866,6 @@
 ::  connection the browser already dropped.
 ::
 ++  srv  ~(. http-res:io [%| 1 %& ~ %'main.sig'])
-::
-::  +self-bumped: must the writer's loop NOT bump the beacon for this?
-::
-::    Two actions, for opposite reasons.
-::
-::    %read must never bump AT ALL. Lattice learned this with page
-::    history: every view recorded a visit, every visit bumped the
-::    beacon, and every open reader reloaded - a storm produced by
-::    nothing a reader could see. It is sharper here. Opening a thread
-::    marks SEVERAL messages read at once, and an open reader answers a
-::    bump by refetching the thread it is showing, which marks it read
-::    again. That is not a storm, it is a loop. Read state is not
-::    content.
-::
-::    %send has ALREADY bumped, from inside +do-send, before its
-::    fan-out. The loop's bump comes after +apply returns, and +apply
-::    returns only once the chain has been offered to every recipient
-::    with a send-timeout deadline each - so the loop's bump is the late
-::    one and do-send's is the true one. Skipping it here keeps a send
-::    to exactly one bump; letting both fire would cost every open
-::    reader a second, pointless refetch of a thread it already has.
-::
-++  self-bumped
-  |=  =sage:tarball
-  ^-  ?
-  ?.  =([/ %urmail-action] p.sage)  |
-  =/  res  (mule |.(!<(action:uc q.sage)))
-  ?:(?=(%| -.res) | ?=(?(%read %send) -.p.res))
 ::
 ::  +bump-beacon: move the beacon so open readers refetch.
 ::
