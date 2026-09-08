@@ -237,22 +237,29 @@
   %+  expect-eq  !>(4)  !>((lent (prune:urmail cs vs 4)))
 ::
 ::  a %verified copy is never shed, however many forged copies crowd it and
-::  whatever order they arrive in. The forged copies are placed FIRST here,
-::  so an arrival-ordered fill would keep them and drop the genuine one.
+::  whatever order they arrive in. Both orders, same reason as above.
 ++  test-prune-never-sheds-a-verified
-  =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
-  =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
-  =/  vs  (malt (verify-chain:urmail (all-keys ~[~sampel-palnet]) cs))
-  %+  expect-eq
-    !>  ~[a]
-    !>  (prune:urmail cs vs 1)
+  =/  a    (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  cs   ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
+  =/  cs2  ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)]
+  =/  vs   (malt (verify-chain:urmail (all-keys ~[~sampel-palnet]) cs))
+  ;:  weld
+    (expect-eq !>(~[a]) !>((prune:urmail cs vs 1)))
+    (expect-eq !>(~[a]) !>((prune:urmail cs2 vs 1)))
+  ==
 ::
 ::  the fill bucket ranks %unverified above %forged. This is not a nicety:
 ::  every moon and comet message is %unverified in v1, so an unranked fill
 ::  lets four junk-signature copies evict the one genuine copy of a moon's
 ::  message and leave the user holding only forged copies of something that
-::  was never forged. The forged copies come first in the list, so arbitrary
-::  order keeps them.
+::  was never forged.
+::
+::  Asserted in BOTH input orders on purpose. +prune groups copies with
+::  +add:ja, which PREPENDS, so a group comes out in the reverse of the
+::  chain order it was built from - an unranked fill therefore keeps
+::  whichever copy was written last, and a single-order fixture passes the
+::  broken code half the time by luck. Verified: reverting the fill to the
+::  old (skip ms verified) form fails this test.
 ++  test-prune-prefers-unverified-over-forged
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  i   (id:urmail unsigned.a)
@@ -264,9 +271,14 @@
         [[i 0x4] %forged]
         [[i 0x1] %unverified]
     ==
-  %+  expect-eq
-    !>  ~[a(sig 0x1)]
-    !>  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+  ;:  weld
+    %+  expect-eq
+      !>  ~[a(sig 0x1)]
+      !>  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+    %+  expect-eq
+      !>  ~[a(sig 0x1)]
+      !>  (prune:urmail ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 1)
+  ==
 ::
 ::  the whole ranking in one shot: %verified, then %unverified, then
 ::  %forged. With room for two, the survivors are the verified copy and the
@@ -283,10 +295,15 @@
         [[i 0x1] %unverified]
         [[i sig.a] %verified]
     ==
-  =/  kept  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
+  ::  both input orders, for the +add:ja reversal reason given above
+  =/  one  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
+  =/  two  (prune:urmail ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 2)
   ;:  weld
-    (expect-eq !>(2) !>((lent kept)))
-    (expect !>((lien kept |=(m=msg:sur =(sig.m sig.a)))))
-    (expect !>((lien kept |=(m=msg:sur =(sig.m 0x1)))))
+    (expect-eq !>(2) !>((lent one)))
+    (expect !>((lien one |=(m=msg:sur =(sig.m sig.a)))))
+    (expect !>((lien one |=(m=msg:sur =(sig.m 0x1)))))
+    (expect-eq !>(2) !>((lent two)))
+    (expect !>((lien two |=(m=msg:sur =(sig.m sig.a)))))
+    (expect !>((lien two |=(m=msg:sur =(sig.m 0x1)))))
   ==
 --
