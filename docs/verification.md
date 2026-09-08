@@ -192,9 +192,28 @@ them at all — see the spec's overlay import rule.
 The `%puby` scry returns a key on a real ship; the annotation `(unit
 [crypto-suite=@ud =pass])` matches a live return; crypto-suite `1` is suite
 `%b`, the same suite the fake-ship derivation uses, so `com:nu:cric:crypto`
-handles real and fake keys identically. What this does not yet prove: that a
-real Azimuth `pass` verifies a signature from the same ship's real `%vein`
-ring. That is one further dojo sequence on a real ship, pending.
+handles real and fake keys identically. **And then the remaining link, same ship, same session:**
+
+```
+> .^(@ud %j /=life=/~martyr-sanryg)
+1
+> =ring .^(@ %j /=vein=/1)
+> =pas +:(need .^((unit [@ud @]) %j /=puby=/~martyr-sanryg/1))
+> =msg (shaf %urmail (sham 'test'))
+> =sig (sigh:as:(nol:nu:cric:crypto ring) msg)
+> (safe:as:(com:nu:cric:crypto pas) sig msg)
+%.y
+```
+
+A real planet's own `%vein` ring signed a `%urmail`-salted digest and the
+`pass` from its own Azimuth snapshot verified it, through the same arms
+`+sign-with` and `+verify-with` use. **The real-key path is proven end to
+end.** This is the single result the fake dev ships could not produce, and it
+was the last untested link between a fake-ship `verified` and a network one.
+
+Still true and unchanged: the nexus's own `+peer-pass` `%puby` branch has not
+executed inside urmail on a real ship — that happens the first time a real ship
+runs the nexus. The crypto beneath it is now known good.
 
   branch**. Both read off `pkg/arvo/sys/vane/jael.hoon`. The consequences are
   designed around rather than tested: the crypto split into pure gates and thin
