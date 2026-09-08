@@ -69,6 +69,29 @@
         %send
       =^  cards  state  (send:hc +.act)
       [cards this]
+    ::
+        %delete-thread
+      ::  the escape hatch, gated local-only by the ?> above. Without it a
+      ::  thread frozen at the distinct-id cap, or a state at max-threads,
+      ::  is unrecoverable short of |nuke. Drops the thread's verdicts and
+      ::  read marks too, so deleting actually reclaims the state rather
+      ::  than leaving a per-[id sig] residue behind that no longer names
+      ::  anything - the point of the arm is to free capacity.
+      =/  gone=chain:sur
+        =/  th  (~(get by threads) thread-id.act)
+        ?~(th ~ chain.u.th)
+      =.  threads   (~(del by threads) thread-id.act)
+      =.  inbox     (skip inbox |=(t=thread-id:sur =(t thread-id.act)))
+      =.  verdicts
+        %+  roll  gone
+        |=  [m=msg:sur acc=_verdicts]
+        (~(del by acc) [(id:urmail unsigned.m) sig.m])
+      =.  read
+        %+  roll  gone
+        |=  [m=msg:sur acc=_read]
+        (~(del in acc) (id:urmail unsigned.m))
+      :_  this
+      ~[[%give %fact ~[/updates] %urmail-update !>([%thread thread-id.act])]]
     ==
   ::
       %urmail-chain

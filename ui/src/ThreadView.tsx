@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { thread, send, markRead, ourShip, type Thread } from './api'
+import { thread, send, markRead, deleteThread, ourShip, type Thread } from './api'
 import VerdictBadge from './VerdictBadge'
 
 // The default reply audience.
@@ -31,10 +31,11 @@ function defaultRecipients(th: Thread): string[] {
 }
 
 export default function ThreadView({
-  id, onSent, updatedAt,
+  id, onSent, onDeleted, updatedAt,
 }: {
   id: string
   onSent: () => void
+  onDeleted: () => void
   // Set by App when a /updates push names this thread's id. An opaque,
   // monotonically increasing value (not a timestamp) that only changes
   // for the thread currently open, so it is safe as an effect dependency:
@@ -118,6 +119,23 @@ export default function ThreadView({
     return next
   }
 
+  const onDelete = async () => {
+    // Deleting drops evidence: the signed chain is the artifact, and a
+    // forged message in it is proof of an attempt. Worth a confirm.
+    if (!window.confirm(
+      'Delete this conversation and everything stored under it? '
+      + 'The signed chain, including any forged messages kept as evidence, '
+      + 'is removed from this ship. Other ships keep their own copies.',
+    )) return
+    try {
+      await deleteThread(id)
+      onDeleted()
+    } catch (e) {
+      console.error(e)
+      setSendError('Could not delete this conversation.')
+    }
+  }
+
   const onReply = async () => {
     const forId = id
     const to = commitPending()
@@ -154,7 +172,17 @@ export default function ThreadView({
 
   return (
     <div className="p-8">
-      <h1 className="mb-6 text-2xl">{t.messages[0].subject}</h1>
+      <div className="mb-6 flex items-start gap-4">
+        <h1 className="text-2xl">{t.messages[0].subject}</h1>
+        <button
+          type="button"
+          onClick={onDelete}
+          title="Remove this conversation from this ship. The only way to free a thread pinned at a capacity limit."
+          className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
+        >
+          Delete
+        </button>
+      </div>
       {t.messages.map((m, i) => (
         // Up to 4 copies of a message share the same `id` by design (one
         // genuine, others forged) — index into the fixed, backend-ordered

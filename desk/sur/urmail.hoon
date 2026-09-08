@@ -40,9 +40,19 @@
       last=@da
   ==
 ::
+::  $action: the local poke. %delete-thread is the escape hatch.
+::
+::    Every capacity limit in this agent is otherwise permanent and
+::    unrecoverable: a thread pinned at the distinct-id cap, or a state
+::    filled to max-threads, has no remedy but |nuke. Deletion makes those
+::    limitations recoverable without committing to a quota redesign. It is
+::    local-only - on-poke gates every action on our.bowl = src.bowl - so
+::    no peer can delete a thread out from under us.
+::
 +$  action
   $%  [%send to=(set ship) subj=@t body=@t prev=(unit msg-id)]
       [%read =msg-id]
+      [%delete-thread =thread-id]
   ==
 ::
 +$  update

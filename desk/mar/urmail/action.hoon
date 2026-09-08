@@ -17,6 +17,7 @@
             prev+(mu (se %uv))
         ==
         read+(ot ~[[%msg-id (se %uv)]])
+        delete-thread+(ot ~[[%thread-id (se %uv)]])
     ==
   --
 ++  grow

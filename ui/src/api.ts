@@ -73,6 +73,16 @@ export const send = (
     json: { send: { to, subj: subject, body, prev } },
   })
 
+// The escape hatch for a thread frozen at a capacity limit, and the only
+// way to remove anything from state short of |nuke. The agent gates this
+// on our.bowl = src.bowl, so it is local-only.
+export const deleteThread = (id: string) =>
+  api.poke({
+    app: 'urmail',
+    mark: 'urmail-action',
+    json: { 'delete-thread': { 'thread-id': id } },
+  })
+
 export const markRead = (id: string) =>
   api.poke({
     app: 'urmail',

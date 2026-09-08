@@ -67,6 +67,7 @@ export default function App() {
             <ThreadView
               id={selected}
               onSent={refresh}
+              onDeleted={() => { setSelected(null); refresh() }}
               updatedAt={threadUpdate && threadUpdate.id === selected ? threadUpdate.seq : null}
             />
           )
