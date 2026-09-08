@@ -1,0 +1,45 @@
+::  mar/urmail/msg: one stored signed copy, at /mail/thread/<tid>/msg/<slot>.
+::
+::    A NOUN PASSTHROUGH, deliberately. A marc written `|_ s=stored-msg:uc`
+::    re-validates every stored grub against the live type on every read, so
+::    the day $stored-msg gains a field every message already on disk booms
+::    and every reader silently falls back to the bunt. For mail that is
+::    data loss. The grub goes in and comes out as a raw noun; the nexus
+::    reads it through a `;;` ladder (see +read-stored) which tries the
+::    newest shape first and can upgrade an older one in place.
+::
+::    +grow json is the read surface for verification and for anything that
+::    wants to look at a message without the nexus. It is mule-guarded for
+::    the same reason: a shape it does not recognise must not crash the
+::    reader, only render as unreadable.
+::
+/<  uc  /lib/urmail-chain.hoon
+|_  n=*
+++  grad  %noun
+++  grow
+  |%
+  ++  noun  n
+  ++  json
+    ^-  ^json
+    =/  res  (mule |.(;;(stored-msg:uc n)))
+    ?:  ?=(%| -.res)  [%s 'unreadable']
+    =/  s  p.res
+    =/  u  unsigned.msg.s
+    %-  pairs:enjs:format
+    :~  ['id' [%s (scot %uv (id:uc u))]]
+        ['sig' [%s (scot %ux sig.msg.s)]]
+        ['from' [%s (scot %p from.u)]]
+        ['life' (numb:enjs:format life.u)]
+        ['to' [%a (turn ~(tap in to.u) |=(w=ship `^json`[%s (scot %p w)]))]]
+        ['subject' [%s subj.u]]
+        ['body' [%s body.u]]
+        ['sent' (time:enjs:format sent.u)]
+        ['prev' ?~(prev.u ~ [%s (scot %uv u.prev.u)])]
+        ['verdict' [%s verdict.s]]
+    ==
+  --
+++  grab
+  |%
+  ++  noun  *
+  --
+--

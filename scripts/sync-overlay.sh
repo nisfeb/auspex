@@ -12,7 +12,12 @@
 #   lib/*.hoon         -> gub/lib/   (deployed: the nexus imports it here)
 #                         lib/       (so desk-level /tests can import it too)
 #   nex/urmail/*       -> gub/nex/urmail/
-#   mar/urmail/*.hoon  -> gub/mar/urmail/
+#   mar/urmail/*.hoon  -> gub/mar/urmail/  (persisted-state marcs)
+#   mar-gub/*.hoon     -> gub/mar/         (the WIRE marcs. A blot with a
+#                         path prefix is unaddressable from the agent-facing
+#                         %grub-cmd surface and from a dojo poke, both of
+#                         which flatten a blot to its bare mark name, so the
+#                         marks a peer pokes have to sit at the top of gub/mar)
 #   mar-clay/**        -> gub/mar/clay/   (cross-desk poke marks)
 #   mar-core/*.hoon    -> mar/            (desk-level marks a DOJO poke resolves)
 #   tests/**           -> tests/          (run via -test /=grubbery=/tests/...)
@@ -53,6 +58,16 @@ for f in "$OVERLAY"/lib/*.hoon; do
     *) echo "REFUSING: lib/$b has no urmail- prefix; gub/lib is shared" >&2; BAD=1 ;;
   esac
 done
+# gub/mar's top level is shared exactly like gub/lib, and for the same
+# reason: no --delete, so an unprefixed file overwrites grubbery's forever.
+for f in "$OVERLAY"/mar-gub/*.hoon; do
+  [ -e "$f" ] || continue
+  b="$(basename "$f")"
+  case "$b" in
+    urmail-*) ;;
+    *) echo "REFUSING: mar-gub/$b has no urmail- prefix; gub/mar is shared" >&2; BAD=1 ;;
+  esac
+done
 [ "$BAD" -eq 0 ] || exit 69
 
 # ---------------------------------------------------------------------------
@@ -84,6 +99,7 @@ shadow_scan "$OVERLAY/lib"       "$DEST/gub/lib"
 shadow_scan "$OVERLAY/lib"       "$DEST/lib"
 shadow_scan "$OVERLAY/nex"       "$DEST/gub/nex"
 shadow_scan "$OVERLAY/mar"       "$DEST/gub/mar"
+shadow_scan "$OVERLAY/mar-gub"   "$DEST/gub/mar"
 shadow_scan "$OVERLAY/mar-clay"  "$DEST/gub/mar/clay"
 shadow_scan "$OVERLAY/mar-core"  "$DEST/mar"
 shadow_scan "$OVERLAY/tests"     "$DEST/tests"
@@ -106,6 +122,11 @@ if [ -d "$OVERLAY/mar/urmail" ]; then
   mkdir -p "$DEST/gub/mar/urmail"
   rsync -a "$OVERLAY/mar/urmail/" "$DEST/gub/mar/urmail/"
 fi
+# Wire marcs: gub/mar's top level (see the layout note above).
+if [ -d "$OVERLAY/mar-gub" ]; then
+  mkdir -p "$DEST/gub/mar"
+  rsync -a "$OVERLAY/mar-gub/" "$DEST/gub/mar/"
+fi
 # Cross-desk poke marks, for building a poke vase from another desk.
 if [ -d "$OVERLAY/mar-clay" ]; then
   mkdir -p "$DEST/gub/mar/clay"
@@ -126,7 +147,8 @@ LIB=$(count "$DEST/gub/lib" -maxdepth 1 -name 'urmail-*.hoon')
 TST=$(count "$DEST/tests" -name 'urmail-*.hoon')
 NEX=$(count "$DEST/gub/nex/urmail" -type f)
 MAR=$(count "$DEST/gub/mar/urmail" -type f)
-echo "synced overlay -> $DEST (urmail libs: $LIB, tests: $TST, nex: $NEX, marcs: $MAR)"
+WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'urmail-*.hoon')
+echo "synced overlay -> $DEST (urmail libs: $LIB, tests: $TST, nex: $NEX, marcs: $MAR, wire marcs: $WIR)"
 if [ "$LIB" -eq 0 ]; then
   echo "WARNING: overlay did not land - do NOT commit the desk" >&2
   exit 68
@@ -145,3 +167,29 @@ next, in the ~<ship> dojo - one command at a time, verify each echo:
   |revive %grubbery
   -test /=grubbery=/tests/lib/urmail-chain ~
 NEXT
+
+# ---------------------------------------------------------------------------
+# ROOT ROW CHECK. A nexus does not install itself. Nothing in gub/ can create
+# the /apps/<name> directory that CARRIES the nexus: the neck (the directory
+# level mark naming the nexus source) is set when the directory is made, and
+# neither the HTTP dir endpoint nor the %grub-cmd %make-dir op can set one.
+# The row in lib/root.hoon is the only mechanism the distribution provides,
+# which is how lattice and mcp are installed too.
+#
+# lib/root.hoon belongs to GRUBBERY, not to this overlay, so this script will
+# not write it - an overlay that edits its host's files silently is exactly
+# how the obelisk-ast clobber happened. It checks and tells you instead.
+# ---------------------------------------------------------------------------
+if ! grep -q "urmail.urmail_app" "$DEST/lib/root.hoon" 2>/dev/null; then
+  cat <<'ROOT'
+
+WARNING: lib/root.hoon on this desk does not install the urmail nexus.
+Add this row to the child-nexus block of +on-load in that file, next to
+the lattice row, and re-run |commit %grubbery:
+
+  [%fall %| /apps/'urmail.urmail_app' [`[`[/urmail %app] ~ %.n ~] ~]]
+
+Until it is there the marcs and the nexus source are on the desk but no
+tree carries them, and nothing runs.
+ROOT
+fi

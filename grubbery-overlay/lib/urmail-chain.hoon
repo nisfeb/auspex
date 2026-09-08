@@ -64,12 +64,13 @@
 ::
 ::  $action: the local poke. %delete-thread is the escape hatch.
 ::
-::    Every capacity limit in this agent is otherwise permanent and
-::    unrecoverable: a thread pinned at the distinct-id cap, or a state
-::    filled to max-threads, has no remedy but |nuke. Deletion makes those
-::    limitations recoverable without committing to a quota redesign. It is
-::    local-only - on-poke gates every action on our.bowl = src.bowl - so
-::    no peer can delete a thread out from under us.
+::    Every capacity limit in this nexus is otherwise permanent and
+::    unrecoverable: a thread pinned at the distinct-id cap, or a store
+::    filled to max-threads, has no remedy but deleting the tree.
+::    Deletion makes those limitations recoverable without committing to
+::    a quota redesign. It is local-only - the writer fiber gates every
+::    action on the poke's source being us - so no peer can delete a
+::    thread out from under us.
 ::
 +$  action
   $%  [%send to=(set ship) subj=@t body=@t prev=(unit msg-id)]
@@ -77,17 +78,38 @@
       [%delete-thread =thread-id]
   ==
 ::
-+$  update
-  $%  [%thread =thread-id]
-  ==
+::  the tree's persisted shapes. Every one of these is read back through
+::  ;; against a NOUN-marc vase, newest shape first, so a later version
+::  can be added without booming every grub already on disk. See
+::  +read-stored / +read-meta / +read-idx in the nexus.
 ::
-+$  state-0
-  $:  %0
-      threads=(map thread-id thread)
-      inbox=(list thread-id)              ::  newest first
-      read=(set msg-id)
-      verdicts=(map [msg-id @ux] verdict)   ::  keyed [id sig], see +verify-chain
-  ==
+::  $stored-msg: one signed copy, at /mail/thread/<tid>/msg/<slot>.
+::
+::    The verdict rides WITH the copy rather than in a side map, because
+::    a verdict names one signed copy: two messages sharing an id and
+::    differing in signature are distinct grubs with distinct verdicts.
+::    That is the [id sig] keying, expressed as storage layout.
+::
++$  stored-msg  [%0 =msg =verdict]
+::
+::  $meta: local state about a thread, at /mail/thread/<tid>/meta.
+::  Never signed, never travels: two ships may disagree about any of it.
+::
++$  meta  [%0 read=(set msg-id) archived=? labels=(set @tas)]
+::
+::  $mail-idx: the derived inbox order, at /mail/idx. Newest first.
+::
++$  mail-idx  [%0 inbox=(list thread-id)]
+::
+::  the capacity limits. Arms rather than constants in the nexus so the
+::  predicates below and their callers cannot drift apart.
+::
+++  max-chain    1.000        ::  distinct messages per chain
+++  max-body     100.000      ::  bytes per body
+++  max-subj     1.000        ::  bytes per subject
+++  max-to       100          ::  recipients per message
+++  max-copies   4            ::  copies (same id, distinct sig) per message
+++  max-threads  10.000       ::  distinct threads this ship will hold
 ::
 ::  +digest: the preimage every urmail signature covers.
 ::

@@ -1,0 +1,741 @@
+::  nex/urmail/app: the grubbery-native %urmail nexus.
+::
+::  urmail is a nexus, not a gall agent. The tree it owns:
+::    /main.sig                    the WRITER. Takes %urmail-action (local
+::                                 only) and %urmail-chain (any ship) pokes
+::                                 and serialises every mutation. Nothing
+::                                 else in this nexus writes.
+::    /mail/thread/<tid>/msg/<slot>  one SIGNED COPY per grub, verdict and
+::                                 all. <slot> is (sham [id sig]), so the
+::                                 [id sig] anti-shadowing key IS the
+::                                 storage key: two copies of one message
+::                                 that differ in signature are two grubs
+::                                 with two verdicts, and neither can
+::                                 overwrite the other.
+::    /mail/thread/<tid>/meta      local state: read marks, archive, labels.
+::                                 Never signed, never travels.
+::    /mail/idx                    the derived inbox order, newest first.
+::    /tr/last                     the last writer outcome, as json. Fiber
+::                                 prints go to the raw console and are
+::                                 invisible to every tool that can reach
+::                                 this ship; a grub is not. This is the
+::                                 only way to see WHY a poke was refused.
+::
+::  Every guarantee the gall agent established holds here unchanged:
+::  verification happens before anything is stored, the three verdicts, a
+::  missing key is %unverified and never %forged, %forged messages are
+::  stored as evidence, +prune sheds and never sheds a %verified copy,
+::  thread identity comes from content, and the write path accepts a chain
+::  from ANY ship because the signatures are the authority and the courier
+::  is irrelevant.
+::
+::  THE WRITER MUST NOT CRASH. +rise-wait restarts a failed process by
+::  CONSUMING the next poke without processing it, so a crash on a bad
+::  input eats the next legitimate message. Every rejection below is
+::  therefore a branch that returns cleanly, never a ?> or a !!. The one
+::  arm that can crash on hostile input, +thread-key, is called under mule.
+::
+/<  uc  /lib/urmail-chain.hoon
+=<  ^-  nexus:nexus
+    |%
+    ++  on-load
+      |=  =ball:tarball
+      ^-  bole:tarball
+      ::  Every persistent path needs a covering row: spin rebuilds the
+      ::  bole from scratch and DROPS anything uncovered, and an uncovered
+      ::  path here is lost mail.
+      %+  spin:loader  ball
+      :~  (manifest:loader 0)
+          ::  the writer. %fall, so an existing live process is kept.
+          [%fall %& [/ %'main.sig'] [[/ %sig] ~]]
+          ::  /mail: %fall %| copies the WHOLE existing subtree, which is
+          ::  what makes every dynamically created thread, message and meta
+          ::  grub survive a reload. Without this row a nexus reload
+          ::  deletes the mailbox.
+          [%fall %| /mail empty-dir:loader]
+          ::  /mail/thread: the same guarantee stated at the level the
+          ::  writer actually makes directories under, and the row that
+          ::  creates it on a first load. +ensure-thread only makes the
+          ::  per-thread dirs; the parent has to already be there.
+          [%fall %| /mail/thread empty-dir:loader]
+          ::  /mail/idx: a FILE row, not a directory one, so the inbox
+          ::  order survives a reload and gets a real default (an empty
+          ::  list, versioned) on a first load. A grub laid under a mark
+          ::  with no source file gets a BOOM sang, so this names
+          ::  [/urmail %idx], which mar/urmail/idx.hoon is.
+          [%fall %& [/mail %idx] [[/urmail %idx] *mail-idx:uc]]
+          ::  /tr: the writer's trace. Covered so the last outcome survives
+          ::  a reload, which is the case where you most want to read it.
+          [%fall %| /tr empty-dir:loader]
+          [%fall %& [/tr %last] [[/ %json] ~]]
+      ==
+    ::
+    ++  on-file
+      |=  [=rail:tarball =blot:tarball]
+      ^-  spool:fiber:nexus
+      |=  =prod:fiber:nexus
+      =/  m  (fiber:fiber:nexus ,~)
+      ^-  process:fiber:nexus
+      ?+    rail  stay:m
+          ::  /main.sig: the single writer. rise, grant, then loop on
+          ::  take-poke forever. Every road it builds below is ABSOLUTE,
+          ::  derived from +get-here-abs at start: a depth-relative road
+          ::  called from the wrong depth climbs past the nexus root and
+          ::  crashes the fiber, and a crashed sig fiber respawns, so one
+          ::  bad road is an infinite crash loop at 100% CPU.
+          [~ %'main.sig']
+        ;<  ~  bind:m  (rise-wait:io prod "%urmail writer failed")
+        ;<  here=rail:tarball  bind:m  get-here-abs:io
+        =/  root=path  path.here
+        ;<  ~  bind:m  (grant-public root)
+        |-
+        ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
+        ;<  ~  bind:m  (apply root from sage)
+        $
+      ==
+    --
+|%
+::  ── paths ───────────────────────────────────────────────────────────
+::
+++  mail-dir    |=(root=path ^-(path (weld root /mail)))
+++  thread-dir  |=(root=path ^-(path (weld root /mail/thread)))
+++  tdir        |=([root=path t=thread-id:uc] ^-(path (weld (thread-dir root) /[(scot %uv t)])))
+++  mdir        |=([root=path t=thread-id:uc] ^-(path (weld (tdir root t) /msg)))
+::  +slot: the grub name of one SIGNED COPY.
+::
+::    (sham [id sig]), not a positional index. The spec writes this leaf as
+::    <n> without saying what n is; a position would have to be renumbered
+::    on every insert (a chain is ordered by `sent`, and mail arrives out of
+::    order), which is a thousand rewrites per delivery and, worse, makes
+::    the storage key something other than [id sig]. Deriving the name from
+::    [id sig] makes the anti-shadowing key and the storage key the same
+::    thing by construction: two copies of one message differing in
+::    signature cannot collide, a redelivery of the same chain is a no-op,
+::    and +prune sheds a copy by culling exactly one grub.
+::
+++  slot  |=([i=msg-id:uc s=@ux] ^-(@ta (scot %uv (sham [i s]))))
+::
+::  ── writes ──────────────────────────────────────────────────────────
+::
+::  +put-file: create-or-overwrite one grub. %over's forced make creates
+::  when the rail is missing and overwrites when it exists, so no
+::  peek-exists round trip.
+::
+++  put-file
+  |=  [road=road:tarball =blot:tarball noun=*]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  (over:io road [blot noun])
+::
+++  ensure-dir
+  |=  pax=path
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  road=road:tarball  [%& %| pax]
+  ;<  ex=?  bind:m  (peek-exists:io road)
+  ?:  ex  (pure:m ~)
+  (make:io road &+empty-dir:loader)
+::
+++  ensure-thread
+  |=  [root=path t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ~  bind:m  (ensure-dir (thread-dir root))
+  ;<  ~  bind:m  (ensure-dir (tdir root t))
+  (ensure-dir (mdir root t))
+::
+::  ── reads ───────────────────────────────────────────────────────────
+::
+::  +read-stored / +read-meta / +read-idx: the `;;` ladders.
+::
+::    Each persisted marc is a noun passthrough, so what comes back is a
+::    raw noun and the SHAPE CHECK LIVES HERE. Newest shape first; a later
+::    version adds a branch above the default and upgrades in place. Doing
+::    it in the marc instead would re-validate every stored grub against
+::    the live type on read, booming every message the day the type moves.
+::
+++  read-stored
+  |=  n=*
+  ^-  (unit stored-msg:uc)
+  =/  res  (mule |.(;;(stored-msg:uc n)))
+  ?:(?=(%& -.res) `p.res ~)
+::
+++  read-meta
+  |=  [root=path t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,meta:uc)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %& (tdir root t) %meta] ~)
+  ?.  ?=([%file *] vw)  (pure:m *meta:uc)
+  ?:  (is-boom:tarball sang.vw)  (pure:m *meta:uc)
+  =/  res  (mule |.(;;(meta:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%& -.res) p.res *meta:uc))
+::
+++  read-idx
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,mail-idx:uc)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %& (mail-dir root) %idx] ~)
+  ?.  ?=([%file *] vw)  (pure:m *mail-idx:uc)
+  ?:  (is-boom:tarball sang.vw)  (pure:m *mail-idx:uc)
+  =/  res  (mule |.(;;(mail-idx:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%& -.res) p.res *mail-idx:uc))
+::
+::  +read-threads: every stored thread, as slot maps.
+::
+::    One deep peek of /mail/thread rather than a walk per thread. This is
+::    the O(total stored messages) read the spec already records against
+::    +thread-key, now paid on the tree instead of on agent state; the
+::    upgrade path is the same, a [msg-id sig] -> thread-id index grub.
+::
+++  read-threads
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map @ta stored-msg:uc)))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  (pure:m (collect-threads ball.vw))
+::
+++  collect-threads
+  |=  b=ball:tarball
+  ^-  (map thread-id:uc (map @ta stored-msg:uc))
+  %-  ~(gas by *(map thread-id:uc (map @ta stored-msg:uc)))
+  %+  murn  ~(tap by dir.b)
+  |=  [seg=@ta kid=ball:tarball]
+  ^-  (unit [thread-id:uc (map @ta stored-msg:uc)])
+  =/  t=(unit @uv)  (slaw %uv seg)
+  ?~  t  ~
+  `[u.t (collect-slots kid)]
+::
+++  collect-slots
+  |=  kid=ball:tarball
+  ^-  (map @ta stored-msg:uc)
+  =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
+  ?~  sub  ~
+  ?~  fil.u.sub  ~
+  %-  ~(gas by *(map @ta stored-msg:uc))
+  %+  murn  ~(tap by contents.u.fil.u.sub)
+  |=  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
+  ^-  (unit [@ta stored-msg:uc])
+  ?:  (is-boom:tarball sang.c)  ~
+  =/  s=(unit stored-msg:uc)  (read-stored (sang-noun:tarball sang.c))
+  ?~(s ~ `[nm u.s])
+::
+::  +chain-of: a thread's slots as a chain. +merge with an empty `old` is
+::  what re-imposes the canonical order, which the tree does not store.
+::
+++  chain-of
+  |=  ss=(map @ta stored-msg:uc)
+  ^-  chain:uc
+  (merge:uc ~ (turn ~(val by ss) |=(s=stored-msg:uc msg.s)))
+::
+++  verdicts-of
+  |=  ss=(map @ta stored-msg:uc)
+  ^-  (map [msg-id:uc @ux] verdict:uc)
+  %-  ~(gas by *(map [msg-id:uc @ux] verdict:uc))
+  %+  turn  ~(val by ss)
+  |=(s=stored-msg:uc [[(id:uc unsigned.msg.s) sig.msg.s] verdict.s])
+::
+++  threads-of
+  |=  loaded=(map thread-id:uc (map @ta stored-msg:uc))
+  ^-  (map thread-id:uc thread:uc)
+  %-  ~(run by loaded)
+  |=  ss=(map @ta stored-msg:uc)
+  ^-  thread:uc
+  =/  c=chain:uc  (chain-of ss)
+  [c (participants:uc c) (last-sent:uc c)]
+::
+::  ── the trace grub ──────────────────────────────────────────────────
+::
+++  note
+  |=  [root=path stage=@t ok=? why=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  now=@da  bind:m  bowl-now
+  %^  put-file  [%& %& (weld root /tr) %last]  [/ %json]
+  %-  pairs:enjs:format
+  :~  ['stage' [%s stage]]
+      ['ok' [%b ok]]
+      ['why' [%s why]]
+      ['at' (time:enjs:format now)]
+  ==
+::
+::  +reject: refuse a poke without crashing the writer. See the header.
+::
+++  reject
+  |=  [root=path why=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ~  bind:m  (trace:io ~[leaf+"urmail: rejected: {(trip why)}"])
+  (note root 'reject' | why)
+::
+::  ── permissions ─────────────────────────────────────────────────────
+::
+::  +grant-public: whitelist a POKE road to /main.sig in the `public`
+::  usergroup, so any ship may hand us a chain.
+::
+::    The sanctioned path: a grant lands through the registry's %how
+::    action, which validates the roads against the sender's registered
+::    prefix and merges them server-side, so lattice's grants in the same
+::    group survive untouched. A direct write to how.weir does none of that.
+::
+::    The grant is a ROAD, not a mark: a peer that can reach /main.sig can
+::    address any marc at it, %urmail-action included. +apply's source
+::    check is what makes that harmless, and it is the same check the
+::    agent's `?>  =(our.bowl src.bowl)` was.
+::
+++  grant-public
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
+  ;<  ok=?  bind:m  (peek-exists:io gdir)
+  ?.  ok
+    (trace:io ~[leaf+"urmail: no public usergroup, delivery is local only"])
+  ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
+  %+  reg-how:io  /public
+  [make=~ poke=(sy ~[`road:tarball`[%& %& root %'main.sig']]) peek=~]
+::
+::  ── the writer ──────────────────────────────────────────────────────
+::
+++  apply
+  |=  [root=path =from:fiber:nexus =sage:tarball]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ::  a chain from ANYONE. src is deliberately not checked against the
+  ::  participants: the signatures are the authority, not the courier.
+  ?:  =([/ %urmail-chain] p.sage)
+    (deliver root !<(chain:uc q.sage))
+  ?.  =([/ %urmail-action] p.sage)
+    ::  an unknown blot. Ignore it rather than crash - see the header.
+    (pure:m ~)
+  ;<  our=@p  bind:m  bowl-our
+  ::  +get-poke-src reads the SHIP off the transport, never the payload.
+  ::  ~ is a fiber inside this nexus; our own ship arrives named, because
+  ::  the agent-facing surface makes every caller a /sys/ames/ships/<who>.
+  =/  src=(unit @p)  (get-poke-src:io from)
+  ?.  ?|(?=(~ src) =(our u.src))
+    (reject root 'foreign action refused')
+  (act root !<(action:uc q.sage))
+::
+++  act
+  |=  [root=path a=action:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?-  -.a
+    %send           (do-send root to.a subj.a body.a prev.a)
+    %read           (do-read root msg-id.a)
+    %delete-thread  (do-delete root thread-id.a)
+  ==
+::
+::  +do-send: compose, reply and forward are all this.
+::
+::    A reply points `prev` at a message in a chain we hold. A forward is
+::    the same action addressed elsewhere. The chain that travels is the
+::    payload, and that is the whole design.
+::
+::    The bounds +deliver enforces are enforced here too. Every send ships
+::    the whole accumulated chain, so one oversized compose would poison a
+::    thread permanently: every later message in it rejected by every
+::    recipient, silently, forever. Failing at compose time is the only
+::    point where a human can still do something about it.
+::
+++  do-send
+  |=  [root=path to=(set ship) subj=@t body=@t prev=(unit msg-id:uc)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?.  (lte (met 3 body) max-body:uc)
+    (reject root 'body too long')
+  ?.  (lte (met 3 subj) max-subj:uc)
+    (reject root 'subject too long')
+  ?.  (lte ~(wyt in to) max-to:uc)
+    (reject root 'too many recipients')
+  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  ::  resolve prev to its containing thread. A msg-id is a hash over the
+  ::  message's full contents, so it names exactly one message and
+  ::  therefore exactly one chain.
+  =/  tid=(unit thread-id:uc)
+    ?~  prev  ~
+    =/  hits
+      %+  skim  ~(tap by loaded)
+      |=  [t=thread-id:uc ss=(map @ta stored-msg:uc)]
+      %+  lien  ~(val by ss)
+      |=(s=stored-msg:uc =((id:uc unsigned.msg.s) u.prev))
+    ?~(hits ~ `p.i.hits)
+  ?:  &(?=(^ prev) ?=(~ tid))
+    (reject root 'unknown prev')
+  ;<  our=@p    bind:m  bowl-our
+  ;<  now=@da   bind:m  bowl-now
+  ;<  lyf=@ud   bind:m  (our-life our)
+  ;<  rng=ring  bind:m  (our-ring lyf)
+  =/  u=unsigned:uc  [our lyf to subj body now prev]
+  =/  mg=msg:uc     [u (sign-with:uc rng (digest:uc u))]
+  =/  old=chain:uc  ?~(tid ~ (chain-of (~(gut by loaded) u.tid ~)))
+  =/  new=chain:uc  (merge:uc old ~[mg])
+  ::  the outgoing chain must clear the same length bound the recipient
+  ::  will apply on arrival, or the send is a silent no-op at the far end
+  ::  while looking successful here.
+  ?.  (fits-length:uc new max-chain:uc)
+    (reject root 'chain too long')
+  ::  the thread is already resolved: `tid` came from `prev`, which names
+  ::  exactly one message, and a compose is by definition a new root.
+  ::  Re-deriving it with +thread-key here would be slower AND wrong -
+  ::  it returns the first map-traversal match, so a coincidental [id sig]
+  ::  overlap with another thread would file this send into that thread.
+  ::  Nothing here is attacker-supplied, so no identity fixing is needed.
+  =/  rid=thread-id:uc  ?^(tid u.tid (id:uc u))
+  ;<  ~  bind:m  (ensure-thread root rid)
+  ;<  ~  bind:m  (write-msg root rid mg %verified)
+  ;<  ~  bind:m  (mark-read root rid (id:uc u))
+  ;<  ~  bind:m  (touch-idx root rid)
+  ;<  ~  bind:m  (note root 'send' & (scot %uv rid))
+  ::  ship the WHOLE chain to every recipient. A ship added at message
+  ::  forty receives one through forty, each independently verifiable.
+  (fan-out root new ~(tap in (~(del in to) our)))
+::
+++  do-read
+  |=  [root=path mid=msg-id:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  =/  hits
+    %+  skim  ~(tap by loaded)
+    |=  [t=thread-id:uc ss=(map @ta stored-msg:uc)]
+    (lien ~(val by ss) |=(s=stored-msg:uc =((id:uc unsigned.msg.s) mid)))
+  ?~  hits  (reject root 'unknown message')
+  (mark-read root p.i.hits mid)
+::
+::  +do-delete: the escape hatch. Every capacity limit here is otherwise
+::  permanent: a thread pinned at the distinct-id cap has no other remedy.
+::  Culling the thread dir takes its messages, its verdicts and its read
+::  marks with it, so deleting actually reclaims capacity.
+::
+++  do-delete
+  |=  [root=path t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  road=road:tarball  [%& %| (tdir root t)]
+  ;<  ex=?  bind:m  (peek-exists:io road)
+  ;<  *  bind:m  ?:(ex (cull-soft:io road) (pure:m `(unit tang)`~))
+  ;<  ix=mail-idx:uc  bind:m  (read-idx root)
+  ;<  ~  bind:m
+    %^  put-file  [%& %& (mail-dir root) %idx]  [/urmail %idx]
+    ix(inbox (skip inbox.ix |=(o=thread-id:uc =(o t))))
+  (note root 'delete-thread' & (scot %uv t))
+::
+::  +deliver: accept a chain from any ship.
+::
+::    The courier is deliberately not checked against the participants.
+::    Anyone may hand us a chain; the signatures are the authority. That is
+::    what makes chains portable and what separates this from a chat app.
+::
+::    Order is load-bearing: cap, then VERIFY, then resolve identity, then
+::    merge, then store. Nothing is written before every signature in the
+::    incoming chain has a verdict.
+::
+++  deliver
+  |=  [root=path c=chain:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?:  =(~ c)  (pure:m ~)
+  ::  reject rather than truncate. A chain that violates a limit is not
+  ::  partially trustworthy. This governs the INCOMING poke only; once
+  ::  merged, excess capacity is a different question with a different
+  ::  answer, and +prune sheds there rather than rejecting.
+  ?.  (fits-length:uc c max-chain:uc)      (reject root 'chain too long')
+  ?.  (fits-bodies:uc c max-body:uc)       (reject root 'body too long')
+  ?.  (fits-subjects:uc c max-subj:uc)     (reject root 'subject too long')
+  ?.  (fits-recipients:uc c max-to:uc)     (reject root 'too many recipients')
+  ;<  fake=?  bind:m  fake-ship
+  ;<  keys=(map [ship @ud] (unit pass))  bind:m
+    (key-map fake ~(tap in (signers:uc c)) ~)
+  =/  vs=(list [[msg-id:uc @ux] verdict:uc])  (verify-chain:uc keys c)
+  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  ::  thread identity is never (root:uc c). `c` is attacker-controlled and
+  ::  unsorted, so the head-as-supplied is not a stable identity.
+  ::  +thread-key crashes on a first-contact chain with no unique prev=~
+  ::  root, which is hostile input reaching the writer, so: mule.
+  =/  rk  (mule |.((thread-key:uc (threads-of loaded) c)))
+  ?:  ?=(%| -.rk)  (reject root 'no unique root')
+  =/  rid=thread-id:uc  p.rk
+  =/  ss=(map @ta stored-msg:uc)  (~(gut by loaded) rid ~)
+  =/  new=chain:uc  (merge:uc (chain-of ss) c)
+  ::  a genuine state-capacity limit, and it stays a reject: shedding a
+  ::  distinct non-root id would orphan the prev pointers of later
+  ::  messages. The cost is recorded in the spec and not hidden.
+  ?.  (lte (distinct-ids:uc new) max-chain:uc)
+    (reject root 'too many messages')
+  ::  an EXISTING thread always accepts - a reply must never be refused
+  ::  because some unrelated thread filled the cap. Only a brand-new
+  ::  thread id is capped.
+  ?.  ?|((~(has by loaded) rid) (lth ~(wyt by loaded) max-threads:uc))
+    (reject root 'too many threads')
+  ::  fold this poke's verdicts into the stored ones BEFORE pruning:
+  ::  +prune needs a verdict for every message in `new`, including ones
+  ::  stored by an earlier poke that this one did not carry.
+  =/  vs2  (freeze:uc (verdicts-of ss) vs)
+  =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
+  ;<  ~  bind:m  (ensure-thread root rid)
+  ;<  ~  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
+  ;<  ~  bind:m  (touch-idx root rid)
+  (note root 'deliver' & (scot %uv rid))
+::
+::  ── slot writing ────────────────────────────────────────────────────
+::
+++  write-msg
+  |=  [root=path t=thread-id:uc mg=msg:uc v=verdict:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  (put-file [%& %& (mdir root t) (slot (id:uc unsigned.mg) sig.mg)] [/urmail %msg] [%0 mg v])
+::
+++  want-slots
+  |=  [c=chain:uc vs=(map [msg-id:uc @ux] verdict:uc)]
+  ^-  (map @ta stored-msg:uc)
+  %-  ~(gas by *(map @ta stored-msg:uc))
+  %+  turn  c
+  |=  mg=msg:uc
+  ^-  [@ta stored-msg:uc]
+  =/  i=msg-id:uc  (id:uc unsigned.mg)
+  [(slot i sig.mg) [%0 mg (~(gut by vs) [i sig.mg] %unverified)]]
+::
+::  +sync-slots: make the thread's grubs equal `want`.
+::
+::    Cull what +prune shed, write what is new or whose verdict moved,
+::    leave the rest alone. Redelivering a chain we already hold writes
+::    nothing at all.
+::
+++  sync-slots
+  |=  $:  root=path
+          t=thread-id:uc
+          have=(map @ta stored-msg:uc)
+          want=(map @ta stored-msg:uc)
+      ==
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ~  bind:m
+    %+  cull-slots  (mdir root t)
+    (skip ~(tap by have) |=([nm=@ta *] (~(has by want) nm)))
+  %+  put-slots  (mdir root t)
+  (skip ~(tap by want) |=([nm=@ta s=stored-msg:uc] =(`s (~(get by have) nm))))
+::
+::  recursion by ARM NAME, not by $. A $ with arguments inside a ;<
+::  continuation cannot find the trap (-find.$.+2).
+::
+++  cull-slots
+  |=  [dir=path xs=(list [@ta stored-msg:uc])]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  xs  (pure:m ~)
+  ;<  *  bind:m  (cull-soft:io [%& %& dir -.i.xs])
+  (cull-slots dir t.xs)
+::
+++  put-slots
+  |=  [dir=path xs=(list [@ta stored-msg:uc])]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  xs  (pure:m ~)
+  ;<  ~  bind:m  (put-file [%& %& dir -.i.xs] [/urmail %msg] +.i.xs)
+  (put-slots dir t.xs)
+::
+++  mark-read
+  |=  [root=path t=thread-id:uc i=msg-id:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mt=meta:uc  bind:m  (read-meta root t)
+  %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
+  mt(read (~(put in read.mt) i))
+::
+++  touch-idx
+  |=  [root=path t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ix=mail-idx:uc  bind:m  (read-idx root)
+  %^  put-file  [%& %& (mail-dir root) %idx]  [/urmail %idx]
+  ix(inbox [t (skip inbox.ix |=(o=thread-id:uc =(o t)))])
+::
+::  ── delivery out ────────────────────────────────────────────────────
+::
+++  fan-out
+  |=  [root=path c=chain:uc ws=(list ship)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  ws  (pure:m ~)
+  ;<  ~  bind:m  (send-one root c i.ws)
+  (fan-out root c t.ws)
+::
+::  +send-one: poke one recipient's writer with the whole chain.
+::
+::    Bounded by a deadline, and soft. This runs INSIDE the writer, which
+::    is the ship's single serialisation point for mail; an unreachable
+::    recipient must not wedge it forever, and a nack from a peer running
+::    a different urmail must not crash it.
+::
+++  send-one
+  |=  [root=path c=chain:uc who=ship]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  rd=road:tarball  (remote-road [%& %& root %'main.sig'] who)
+  ;<  res=(unit (unit tang))  bind:m
+    ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ %urmail-chain] c]))
+  ?~  res
+    (trace:io ~[leaf+"urmail: send to {<who>} timed out"])
+  ?~  u.res  (pure:m ~)
+  (trace:io ~[leaf+"urmail: send to {<who>} nacked"])
+::
+++  send-timeout  ^-(@dr ~s20)
+::
+::  +remote-road: rewrite an absolute road into its /sys/ames mirror on
+::  `shp`, so a dart routes to that ship. The peer's urmail sits at the
+::  same absolute path its own root nexus gave it.
+::
+++  remote-road
+  |=  [=road:tarball shp=@p]
+  ^-  road:tarball
+  ?-  -.road
+    %|  road
+    %&
+      =/  prefix=path  /sys/ames/ships/[(scot %p shp)]/root
+      ?-  -.p.road
+        %&  [%& %& (weld prefix path.p.p.road) name.p.p.road]
+        %|  [%& %| (weld prefix p.p.road)]
+      ==
+  ==
+::
+::  ── jael, through the scry service ──────────────────────────────────
+::
+::  A nexus cannot .^ directly; /sys/scry does it with the agent's live
+::  bowl, which is exactly what jael needs - it answers scries only at
+::  exactly `now`, so nothing may scry it with a stored date. The mark is
+::  %noun and the shape check is a `;;` here, because !< against a
+::  noun-marc vase would nest-fail on any narrower mold.
+::
+++  our-life
+  |=  our=@p
+  =/  m  (fiber:fiber:nexus ,@ud)
+  ^-  form:m
+  ;<  n=noun  bind:m  (typed-scry:io noun %noun ~[%j %life (scot %p our)])
+  (pure:m ;;(@ud n))
+::
+++  our-ring
+  |=  lyf=@ud
+  =/  m  (fiber:fiber:nexus ,ring)
+  ^-  form:m
+  ;<  n=noun  bind:m  (typed-scry:io noun %noun ~[%j %vein (scot %ud lyf)])
+  (pure:m ;;(ring n))
+::
+++  fake-ship
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  n=noun  bind:m  (typed-scry:io noun %noun ~[%j %fake])
+  (pure:m ;;(? n))
+::
+::  +peer-pass: a ship's public key at a given life, or ~ when none.
+::
+::    %puby is the UNITIZED public-key scry: ~ for a ship absent from the
+::    local azimuth snapshot, rather than blocking. A blocking scry stalls
+::    the agent that runs it, so %deed is not an option.
+::
+::    %puby has no fake-ship branch the way %deed does, so on a fake ship
+::    it returns ~ for nearly every ship and nothing would ever verify in
+::    development. Mirror what %deed does for fake ships instead.
+::
+++  peer-pass
+  |=  [fake=? who=ship lyf=@ud]
+  =/  m  (fiber:fiber:nexus ,(unit pass))
+  ^-  form:m
+  ?:  fake  (pure:m `(fake-pass:uc who))
+  ;<  n=noun  bind:m
+    (typed-scry:io noun %noun ~[%j %puby (scot %p who) (scot %ud lyf)])
+  =/  res  (mule |.(;;((unit [crypto-suite=@ud =pass]) n)))
+  ?:  ?=(%| -.res)  (pure:m ~)
+  ?~  p.res  (pure:m ~)
+  (pure:m `pass.u.p.res)
+::
+::  +key-map: one scry per distinct [ship life], not one per message.
+::  Recursion by arm name, for the ;< reason stated above.
+::
+++  key-map
+  |=  $:  fake=?
+          sg=(list [who=ship lyf=@ud])
+          acc=(map [ship @ud] (unit pass))
+      ==
+  =/  m  (fiber:fiber:nexus ,(map [ship @ud] (unit pass)))
+  ^-  form:m
+  ?~  sg  (pure:m acc)
+  ;<  p=(unit pass)  bind:m  (peer-pass fake who.i.sg lyf.i.sg)
+  (key-map fake t.sg (~(put by acc) [who.i.sg lyf.i.sg] p))
+::
+::  ── bowl reads ──────────────────────────────────────────────────────
+::
+::  +bowl-our / +bowl-now: our/now, with the reply MARK-FILTERED. The
+::  writer is a busy fiber: a %urmail-chain poke queued while it was
+::  mid-work must be skipped back to the loop, not stolen by a bowl read.
+::
+++  bowl-our
+  =/  m  (fiber:fiber:nexus ,ship)
+  ^-  form:m
+  ;<  ~  bind:m  (poke:io &+&+[/sys %'bowl.sig'] [[/ %bowl-req] %our])
+  |=  input:fiber:nexus
+  :+  ~  q.state
+  ?+  in  [%skip ~]
+      ~  [%wait ~]
+      [~ %poke * *]
+    ?.  =([/ %ship] p.sage.u.in)  [%skip ~]
+    [%done !<(ship q.sage.u.in)]
+  ==
+::
+++  bowl-now
+  =/  m  (fiber:fiber:nexus ,@da)
+  ^-  form:m
+  ;<  ~  bind:m  (poke:io &+&+[/sys %'bowl.sig'] [[/ %bowl-req] %now])
+  |=  input:fiber:nexus
+  :+  ~  q.state
+  ?+  in  [%skip ~]
+      ~  [%wait ~]
+      [~ %poke * *]
+    ?.  =([/ %time] p.sage.u.in)  [%skip ~]
+    [%done !<(@da q.sage.u.in)]
+  ==
+::
+::  +deadline: with-timeout, rebuilt from primitives every grubbery in the
+::  fleet shares. +with-timeout:io's BODY is identical across the versions
+::  our ships run but its SIGNATURE is not, so calling it directly makes
+::  this file buildable on exactly one grubbery generation. Taken from
+::  lattice, which learned this the expensive way.
+::
+++  deadline
+  |*  result=mold
+  =/  m   (fiber:fiber:nexus ,(unit result))
+  =/  mr  (fiber:fiber:nexus ,result)
+  |=  [time=@dr computation=form:mr]
+  ^-  form:m
+  ;<  =wire    bind:m  (nonce:io /urmail-to)
+  ;<  now=@da  bind:m  get-time:io
+  ;<  ~        bind:m  (set-timer:io wire (add now time))
+  |=  input:fiber:nexus
+  ^-  output:m
+  ?:  ?&  ?=([~ %poke * *] in)
+          =([/ %timer-wake] p.sage.u.in)
+          =(wire !<(^wire q.sage.u.in))
+      ==
+    [~ q.state %done ~]
+  =/  c-res=output:mr  (computation +<)
+  ?:  ?=(%cont -.next.c-res)
+    [darts.c-res state.c-res %cont ..$(computation self.next.c-res)]
+  ?:  ?=(%done -.next.c-res)
+    =/  fin=form:m
+      ;<  ~  bind:m  (cancel-timer:io wire)
+      (pure:m `value.next.c-res)
+    [darts.c-res state.c-res %cont fin]
+  ?:  ?=(%fail -.next.c-res)
+    =/  err=tang  err.next.c-res
+    =/  fin=form:m
+      ;<  ~  bind:m  (cancel-timer:io wire)
+      |=  input:fiber:nexus
+      [~ q.state %fail err]
+    [darts.c-res state.c-res %cont fin]
+  :+  darts.c-res  state.c-res
+  ?-  -.next.c-res
+    %wait  [%wait ~]
+    %skip  [%skip ~]
+  ==
+--
