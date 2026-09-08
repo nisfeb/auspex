@@ -481,3 +481,115 @@ The agent keeps its own validation — the UI is a convenience, not the boundary
 
 Rich text, threading collapse, keyboard shortcuts, contacts, spam
 classification, delivery receipts, and any bridge to internet email.
+
+---
+
+# v3 — urmail as a grubbery nexus
+
+v1 and v2 assume a Gall agent. This section replaces that assumption. urmail
+becomes a **grubbery nexus** distributed as an overlay into the `%grubbery`
+desk, the same way lattice is. The signed-chain guarantees do not change; where
+they are stated above, they still bind.
+
+## Why the tree, and what it replaces
+
+v2 specified labels as `(map thread-id (set @tas))`, archive as a `(set
+thread-id)`, drafts as a `(map @uv draft)`, and a bespoke `%want-blob` /
+`%blob` poke protocol for attachments. Every one of those is a tree hand-rolled
+inside a map, or a platform feature reinvented.
+
+Lattice's own header states the principle: *"pub and know are the SAME kind of
+grub. They differ only in permission... The public/private split is a weir
+concern, not a schema split."* The same holds here. A label is not a field on a
+thread; it is where the thread is. An attachment is not a payload; it is a
+grub with a weir on it.
+
+## The tree
+
+```
+/main.sig                       the write fiber; serialises every mutation
+/mail/thread/<tid>/msg/<n>      one signed message per grub (noun marc)
+/mail/thread/<tid>/meta         local state: read, archived, labels
+/mail/blob/<hash>               attachment bytes, weir-gated
+/mail/draft/<id>                unsigned drafts
+/mail/rule/<id>                 filters
+/mail/idx                       derived: inbox order, search terms
+/ui/main.sig                    binds /apps/urmail
+/ui/requests/<id>               one ephemeral fiber per HTTP request
+/ui/views/*.html                server-rendered pages
+```
+
+Views are walks over this tree, not stored sets: Inbox is `meta` without
+`archived`, Sent is threads containing a message we authored, a label is the
+threads whose `meta` carries it. Pagination is a bounded tree listing. Search
+is a sweep, the same honest linear scan v2 specified.
+
+## Attachments over mesa
+
+`/mail/blob/<hash>` holds the bytes. The message carries only `name`, `size`,
+`mime` and `hash`, inside `unsigned`, therefore signed.
+
+The fetch is **keen**, not a poke protocol. Per the mesa work already done on
+lattice, the keen is the kernel scry farm and is the *only permissionless
+channel* — peeks and keeps are both weir-gated, and a cross-ship peek between
+un-granted peers hangs rather than failing. That asymmetry is exactly what
+urmail wants:
+
+- **Blobs the author has made public** are keenable by anyone holding the hash,
+  which matches "the hash is the authority, the courier is irrelevant." Any
+  ship holding the bytes can serve them; the hash proves them.
+- **Blobs the author has restricted** are weir-gated, granting named ships. This
+  is per-attachment permission, which v2 had no answer for at all.
+
+A blob whose contents do not hash to the path it was fetched from is discarded
+without comment. Blobs remain a cache: losing one loses a file, never a message
+and never a signature.
+
+## Constraints this platform imposes
+
+These are not style notes. Each has cost real debugging time on lattice and is
+silent at the point of failure.
+
+1. **Every blot needs a marc.** A poke to a blot with no marc parks its dart
+   silently and hangs the poking fiber forever, printing nothing. Every path
+   above ships a marc under `mar/urmail/`.
+2. **Persistent-state marcs are noun passthroughs.** A marc written as
+   `|_ x=type:lib` re-validates every stored grub against the live type on
+   read, so changing the type booms every persisted grub and readers fall to
+   bunt defaults. Message grubs carry a version and the reader upgrades in
+   place. This is not optional for mail.
+3. **Every persistent path needs a covering `%fall` row in `on-load`.** `spin`
+   rebuilds the bole from scratch and drops anything uncovered. An uncovered
+   path is lost mail.
+4. **Long-lived fibers use absolute roads.** A depth-relative road called from
+   the wrong depth climbs past the nexus root and crashes the fiber; crashed
+   sig fibers respawn, so one bad road becomes an infinite crash loop at 100%
+   CPU.
+5. **No `$` with arguments inside a `;<` continuation** — it cannot find the
+   trap. Recurse by arm name.
+6. **Deploys bounce.** Pushing source recompiles the nexus but does not respawn
+   long-lived fibers; they keep running old code silently. Every deploy is
+   `|suspend %grubbery` then `|revive %grubbery`.
+7. **Never hotfix a single file through the mount.** The mount is a stale
+   snapshot and commits wholesale, reverting every file changed since the last
+   sync. Deploy the full overlay or nothing.
+
+## What ports unchanged
+
+`lib/urmail.hoon` and `sur/urmail.hoon` have no Gall dependency — 944 lines
+including the 31 tests, carrying every reviewed property: signing, verification,
+`[id sig]` anti-shadowing, `+merge`, `+prune`, `+thread-key`, `+freeze`, the
+caps. They become `lib/urmail-chain.hoon` and friends under the overlay's
+`lib/`, tested exactly as before with `-test /=grubbery=/tests/lib/... ~`.
+
+`gub/lib` is shared with grubbery's own libraries, so every file takes an
+`urmail-` prefix to avoid shadowing.
+
+What is rewritten is `app/urmail.hoon` — 382 lines of Gall — as a nexus.
+
+## What this does not change
+
+The signed chain, the three verdicts, verification before storage, forged
+messages kept as evidence, the caps, and every guarantee stated in the v1
+sections above. A grubbery port that weakened any of those would be a
+regression, not a migration.
