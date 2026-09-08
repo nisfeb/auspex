@@ -27,6 +27,15 @@
 ::    /mail/blobvis                per-blob permission: %public (the
 ::                                 default, in the farm) or %restricted
 ::                                 (withdrawn from it, weir-gated).
+::    /fetch/<id>                  ONE EPHEMERAL FIBER PER BLOB FETCH.
+::                                 A keen is a network round trip and
+::                                 the writer serialises MUTATIONS; a
+::                                 fetch that ran on the writer queued
+::                                 every send, every inbound chain and
+::                                 every read-mark behind it for as long
+::                                 as the probe took. The fiber keens
+::                                 and pokes the answer back; only the
+::                                 writer touches the tree.
 ::    /mail/idx                    the derived inbox order, newest first.
 ::    /tr/last                     the last writer outcome, as json. Fiber
 ::                                 prints go to the raw console and are
@@ -86,6 +95,12 @@
           ::  deliberately not a field beside the bytes: changing who may
           ::  read a quarter-megabyte file must not rewrite the file.
           [%fall %& [/mail %blobvis] [[/urmail %blobvis] *blob-index:uc]]
+          ::  /fetch: one grub per in-flight blob fetch, each grub the
+          ::  state of its own fiber. Covered like every other
+          ::  persistent path - spin drops what it does not cover - and
+          ::  %fall so a request that outlives a reload respawns and
+          ::  retries rather than vanishing half-done.
+          [%fall %| /fetch empty-dir:loader]
           ::  /tr: the writer's trace. Covered so the last outcome survives
           ::  a reload, which is the case where you most want to read it.
           [%fall %| /tr empty-dir:loader]
@@ -110,10 +125,25 @@
         ;<  here=rail:tarball  bind:m  get-here-abs:io
         =/  root=path  path.here
         ;<  ~  bind:m  (grant-public root)
+        ;<  ~  bind:m  (republish-all root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ;<  ~  bind:m  (apply root from sage)
         $
+      ::  /fetch/*: one EPHEMERAL fiber per blob fetch. It keens, pokes
+      ::  the answer at the writer, and ends; the writer culls the
+      ::  request grub on receipt, whether the fetch hit or missed.
+      ::
+      ::  Ephemeral is not an incidental choice. A timed-out keen leaves
+      ::  a late %keen-response poke behind and a stray %veto arrives
+      ::  too, and a LONG-LIVED fiber that %skips those piles them in
+      ::  its skip queue to be re-offered on every later take. Running
+      ::  the probe here means that debris lands on a process that is
+      ::  about to be culled, instead of on the ship's single
+      ::  serialisation point for mail.
+          [[%fetch ~] @]
+        ;<  ~  bind:m  (rise-wait:io prod "%urmail fetch: failed")
+        (run-fetch name.rail)
       ==
     --
 |%
@@ -226,6 +256,23 @@
   =/  res  (mule |.(;;(mail-idx:uc (sang-noun:tarball sang.vw))))
   (pure:m ?:(?=(%& -.res) p.res *mail-idx:uc))
 ::
+::  +read-stored-blob-noun: the blob shape ladder.
+::
+::    Newest first, and unlike +read-stored this one really does upgrade
+::    in place: a %0 blob (bytes, no arrival time) becomes a %1 with
+::    at=0, which sorts it oldest and evicts it first. That is safe here
+::    for the reason it is not safe for a message - a blob's shape is
+::    covered by no signature, so supplying a default misrepresents
+::    nothing.
+::
+++  read-stored-blob-noun
+  |=  n=*
+  ^-  (unit stored-blob:uc)
+  =/  r1  (mule |.(;;(stored-blob:uc n)))
+  ?:  ?=(%& -.r1)  `p.r1
+  =/  r0  (mule |.(;;(stored-blob-0:uc n)))
+  ?:(?=(%| -.r0) ~ `[%1 octs.p.r0 *@da])
+::
 ::  +read-blob: one attachment's bytes, ~ when we do not hold them.
 ::
 ++  read-blob
@@ -235,8 +282,8 @@
   ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
   ?.  ?=([%file *] vw)  (pure:m ~)
   ?:  (is-boom:tarball sang.vw)  (pure:m ~)
-  =/  res  (mule |.(;;(stored-blob:uc (sang-noun:tarball sang.vw))))
-  ?:(?=(%| -.res) (pure:m ~) (pure:m `octs.p.res))
+  =/  st  (read-stored-blob-noun (sang-noun:tarball sang.vw))
+  ?~(st (pure:m ~) (pure:m `octs.u.st))
 ::
 ++  read-blobvis
   |=  root=path
@@ -248,20 +295,80 @@
   =/  res  (mule |.(;;(blob-index:uc (sang-noun:tarball sang.vw))))
   (pure:m ?:(?=(%& -.res) p.res *blob-index:uc))
 ::
-::  +count-blobs: how many blobs this ship holds. Bounds the store.
+::  +list-blobs: every blob this ship holds, with its age and weight.
 ::
-::    The bound cannot be weaponised: bytes only ever enter through a
+::    The store's whole bookkeeping. Both bounds - max-blobs by count and
+::    max-blob-bytes by weight - are computed off this, and so is the
+::    eviction order.
+::
+::    Neither bound can be weaponised: bytes only ever enter through a
 ::    LOCAL action (%send's files, or %fetch-blob), never through a
 ::    delivered chain, which carries metadata and no bytes at all.
 ::
-++  count-blobs
+++  list-blobs
   |=  root=path
-  =/  m  (fiber:fiber:nexus ,@ud)
+  =/  m  (fiber:fiber:nexus ,(list blob-row:uc))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io [%& %| (blob-dir root)] ~)
-  ?.  ?=([%ball *] vw)  (pure:m 0)
-  ?~  fil.ball.vw  (pure:m 0)
-  (pure:m ~(wyt by contents.u.fil.ball.vw))
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  ?~  fil.ball.vw  (pure:m ~)
+  %-  pure:m
+  %+  murn  ~(tap by contents.u.fil.ball.vw)
+  |=  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
+  ^-  (unit blob-row:uc)
+  ?:  (is-boom:tarball sang.c)  ~
+  =/  hh=(unit @uv)  (slaw %uv nm)
+  ?~  hh  ~
+  =/  st  (read-stored-blob-noun (sang-noun:tarball sang.c))
+  ?~  st  ~
+  `[u.hh at.u.st p.octs.u.st]
+::
+::  +all-referenced: every content address any stored message mentions.
+::
+::    The other half of the eviction predicate. A blob named by any
+::    message is never shed; an unreferenced blob is a file whose every
+::    message has been deleted, and %delete-thread culls messages
+::    without culling their blobs, so these genuinely accumulate.
+::
+++  all-referenced
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,(set @uv))
+  ^-  form:m
+  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  (pure:m (chain-hashes:uc (zing (turn ~(val by loaded) chain-of))))
+::
+::  +make-room: shed unreferenced blobs until one more of `bytes` fits.
+::
+::    Refuses rather than half-evicting: +shed-for returns an empty drop
+::    list when the store cannot be made to fit, so a caller never culls
+::    files and then rejects the write anyway.
+::
+::    THE CULL IS OF THE TREE GRUB ONLY, NEVER THE FARM BINDING, and
+::    that is not a shortcut. Culling the binding would park a
+::    high-water mark that nothing re-binds under, burning case 1 for
+::    that hash permanently and making the blob unfetchable at every
+::    peer's first probe. The cost of the rule is stated plainly: an
+::    evicted blob's bytes are still bound in gall's farm, so these
+::    bounds govern the TREE store, not everything the ship holds.
+::
+++  make-room
+  |=  [root=path bytes=@ud]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
+  ;<  refs=(set @uv)  bind:m  (all-referenced root)
+  =/  plan  (shed-for:uc held refs 1 bytes)
+  ?.  ok.plan  (pure:m |)
+  ;<  ~  bind:m  (evict root drop.plan)
+  (pure:m &)
+::
+++  evict
+  |=  [root=path hs=(list @uv)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  hs  (pure:m ~)
+  ;<  ~  bind:m  (cull-if-there (blob-rail root i.hs))
+  (evict root t.hs)
 ::
 ::  +read-threads: every stored thread, as slot maps.
 ::
@@ -388,7 +495,7 @@
   ::  participants: the signatures are the authority, not the courier.
   ?:  =([/ %urmail-chain] p.sage)
     (deliver root !<(chain:uc q.sage))
-  ?.  =([/ %urmail-action] p.sage)
+  ?.  ?|(=([/ %urmail-action] p.sage) =([/urmail %blob-in] p.sage))
     ::  an unknown blot. Ignore it rather than crash - see the header.
     (pure:m ~)
   ;<  our=@p  bind:m  bowl-our
@@ -398,6 +505,13 @@
   =/  src=(unit @p)  (get-poke-src:io from)
   ?.  ?|(?=(~ src) =(our u.src))
     (reject root 'foreign action refused')
+  ::  a fetch fiber's answer. Local-only for the same reason an action
+  ::  is: the blot has a path prefix, which the agent-facing surface and
+  ::  a dojo poke cannot name, but a peer poking over ames can - so the
+  ::  source check is what makes that harmless. The hash is re-checked
+  ::  in +take-blob regardless.
+  ?:  =([/urmail %blob-in] p.sage)
+    (take-blob root !<(blob-in:uc q.sage))
   (act root !<(action:uc q.sage))
 ::
 ++  act
@@ -443,8 +557,13 @@
     (reject root 'too many recipients')
   ?.  (files-ok:uc files)
     (reject root 'bad attachment')
-  ;<  held=@ud  bind:m  (count-blobs root)
-  ?.  (lte (add held (lent files)) max-blobs:uc)
+  ::  the store bound counts only the files we would actually ADD.
+  ::  +store-blob skips a file we already hold, so counting every
+  ::  attachment against the cap refuses a send that stores nothing -
+  ::  and the commonest attachment in a thread is one already in it.
+  ;<  fresh=(list file:uc)  bind:m  (unheld-files root files)
+  ;<  room=?  bind:m  (room-for root fresh)
+  ?.  room
     (reject root 'blob store full')
   ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
@@ -490,7 +609,7 @@
   ::  blob bound, and a keen at an unbound spur PARKS rather than
   ::  failing, so the ordering is the difference between a fast fetch
   ::  and a fetch that waits out our deadline.
-  ;<  ~  bind:m  (store-files root files)
+  ;<  ~  bind:m  (store-files root fresh)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  ~  bind:m  (write-msg root rid mg %verified)
   ;<  ~  bind:m  (mark-read root rid (id:uc u))
@@ -638,8 +757,31 @@
   =/  h=@uv  (blob-hash:uc octs)
   ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
   ?:  ex  (pure:m ~)
-  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%0 octs])
-  (publish-blob h octs)
+  ;<  now=@da  bind:m  bowl-now
+  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%1 octs now])
+  (publish-blob h octs |)
+::
+::  +unheld-files: the files in a send we do not already hold.
+::
+++  unheld-files
+  |=  [root=path fs=(list file:uc)]
+  =/  m  (fiber:fiber:nexus ,(list file:uc))
+  ^-  form:m
+  ?~  fs  (pure:m ~)
+  ;<  ex=?  bind:m  (peek-exists:io (blob-rail root (blob-hash:uc octs.i.fs)))
+  ;<  rest=(list file:uc)  bind:m  (unheld-files root t.fs)
+  (pure:m ?:(ex rest [i.fs rest]))
+::
+::  +room-for: can the store take all of these? Sheds if it has to.
+::
+++  room-for
+  |=  [root=path fs=(list file:uc)]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ?~  fs  (pure:m &)
+  ;<  ok=?  bind:m  (make-room root p.octs.i.fs)
+  ?.  ok  (pure:m |)
+  (room-for root t.fs)
 ::
 ::  +publish-blob: bind the bytes in gall's remote-scry farm.
 ::
@@ -656,10 +798,92 @@
 ::    (lattice grows at /pub/page/...), hence the /urmail prefix.
 ::
 ++  publish-blob
-  |=  [h=@uv =octs]
+  |=  [h=@uv =octs force=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ::  NOTHING MAY GROW A SPUR IT HAS NOT ESTABLISHED IS UNBOUND. gall
+  ::  assigns las+1 on a non-empty fan, so a second %grow at a bound
+  ::  spur raises the case a peer has to probe for, and cases only ever
+  ::  go up. This check is the structural guard; +do-publish's own
+  ::  visibility gate is belt to these braces.
+  ::
+  ::  `force` exists for exactly one caller. A restrict CULLED the spur,
+  ::  and gall keeps the emptied plot, so %gt still lists a spur that no
+  ::  longer answers - the one case where "listed" and "bound" disagree.
+  ::  +do-publish has already established the blob is %restricted, which
+  ::  is the record that says the cull happened, and so may grow anyway.
+  ?:  force  (grow:io (blob-spur:uc h) [blob-page-mark:uc octs])
+  ;<  bound=?  bind:m  (farm-has (blob-spur:uc h))
+  ?:  bound  (pure:m ~)
   (grow:io (blob-spur:uc h) [blob-page-mark:uc octs])
+::
+::  +farm-has: is this spur listed in our own remote-scry farm?
+::
+::    %gt is the TOTAL read - it lists every bound spur strictly below
+::    the path it is given and never blocks for a live agent - which is
+::    why it is asked rather than %gw, whose partial read crashes on a
+::    spur it does not hold and cannot be softened from inside the
+::    event. The scry runs through /sys/scry with the agent's live bowl,
+::    which is what supplies the `now` case gall demands for %t.
+::
+++  farm-has
+  |=  spur=path
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  n=noun  bind:m
+    (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %urmail %blob])
+  =/  res  (mule |.(;;((list path) n)))
+  ::  a read we could not understand must not be taken as "absent",
+  ::  because "absent" is the branch that grows and raises a case.
+  ?:  ?=(%| -.res)  (pure:m &)
+  (pure:m (lien p.res |=(x=path =(x spur))))
+::
+::  +republish-all: re-bind every public blob the farm has lost.
+::
+::    The farm lives OUTSIDE the nexus tree and outside on-load, so no
+::    %fall row protects it. If a binding is ever lost - a nuked agent,
+::    a rebuilt yoke - the bytes sit intact in the tree while every peer
+::    silently reports a miss. This runs at writer rise and re-binds
+::    exactly what is missing.
+::
+::    Gated on the farm listing, so it is a no-op in the ordinary case
+::    and can never raise a case by running again. A %restricted blob is
+::    skipped: it is withdrawn on purpose.
+::
+++  republish-all
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ::  no ?~ early-return on `held`: it would narrow the face to a lest,
+  ::  and the ;< continuations below are gates whose bodies mull against
+  ::  BOTH branches of that narrowing, so the null case then fails to
+  ::  nest. The empty case costs one scry and is not worth the shape.
+  ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
+  ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
+  ;<  n=noun  bind:m
+    (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %urmail %blob])
+  =/  res  (mule |.(;;((list path) n)))
+  ?:  ?=(%| -.res)  (pure:m ~)
+  =/  bound=(set path)  (~(gas in *(set path)) p.res)
+  %+  republish-loop  root
+  %+  skip  held
+  |=  r=blob-row:uc
+  ^-  ?
+  ?:  (~(has in bound) (blob-spur:uc h.r))  &
+  =/  v=blob-vis:uc  (~(gut by vis.ix) h.r [%public ~])
+  ?=(%restricted -.v)
+::
+++  republish-loop
+  |=  [root=path rs=(list blob-row:uc)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  rs  (pure:m ~)
+  ;<  o=(unit octs)  bind:m  (read-blob root h.i.rs)
+  ;<  ~  bind:m
+    ?~  o  (pure:m ~)
+    ;<  ~  bind:m  (grow:io (blob-spur:uc h.i.rs) [blob-page-mark:uc u.o])
+    (trace:io ~[leaf+"urmail: republished blob {<h.i.rs>}"])
+  (republish-loop root t.rs)
 ::
 ::  ── the blob fetch ──────────────────────────────────────────────────
 ::
@@ -746,24 +970,76 @@
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
   ?^  have  (note root 'fetch-blob' & 'already held')
-  ;<  held=@ud  bind:m  (count-blobs root)
-  ?.  (lth held max-blobs:uc)
-    (reject root 'blob store full')
-  ;<  got=(unit octs)  bind:m  (keen-blob who h 1)
-  ?~  got  (reject root 'blob fetch missed')
+  ;<  ~  bind:m  (ensure-dir (weld root /fetch))
+  ::  the id is derived from [hash ship], so asking twice for the same
+  ::  blob from the same peer overwrites one request rather than
+  ::  spawning a second fiber to race the first.
+  =/  id=@ta  (scot %uv (sham [h who]))
+  ;<  ~  bind:m
+    (put-file [%& %& (weld root /fetch) id] [/urmail %fetchreq] [%0 h who])
+  (note root 'fetch-blob' & 'queued')
+::
+::  +run-fetch: the ephemeral fetch fiber. Runs OFF the writer.
+::
+::    Its state is its own grub, so it needs nothing passed in. It keens
+::    (probing cases, each bounded and yawned), hands the outcome to the
+::    writer and ends. It writes nothing: the writer is still the only
+::    thing that mutates the tree, including culling this request.
+::
+::    Its road to the writer is ABSOLUTE, derived from +get-here-abs.
+::    This fiber lives at a fixed depth today, but a depth-relative road
+::    called from the wrong depth climbs past the nexus root and crashes
+::    the fiber, and there is no reason to leave that hostage to a later
+::    move of the path.
+::
+++  run-fetch
+  |=  id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  here=rail:tarball  bind:m  get-here-abs:io
+  =/  root=path  (snip path.here)
+  ;<  rq=fetch-req:uc  bind:m  (get-state-as:io ,fetch-req:uc)
+  ;<  got=(unit octs)  bind:m  (keen-blob from.rq hash.rq 1)
+  %+  poke:io  [%& %& root %'main.sig']
+  [[/urmail %blob-in] [%0 id hash.rq got]]
+::
+::  +take-blob: the writer's half of a fetch. Local only.
+::
+::    THE ACCEPTANCE RULE, and the only thing that matters here: a blob
+::    whose contents do not hash to the address it was fetched under is
+::    DISCARDED. Not stored, not shown, not held against the sender.
+::    The peer named in the request is a hint about where to look and
+::    nothing more - any ship holding the bytes may serve them, and the
+::    hash proves them.
+::
+::    The request grub is culled FIRST and unconditionally, so a miss
+::    leaves nothing behind to respawn on the next reload.
+::
+++  take-blob
+  |=  [root=path b=blob-in:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ~  bind:m  (cull-if-there [%& %& (weld root /fetch) id.b])
+  ?~  res.b  (reject root 'blob fetch missed')
   ::  bound what a hostile publisher can hand back before we measure it
-  ?.  (lte p.u.got max-blob:uc)
+  ?.  (lte p.u.res.b max-blob:uc)
     (reject root 'blob too large')
-  ?.  (gte p.u.got (met 3 q.u.got))
+  ?.  (gte p.u.res.b (met 3 q.u.res.b))
     (reject root 'blob malformed')
-  ?.  (blob-ok:uc u.got h)
+  ?.  (blob-ok:uc u.res.b hash.b)
     (reject root 'blob hash mismatch')
-  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%0 u.got])
+  ;<  room=?  bind:m  (make-room root p.u.res.b)
+  ?.  room
+    (reject root 'blob store full')
+  ;<  now=@da  bind:m  bowl-now
+  ;<  ~  bind:m
+    (put-file (blob-rail root hash.b) [/urmail %blob] [%1 u.res.b now])
   ::  we hold the bytes now, so we can serve them: a blob request is
   ::  answerable by ANYONE holding the bytes, not only the author,
-  ::  exactly as a chain is forwardable by anyone.
-  ;<  ~  bind:m  (publish-blob h u.got)
-  (note root 'fetch-blob' & (scot %uv h))
+  ::  exactly as a chain is forwardable by anyone. That is also why
+  ::  restriction is unpublishing and not revocation - see $blob-vis.
+  ;<  ~  bind:m  (publish-blob hash.b u.res.b |)
+  (note root 'fetch-blob' & (scot %uv hash.b))
 ::
 ::  ── per-attachment permission ───────────────────────────────────────
 ::
@@ -835,7 +1111,7 @@
   ;<  ~  bind:m
     %^  put-file  (vis-rail root)  [/urmail %blobvis]
     ix(vis (~(del by vis.ix) h))
-  ;<  ~  bind:m  (publish-blob h u.have)
+  ;<  ~  bind:m  (publish-blob h u.have &)
   (note root 'publish-blob' & (scot %uv h))
 ::
 ::  +grant-blob: give the named ships a peek road on one blob.

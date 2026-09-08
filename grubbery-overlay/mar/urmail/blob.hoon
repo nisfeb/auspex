@@ -14,6 +14,14 @@
 ::    attachment could reach a UI. It reports the address and the length
 ::    and hands the bytes over as hex, which is exact and inert.
 ::
+::    THE HEX IS LOSSY RELATIVE TO SIZE, and a decoder must left-pad it
+::    to `size` bytes. It is (scot %ux q.octs) over an atom, and an atom
+::    has no leading zero bytes, so a file beginning with a NUL renders
+::    shorter than it is. `size` is the authority on length - it is the
+::    signed field and it is inside the hash - and hex is the authority
+::    on the bytes below it. Read the file as: take `size`, take the hex,
+::    left-pad with zeros to `size` bytes, LITTLE-ENDIAN.
+::
 /<  uc  /lib/urmail-chain.hoon
 |_  n=*
 ++  grad  %noun
@@ -22,13 +30,19 @@
   ++  noun  n
   ++  json
     ^-  ^json
-    =/  res  (mule |.(;;(stored-blob:uc n)))
-    ?:  ?=(%| -.res)  [%s 'unreadable']
-    =/  o  octs.p.res
+    ::  the shape ladder, newest first. A %0 blob (no arrival time) is
+    ::  upgraded rather than refused: a blob's shape is covered by no
+    ::  signature, so supplying a default misrepresents nothing.
+    =/  o=(unit octs)
+      =/  r1  (mule |.(;;(stored-blob:uc n)))
+      ?:  ?=(%& -.r1)  `octs.p.r1
+      =/  r0  (mule |.(;;(stored-blob-0:uc n)))
+      ?:(?=(%| -.r0) ~ `octs.p.r0)
+    ?~  o  [%s 'unreadable']
     %-  pairs:enjs:format
-    :~  ['size' (numb:enjs:format p.o)]
-        ['hash' [%s (scot %uv (blob-hash:uc o))]]
-        ['hex' [%s (scot %ux q.o)]]
+    :~  ['size' (numb:enjs:format p.u.o)]
+        ['hash' [%s (scot %uv (blob-hash:uc u.o))]]
+        ['hex' [%s (scot %ux q.u.o)]]
     ==
   --
 ++  grab
