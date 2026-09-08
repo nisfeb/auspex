@@ -18,10 +18,11 @@ export default function ThreadView({
 }: {
   id: string
   onSent: () => void
-  // Set by App when a /updates push names this thread's id. Only ever
-  // changes for the thread currently open, so it is safe as an effect
-  // dependency: it triggers exactly the refetches that matter, not one
-  // per push for every thread.
+  // Set by App when a /updates push names this thread's id. An opaque,
+  // monotonically increasing value (not a timestamp) that only changes
+  // for the thread currently open, so it is safe as an effect dependency:
+  // it triggers exactly the refetches that matter, not one per push for
+  // every thread.
   updatedAt?: number | null
 }) {
   const [t, setT] = useState<Thread | null>(null)
@@ -31,22 +32,32 @@ export default function ThreadView({
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
-  // Guards against the stale-thread race: click thread A, then click B
-  // before A's scry resolves. Without this, A's response can land after
-  // B's and overwrite it with setT, showing A's messages under B's
-  // header and selection. Shared with onReply below, whose post-send
-  // refetch has the same shape (lower risk, since it only overwrites its
-  // own thread's later state, but the fix is identical).
-  const staleRef = useRef(false)
+  // Tracks the id the effect below most recently committed to, so
+  // onReply's post-send refetch (see below) can tell whether the user has
+  // since navigated to a different thread. Updated synchronously inside
+  // the effect, before any async work, so it's always current by the time
+  // any later promise resolves.
+  const idRef = useRef(id)
 
+  // The stale-thread race: click thread A, then click B before A's scry
+  // resolves. React runs A's effect cleanup and B's effect setup back to
+  // back, synchronously, with no microtask in between — so a *hoisted*
+  // ref re-armed at the top of every invocation is reset to "not stale"
+  // by B's setup before A's in-flight network response ever lands, and
+  // does nothing to stop it. The guard has to be a variable owned by the
+  // one invocation whose request it guards, which only a fresh `let`
+  // inside the effect provides (each call gets its own closure; nothing
+  // later can reach in and reset it) - the same reason `App.tsx`'s
+  // subscription cleanup uses a per-invocation `cancelled`, not a ref.
   useEffect(() => {
-    staleRef.current = false
+    let cancelled = false
+    idRef.current = id
     setT(null)
     setNotFound(false)
     setLoadError(null)
     setSendError(null)
     thread(id).then((th) => {
-      if (staleRef.current) return
+      if (cancelled) return
       if (th === null) {
         setNotFound(true)
         return
@@ -54,11 +65,11 @@ export default function ThreadView({
       setT(th)
       th.messages.filter((m) => !m.read).forEach((m) => markRead(m.id).catch(console.error))
     }).catch((e) => {
-      if (staleRef.current) return
+      if (cancelled) return
       console.error(e)
       setLoadError('Could not load this conversation.')
     })
-    return () => { staleRef.current = true }
+    return () => { cancelled = true }
   }, [id, updatedAt])
 
   if (loadError) {
@@ -71,20 +82,32 @@ export default function ThreadView({
   const last = t.messages[t.messages.length - 1]
 
   const onReply = async () => {
+    const forId = id
     setSending(true)
     setSendError(null)
+    // The send poke and the post-send refetch are different failures.
+    // Only the poke failing means the reply wasn't sent - draft kept, and
+    // safe to retry. If it succeeds but the refetch then fails, the reply
+    // already went out; clearing the draft and saying so (not "could not
+    // send") avoids the user resending a message that already landed.
     try {
       await send(t.participants, `re: ${last.subject}`, reply, last.id)
-      setReply('')
-      onSent()
-      const th = await thread(id)
-      if (!staleRef.current && th !== null) setT(th)
     } catch (e) {
       console.error(e)
       setSendError('Could not send that reply. Try again.')
-    } finally {
       setSending(false)
+      return
     }
+    setReply('')
+    onSent()
+    try {
+      const th = await thread(forId)
+      if (idRef.current === forId && th !== null) setT(th)
+    } catch (e) {
+      console.error(e)
+      setSendError('Sent, but could not refresh this view. Reload to see it.')
+    }
+    setSending(false)
   }
 
   return (

@@ -10,10 +10,14 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   // The most recent /updates push, so the open thread (if any) can react
-  // to it. Only the id and a timestamp: ThreadView compares the id against
-  // its own and only refetches when they match, so one push never causes
-  // every thread to refetch.
-  const [threadUpdate, setThreadUpdate] = useState<{ id: string; at: number } | null>(null)
+  // to it. ThreadView compares the id against its own and only refetches
+  // when they match, so one push never causes every thread to refetch.
+  // `seq` is a monotonic counter, not Date.now(): two pushes for the same
+  // thread landing in the same millisecond (plausible with a batched
+  // channel poll) would otherwise produce an identical `at`, so the
+  // dependency comparison in ThreadView sees no change and silently drops
+  // the second refetch. A counter is guaranteed distinct every call.
+  const [threadUpdate, setThreadUpdate] = useState<{ id: string; seq: number } | null>(null)
 
   const refresh = useCallback(() => {
     inbox().then((es) => { setInboxError(null); setEntries(es) })
@@ -22,7 +26,7 @@ export default function App() {
 
   const onThreadUpdate = useCallback((threadId: string) => {
     refresh()
-    setThreadUpdate({ id: threadId, at: Date.now() })
+    setThreadUpdate((prev) => ({ id: threadId, seq: (prev?.seq ?? 0) + 1 }))
   }, [refresh])
 
   useEffect(() => {
@@ -63,7 +67,7 @@ export default function App() {
             <ThreadView
               id={selected}
               onSent={refresh}
-              updatedAt={threadUpdate && threadUpdate.id === selected ? threadUpdate.at : null}
+              updatedAt={threadUpdate && threadUpdate.id === selected ? threadUpdate.seq : null}
             />
           )
           : <p className="p-8 text-neutral-400">Select a conversation</p>}
