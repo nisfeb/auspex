@@ -41,11 +41,12 @@ export default function ThreadView({
   // message and NO recipients. See ForwardIntent in Compose.tsx for why
   // the audience is not carried across.
   onForward: (f: ForwardIntent) => void
-  // Set by App when a /updates push names this thread's id. An opaque,
-  // monotonically increasing value (not a timestamp) that only changes
-  // for the thread currently open, so it is safe as an effect dependency:
-  // it triggers exactly the refetches that matter, not one per push for
-  // every thread.
+  // Bumped by App on every change-beacon event. An opaque, monotonically
+  // increasing value (not a timestamp), so it is safe as an effect
+  // dependency: each event triggers exactly one refetch of the thread on
+  // screen. The beacon does not name a thread, so this fires for any
+  // mutation — but only the open thread refetches, and read-marks never
+  // bump the beacon, so opening a thread cannot start a refetch loop.
   updatedAt?: number | null
 }) {
   const [t, setT] = useState<Thread | null>(null)
@@ -71,8 +72,11 @@ export default function ThreadView({
   // that keeps finding 1's fix from being switched off remotely.
   //
   // The effect below re-runs on `updatedAt`, which App bumps for every
-  // /updates push — and +receive emits one on EVERY delivery, including a
-  // delivery the attacker sent. Re-seeding the audience there would throw
+  // change-beacon event — and the writer bumps the beacon on EVERY
+  // delivery, including a delivery the attacker sent. Re-seeding there
+  // is worse on the nexus than it was on the agent, because the beacon
+  // does not name a thread: any inbound mail at all would re-run this
+  // effect for whatever thread is open. Re-seeding would throw
   // away the user's removals and restore the attacker-inclusive default,
   // at a moment of the attacker's choosing, including the window between
   // the removal and the click on Send. Worse, the same effect leaves the
@@ -99,7 +103,7 @@ export default function ThreadView({
     idRef.current = id
     // A different thread than the one the audience was seeded from, so
     // this run may seed. A re-run for the SAME thread - which is what a
-    // remote push produces - may not.
+    // beacon event produces - may not.
     const fresh = seededFor.current !== id
     setT(null)
     setNotFound(false)
@@ -290,8 +294,8 @@ export default function ThreadView({
           — remove anyone who should not get the history.
         </p>
       </div>
-      {/* max-body in desk/app/urmail.hoon. See Compose.tsx: a guard rail
-          in UTF-16 units, not the authority. */}
+      {/* max-body in grubbery-overlay/lib/urmail-chain.hoon. See
+          Compose.tsx: a guard rail in UTF-16 units, not the authority. */}
       <textarea
         value={reply}
         onChange={(e) => setReply(e.target.value)}

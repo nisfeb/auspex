@@ -37,14 +37,14 @@ export default function Compose({
     try {
       const ships = to.split(',').map((s) => s.trim()).filter(Boolean)
       // `prev` is the only thing that makes this a forward rather than a
-      // compose. The agent resolves it to its containing thread and ships
-      // that whole chain; there is no separate forward poke.
+      // compose. The nexus resolves it to its containing thread and ships
+      // that whole chain; there is no separate forward action.
       await send(ships, subject, body, forward ? forward.prev : null)
       onSent()
     } catch (e) {
-      // Leave the panel open with the draft intact — a failed poke (an
-      // unreachable ship, a malformed @p the mark's parser rejects) should
-      // not look identical to a successful send.
+      // Leave the panel open with the draft intact — a failed send (an
+      // unreachable ship, a malformed @p the route's parser rejects)
+      // should not look identical to a successful one.
       console.error(e)
       setError('Could not send. Check the recipient and try again.')
     } finally {
@@ -87,12 +87,12 @@ export default function Compose({
           placeholder="Subject"
           className="mb-2 w-full border-b border-neutral-200 py-2 text-sm outline-none"
         />
-        {/* The agent rejects a body over max-body (100,000 bytes) or a
+        {/* The writer rejects a body over max-body (100,000 bytes) or a
             subject over max-subj (1,000) at compose time, and every send
             ships the whole accumulated chain, so an oversized message
-            would otherwise be a poke that just nacks. These caps count
+            would otherwise be a send that just fails. These caps count
             UTF-16 units rather than bytes, so they are a guard rail, not
-            the authority - the agent stays the authority. */}
+            the authority - the nexus stays the authority. */}
         <textarea
           value={body} onChange={(e) => setBody(e.target.value)}
           maxLength={100000}

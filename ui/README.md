@@ -1,45 +1,60 @@
-# React + TypeScript + Vite
+# urmail — the web client
+
+React + TypeScript + Vite. It talks to the **urmail grubbery nexus**, not to a
+gall agent: there is no scry, no poke and no channel subscription here, only
+same-origin `fetch` against the routes the nexus binds under `/apps/urmail`.
+
+## Routes it uses
+
+| | |
+|---|---|
+| `GET /apps/urmail/api/whoami` | our own `@p`, so a reply can drop us from its recipients |
+| `GET /apps/urmail/api/inbox` | the thread listing |
+| `GET /apps/urmail/api/thread/<id>` | one thread, every message with its own verdict |
+| `POST /apps/urmail/api/send` | compose, reply and forward — all one action |
+| `POST /apps/urmail/api/read` | mark one message read |
+| `POST /apps/urmail/api/delete-thread` | remove a thread from this ship |
+| `GET /grubbery/api/keep/apps/urmail.urmail_app/beacon/rev` | grubbery's keep-SSE stream over the nexus's change beacon |
+
+The last one is the live-update channel. The nexus bumps that grub on every
+mutation **except a read-mark**, so the stream means "something a reader can
+see has changed". Opening a thread marks several messages read at once; if
+those bumped the beacon, the stream would refetch the thread, which would mark
+it read again, forever.
+
+## Building
+
+```bash
+npm run build
+```
+
+The output is **not** `dist/`. It lands in
+`../grubbery-overlay/nex/urmail/ui-app/` as exactly two files, `index.html` and
+`app.js`, which the nexus lays down as grubs in `+on-load` and serves at
+`/apps/urmail` and `/apps/urmail/app.js`. The CSS is inlined into the shell:
+every asset request costs about two seconds on a serialized pier and burns its
+own request fiber, which is why lattice ships one document plus one script and
+why this does too.
+
+Those two files are committed. The overlay is the deploy source, so an
+artifact that is not in it does not ship. Rebuild and re-commit them whenever
+`src/` changes, then `scripts/sync-overlay.sh`.
 
 ## Running against a ship
 
-`npm run dev` proxies to `http://localhost:8081` (`~wex`) by default. Point it
-at a different ship's HTTP port with `SHIP_URL`, e.g.
-`SHIP_URL=http://localhost:8080 npm run dev` for `~feb`.
-
-Separately, `src/api.ts` sets `api.ship` from `VITE_SHIP`, which **defaults
-to `'wex'`** when unset. There is no `.env` file, so this default is silent:
-if you point `SHIP_URL` at a different ship and forget `VITE_SHIP`, the app
-still authenticates as `~wex` against the wrong ship's channel and nothing
-will look obviously wrong until pokes and scries fail. Set both together,
-e.g. `SHIP_URL=http://localhost:8080 VITE_SHIP=feb npm run dev`.
-
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm run dev                                     # ~wex, http://localhost:8081
+SHIP_URL=http://localhost:8080 npm run dev      # ~feb
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The app is served under its real route, so open
+**http://localhost:5173/apps/urmail/** rather than the bare root — the client
+builds every URL from `/apps/urmail`, and serving it anywhere else would only
+work by accident. The dev server proxies `/apps/urmail/api` and `/grubbery` to
+that ship. Both need the ship's session cookie, so log into it in the same browser first —
+the nexus answers an unauthenticated request with 403, and every route in the
+client surfaces that as an error rather than as empty state.
+
+There is no `VITE_SHIP` any more, and nothing to keep in step with `SHIP_URL`.
+The client no longer knows a ship name: it is served *by* the ship it talks
+to, and asks that ship who it is.

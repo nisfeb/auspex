@@ -1,5 +1,3 @@
-import Urbit from '@urbit/http-api'
-
 export type Verdict = 'verified' | 'unverified' | 'forged'
 
 export interface Message {
@@ -39,64 +37,152 @@ export interface InboxEntry {
   participants: string[]
 }
 
-const api = new Urbit('', '', 'urmail')
-// window.ship is injected by the ship's own index.html. Under `vite dev`
-// we serve our own, so it is undefined and must be set explicitly.
-api.ship = import.meta.env.VITE_SHIP ?? 'wex'
+// urmail is a grubbery NEXUS, not a gall agent, so there is no Eyre scry
+// path, no `urmail-action` poke and no channel subscription. The nexus
+// binds /apps/urmail and answers a small JSON API under it, and this app
+// is served from that same route as two grubs (the shell and this script).
+// Everything below is therefore a same-origin fetch carrying the session
+// cookie Eyre already set — no @urbit/http-api, no ship name to configure,
+// and no way to point the client at the wrong ship by forgetting an env
+// var (which the previous VITE_SHIP default made silently possible).
+const BASE = '/apps/urmail'
+
+class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+async function jsonOf(res: Response): Promise<unknown> {
+  if (!res.ok) {
+    // The nexus answers every route with JSON, errors included
+    // ({"error":"..."}), so surface its reason rather than a bare code.
+    // A 403 from the owner gate arrives here too, and it is the one an
+    // unauthenticated tab will see.
+    let why = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      if (j && typeof j.error === 'string') why = j.error
+    } catch { /* not JSON: keep the status line */ }
+    throw new ApiError(res.status, why)
+  }
+  return res.json()
+}
+
+const get = async <T>(path: string): Promise<T> =>
+  await jsonOf(await fetch(`${BASE}${path}`, {
+    headers: { accept: 'application/json' },
+  })) as T
+
+const post = async (path: string, body: unknown): Promise<void> => {
+  await jsonOf(await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }))
+}
 
 // Our own @p, with the sig. Needed in the UI so a reply composer can drop
 // us from its own default recipient list.
-export const ourShip = `~${api.ship}`
+//
+// A live binding rather than a constant: the ship is the nexus's to know,
+// not the browser's, so it arrives over the wire. `+whoami` is awaited
+// before the first render (see main.tsx) so no component ever reads it
+// empty — the alternative, threading it through props, would have meant
+// editing every component to carry a value that never changes.
+export let ourShip = ''
 
-// NOTE: the on-peek paths in desk/app/urmail.hoon are `/x/inbox` and
-// `/x/thread/<id>` (care %x, matching the brief). But @urbit/http-api's
-// scry() builds the HTTP request as `/~/scry/{app}{path}.json`, and Eyre's
-// `/~/scry/` endpoint already implies care %x — so a `path` that itself
-// starts with `/x` double-prepends it and 404s ("no scry result").
-// Verified against ~wex: `/~/scry/urmail/x/inbox.json` -> 404,
-// `/~/scry/urmail/inbox.json` -> real inbox JSON. Omit the leading /x here.
-export const inbox = () =>
-  api.scry<InboxEntry[]>({ app: 'urmail', path: '/inbox' })
+export const whoami = async () => {
+  const { ship } = await get<{ ship: string }>('/api/whoami')
+  ourShip = ship
+}
 
-export const thread = (id: string) =>
-  api.scry<Thread | null>({ app: 'urmail', path: `/thread/${id}` })
+export const inbox = () => get<InboxEntry[]>('/api/inbox')
+
+// A deleted (or never-known) thread is a 404, which is the honest status
+// for it, and the view already distinguishes "no longer exists" from a
+// failed load. Map only that one code to null; every other failure stays
+// an exception so it reads as an error rather than as an empty thread.
+export const thread = async (id: string): Promise<Thread | null> => {
+  try {
+    return await get<Thread>(`/api/thread/${id}`)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null
+    throw e
+  }
+}
 
 export const send = (
   to: string[],
   subject: string,
   body: string,
   prev: string | null,
-) =>
-  api.poke({
-    app: 'urmail',
-    mark: 'urmail-action',
-    json: { send: { to, subj: subject, body, prev } },
-  })
+) => post('/api/send', { to, subj: subject, body, prev })
 
 // The escape hatch for a thread frozen at a capacity limit, and the only
-// way to remove anything from state short of |nuke. The agent gates this
-// on our.bowl = src.bowl, so it is local-only.
+// way to remove anything from the tree short of culling it by hand. The
+// writer gates this on the poke's source being us, so it is local-only.
 export const deleteThread = (id: string) =>
-  api.poke({
-    app: 'urmail',
-    mark: 'urmail-action',
-    json: { 'delete-thread': { 'thread-id': id } },
-  })
+  post('/api/delete-thread', { 'thread-id': id })
 
-export const markRead = (id: string) =>
-  api.poke({
-    app: 'urmail',
-    mark: 'urmail-action',
-    json: { read: { 'msg-id': id } },
-  })
+export const markRead = (id: string) => post('/api/read', { 'msg-id': id })
 
-export const unsubscribe = (id: number) => api.unsubscribe(id)
+// Grubbery's own keep-SSE endpoint for one nexus grub. The nexus bumps
+// /beacon/rev on every mutation EXCEPT a read-mark, so this stream is
+// "something a reader can see has changed" and nothing else. Opening a
+// thread marks several messages read at once; if those bumped the beacon
+// this subscription would refetch the thread, which would mark it read
+// again, forever.
+const BEACON = '/grubbery/api/keep/apps/urmail.urmail_app/beacon/rev'
 
-export const subscribeUpdates = (onThread: (id: string) => void) =>
-  api.subscribe({
-    app: 'urmail',
-    path: '/updates',
-    event: (u: { type: string; id: string }) => {
-      if (u.type === 'thread') onThread(u.id)
-    },
-  })
+// Subscribe to that stream. Returns a teardown.
+//
+// EventSource cannot set an Accept header and grubbery keys the SSE
+// response off it, so this is a plain fetch whose body is read as a
+// stream — the same shape lattice's live-view script uses. The stream
+// carries the whole /beacon directory, hence the ' /rev' filter, and the
+// first event ('old ...') is the current value rather than a change, so
+// acting on it would refetch everything on every mount.
+export const subscribeChanges = (onChange: () => void) => {
+  let stopped = false
+  let ac: AbortController | null = null
+
+  const read = async () => {
+    while (!stopped) {
+      ac = new AbortController()
+      try {
+        const res = await fetch(BEACON, {
+          headers: { accept: 'text/event-stream' },
+          signal: ac.signal,
+        })
+        if (!res.ok || !res.body) throw new Error(`beacon ${res.status}`)
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const frames = buf.split('\n\n')
+          // The trailing element is a partial frame, not a whole one.
+          buf = frames.pop() ?? ''
+          for (const f of frames) {
+            const ev = f.split('\n').find((l) => l.startsWith('event: '))?.slice(7)
+            if (ev && ev.endsWith(' /rev') && !ev.startsWith('old')) onChange()
+          }
+        }
+      } catch {
+        // A dropped stream is normal (a ship bounce, a sleeping laptop).
+        // Retry rather than going quiet: the alternative is a tab that
+        // looks live and is not.
+      }
+      if (stopped) return
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+  }
+
+  read()
+  return () => { stopped = true; ac?.abort() }
+}
