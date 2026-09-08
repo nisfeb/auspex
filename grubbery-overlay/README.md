@@ -20,9 +20,11 @@ grubbery-overlay/
                                the three verdicts, +merge, +prune,
                                +thread-key, +freeze, the input caps, and
                                the shapes the tree persists.
-  tests/lib/urmail-chain.hoon  31 tests, ported unchanged
+  tests/lib/urmail-chain.hoon  39 tests: the 31 ported unchanged, plus
+                               eight on the attachment layer
   nex/urmail/app.hoon          the nexus: /main.sig, the mail tree
-  mar/urmail/{msg,meta,idx}    the PERSISTED marcs -> gub/mar/urmail/
+  mar/urmail/{msg,meta,idx,    the PERSISTED marcs -> gub/mar/urmail/
+             blob,blobvis}
   mar-gub/urmail-{chain,action} the WIRE marcs -> gub/mar/ (top level)
 ```
 
@@ -37,6 +39,16 @@ the type gains a field, every message already on disk booms and every reader
 falls back to the bunt. For mail that is data loss. The shape check lives in
 the nexus instead, as a `;;` ladder under `mule` — newest shape first, a later
 version added above the default and upgraded in place.
+
+There is one place that rule cannot save anything, and it is worth naming.
+`$stored-msg` went to version 1 when `unsigned` gained `attachments`, and a
+version 0 grub is **refused**, not upgraded. `msg-id` and the signature both
+cover the shape, so rewriting a %0 message into the %1 shape would leave a
+message whose signature no longer matches its own contents — which every peer
+would then read as `%forged`. Turning genuine mail into apparent forgeries is
+worse than refusing it. A signed message cannot be migrated; the only true
+migration is to carry every historical shape and its digest forever, and that
+is deferred until the chain format is declared stable.
 
 **Wire marcs are typed**, because they are never read back off disk and a
 malformed chain from a hostile ship should fail at the boundary.
