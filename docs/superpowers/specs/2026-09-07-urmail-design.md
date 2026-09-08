@@ -215,7 +215,7 @@ On `%send` the agent builds the `unsigned`, signs it, appends to the local
 thread, and pokes each recipient's `%urmail` with:
 
 ```hoon
-[%deliver =chain]
+[%urmail-chain =chain]
 ```
 
 The **whole chain** ships, not just the new message. That is the entire point of
@@ -257,6 +257,16 @@ ship on the network. It must:
   layer exactly the shadowing `+merge` exists to prevent. Merged-state bounds
   shed the excess instead, and never shed a `%verified` copy — anti-shadowing
   enforced where the verdicts are known.
+
+  One merged-state bound still rejects rather than sheds: the cap on distinct
+  message ids per thread. Shedding there is genuinely harder, because dropping
+  a non-root id orphans the `prev` pointers of later messages. The cost of that
+  exemption is real and is not hidden: anyone who knows a thread's root content
+  can poke enough distinct junk messages — **no signatures required**, since
+  forged messages are stored and counted — to pin the thread at the cap, after
+  which every legitimate message is rejected. One poke, no crypto, permanent
+  per-thread censorship. The fix is to shed distinct ids too, preferring
+  `%verified`, and it is deferred rather than justified.
 - Never let an incoming chain overwrite messages already held under the same
   `msg-id`, since identical ids imply identical bytes and a conflict means an
   attack.
