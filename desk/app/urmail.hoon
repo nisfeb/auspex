@@ -220,15 +220,38 @@
   %+  turn  inbox
   |=  t=thread-id:sur
   =/  th  (~(got by threads) t)
-  =/  newest  (rear chain.th)
+  ::  the list view is the surface a user scans fastest, and every field on
+  ::  it is attacker-chosen: anyone may poke a one-message chain claiming
+  ::  from=~zod, subj='Password reset' with a `sent` far in the future, and
+  ::  `sent` is what orders the chain. Two things follow.
+  ::
+  ::  One: the summary is drawn from the newest NON-%forged copy, not from
+  ::  (rear chain.th). A message whose signature we checked and rejected has
+  ::  no business supplying the sender line of an inbox row.
+  ::
+  ::  Two: the row carries the verdict of whatever message it did draw from,
+  ::  so provenance is visible before the thread is opened rather than only
+  ::  after. If every copy in the thread is %forged there is nothing honest
+  ::  to fall back to - show the newest anyway, labeled %forged, since
+  ::  hiding the row entirely would delete evidence.
+  =/  honest  (skip chain.th |=(m=msg:sur =(%forged (~(gut by verdicts) [(id:urmail unsigned.m) sig.m] %unverified))))
+  =/  newest  ?~(honest (rear chain.th) (rear honest))
+  ::  the spec is explicit that %forged messages "are never counted as
+  ::  unread and never sort into the normal inbox flow", so an unread count
+  ::  that included them would let one poke bold every row in the list.
   =/  unread=?
     %+  lien  chain.th
-    |=(m=msg:sur !(~(has in read) (id:urmail unsigned.m)))
+    |=  m=msg:sur
+    ?&  !=(%forged (~(gut by verdicts) [(id:urmail unsigned.m) sig.m] %unverified))
+        !(~(has in read) (id:urmail unsigned.m))
+    ==
   %-  pairs:enjs:format
   :~  ['id' [%s (scot %uv t)]]
       ['subject' [%s subj.unsigned.newest]]
       ['from' [%s (scot %p from.unsigned.newest)]]
       ['snippet' [%s (crip (scag 140 (trip body.unsigned.newest)))]]
+      ['verdict' [%s (~(gut by verdicts) [(id:urmail unsigned.newest) sig.newest] %unverified)]]
+      ['forged' [%b (lth (lent honest) (lent chain.th))]]
       ['count' (numb:enjs:format (lent chain.th))]
       ['last' (time:enjs:format last.th)]
       ['unread' [%b unread]]

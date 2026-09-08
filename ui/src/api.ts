@@ -26,6 +26,13 @@ export interface InboxEntry {
   subject: string
   from: string
   snippet: string
+  // The verdict of the message this row's from/subject/snippet came from.
+  // Provenance belongs on the surface users scan fastest, not only after
+  // the thread is opened.
+  verdict: Verdict
+  // True when the thread holds at least one %forged copy, whether or not
+  // the summary above was drawn from one.
+  forged: boolean
   count: number
   last: number
   unread: boolean

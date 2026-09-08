@@ -1,17 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { thread, send, markRead, type Thread, type Verdict } from './api'
-
-const badge: Record<Verdict, string> = {
-  verified: 'bg-green-100 text-green-800',
-  unverified: 'bg-neutral-100 text-neutral-600',
-  forged: 'bg-red-100 text-red-800 ring-1 ring-red-600 font-semibold',
-}
-
-const label: Record<Verdict, string> = {
-  verified: 'verified',
-  unverified: 'unverified',
-  forged: 'FORGED',
-}
+import { thread, send, markRead, type Thread } from './api'
+import VerdictBadge from './VerdictBadge'
 
 export default function ThreadView({
   id, onSent, updatedAt,
@@ -121,9 +110,7 @@ export default function ThreadView({
         <article key={i} className="mb-6 border-b border-neutral-100 pb-6">
           <header className="mb-2 flex items-center gap-3 text-sm">
             <span className="font-medium">{m.from}</span>
-            <span className={`rounded px-2 py-0.5 text-xs ${badge[m.verdict]}`}>
-              {label[m.verdict]}
-            </span>
+            <VerdictBadge verdict={m.verdict} />
             <span className="ml-auto text-neutral-400">
               {new Date(m.sent).toLocaleString()}
             </span>

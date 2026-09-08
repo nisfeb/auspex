@@ -1,4 +1,5 @@
 import type { InboxEntry } from './api'
+import VerdictBadge from './VerdictBadge'
 
 export default function ThreadList({
   entries, error, selected, onSelect,
@@ -34,11 +35,20 @@ export default function ThreadList({
               ${selected === e.id ? 'bg-blue-50' : ''}
               ${e.unread ? 'font-semibold' : ''}`}
           >
-            <div className="flex justify-between text-sm">
+            <div className="flex items-center gap-2 text-sm">
               <span className="truncate">{e.from}</span>
+              <VerdictBadge verdict={e.verdict} className="shrink-0" />
+              {e.forged && e.verdict !== 'forged' && (
+                <span
+                  className="shrink-0 rounded px-2 py-0.5 text-xs text-red-700 ring-1 ring-red-300"
+                  title="This conversation also holds at least one message whose signature failed. Open it to see which."
+                >
+                  + forged
+                </span>
+              )}
               {e.count > 1 && (
                 <span
-                  className="text-neutral-400"
+                  className="ml-auto shrink-0 text-neutral-400"
                   title={`${e.count} stored copies of this thread's messages, including any unverified or forged duplicates`}
                 >
                   {e.count} copies
