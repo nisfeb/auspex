@@ -669,3 +669,85 @@ The signed chain, the three verdicts, verification before storage, forged
 messages kept as evidence, the caps, and every guarantee stated in the v1
 sections above. A grubbery port that weakened any of those would be a
 regression, not a migration.
+
+
+---
+
+# The format freeze
+
+Two changes, then `unsigned` is closed. Nothing may be added to it after this
+without breaking every message in existence, because a signature covers a shape
+and rewriting the shape produces messages every peer reads as forged.
+
+## Added: a mime type for the body
+
+```hoon
++$  unsigned
+  $:  from=ship
+      life=@ud
+      to=(set ship)
+      subj=@t
+      body=@t
+      body-mime=@t      ::  'text/plain', 'text/markdown', ...
+      sent=@da
+      prev=(unit msg-id)
+      attachments=(list attachment)
+  ==
+```
+
+`body` stays `@t`; `body-mime` says how to read it. Empty means `text/plain`,
+so a sender that does not care writes nothing and a reader that does not care
+ignores it.
+
+It is signed because the rendering instruction is part of the message: a
+message that says "render me as HTML" and one that says "render me as plain
+text" are different messages, and an intermediary must not be able to change
+which one you read. This is the same argument that puts the attachment hash
+inside the signature.
+
+**Treat `body-mime` as hostile input at the render boundary.** It arrives
+pre-signed inside a delivered chain, so a signature proves the author chose it,
+not that it is safe. The UI renders a fixed allow-list and falls back to plain
+text for anything else; it never passes the value through to a header or a
+`Content-Type`.
+
+## Decided: BCC needs no signed field
+
+The chain proves **authorship, not delivery**. Who handed you a chain is
+answered by Ames and by nothing in the message — which is precisely why a
+forwarded chain works at all. BCC is therefore a delivery concern, and putting
+it in the signature would be answering the wrong question.
+
+- The sender delivers the chain to the BCC'd ships as well. Nothing in the
+  chain names them; `to` lists only the visible recipients and is signed as
+  before.
+- The sender's own ship records who it BCC'd as **local state**, so its Sent
+  view is accurate. That record never travels.
+- A BCC'd recipient receives the same canonical chain as everyone else — same
+  bytes, same `msg-id`, same thread — and sees the visible recipients, which is
+  what BCC means.
+- Replying reveals them, because their reply is signed and lists its own `to`.
+  That is BCC's behavior everywhere.
+
+**The one consequence that needs code:** the Inbox view is defined as threads
+we participate in, and a BCC'd recipient is in neither `from` nor `to`. Their
+mail would be invisible. So `meta` gains a local `direct=?`, set when a chain
+arrives through a delivery poke, and Inbox becomes *participant **or** direct*.
+
+A BCC'd recipient cannot prove the message was addressed to them. Neither can
+anyone a chain was forwarded to, and the system already treats that as normal.
+
+**Rejected, deliberately:** signing the BCC set, and signing a hashed
+commitment to it. A signed list is not BCC. A hashed commitment leaks that a
+BCC exists and is testable against any guessed ship, so it would offer privacy
+it cannot deliver — the same class of overstatement as calling blob restriction
+access control.
+
+## Closed
+
+After these land, `unsigned` is frozen: `from`, `life`, `to`, `subj`, `body`,
+`body-mime`, `sent`, `prev`, `attachments`. Reply-to, expiry and multi-parent
+were considered and rejected. Everything else a mail client needs — labels,
+folders, archive, read state, drafts, filters, BCC records — is local, and two
+ships may disagree about all of it while still agreeing exactly on who signed
+what.
