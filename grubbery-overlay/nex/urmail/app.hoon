@@ -193,6 +193,7 @@
         ;<  ~  bind:m  (grant-public root)
         ;<  ~  bind:m  (republish-all root)
         ;<  ~  bind:m  (migrate-flat root)
+        ;<  ~  bind:m  (note-unreadable root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ::  +apply answers whether the tree actually changed, and that
@@ -571,6 +572,41 @@
   ?~  kids  here
   =.  here  (~(uni by here) (collect-node (snoc base seg.i.kids) kid.i.kids))
   $(kids t.kids)
+::
+::  +unreadable-in: copies under this node that no reader can produce.
+::
+::    +read-stored refuses %0 and %1 grubs rather than upgrading them,
+::    and that decision is right and stays: msg-id and the signature
+::    both cover the shape, so rewriting an old message into the new
+::    one leaves a message whose signature no longer matches its own
+::    contents, which every peer then reads as %forged. Turning genuine
+::    mail into apparent forgeries is worse than refusing it.
+::
+::    But refusing SILENTLY is a different thing. +collect-node murns
+::    them away, so every message stored before the body-mime break
+::    simply vanishes from the API while its thread's meta and its
+::    /mail/idx entry survive - a thread that renders short, or empty,
+::    with nothing anywhere saying why. Counting them is what turns
+::    "your mail is gone" into "this ship cannot read N messages here",
+::    which is a true statement a user can act on.
+::
+::    A separate walk rather than a second return value from
+::    +collect-node, deliberately: the collector is on the writer's
+::    hot path and is called for every send, read-mark and delivery,
+::    while this is wanted only by the two read routes and once at
+::    rise.
+::
+++  unreadable-in
+  |=  b=ball:tarball
+  ^-  @ud
+  =/  here=@ud
+    ?~  fil.b  0
+    %+  roll  ~(val by contents.u.fil.b)
+    |=  [c=[=sang:tarball gain=? bang=(unit tang)] acc=@ud]
+    ?:  (is-boom:tarball sang.c)  +(acc)
+    ?~((read-stored (sang-noun:tarball sang.c)) +(acc) acc)
+  %+  roll  ~(val by dir.b)
+  |=([kid=ball:tarball acc=@ud] (add acc (unreadable-in kid)))
 ::
 ::  +chain-of: a thread's copies as one chain, WHOLE TREE INCLUDED.
 ::
@@ -1583,6 +1619,28 @@
 ::    and writes nothing. +sync-slots does the work, so the migration and
 ::    the delivery path cannot disagree about where a message goes.
 ::
+::  +note-unreadable: say once, at rise, how much mail this build
+::  cannot read.
+::
+::    +read-stored refuses pre-body-mime grubs rather than relabelling
+::    them, which is right, but it did so with no signal anywhere: the
+::    messages disappear from the API while their meta and their
+::    /mail/idx entries survive. A ship upgrading across that break
+::    should be able to find out that it happened, and a fiber print is
+::    invisible to every tool that can reach this ship - so it goes in
+::    the trace grub, which is the one place a human can read it.
+::
+++  note-unreadable
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
+  =/  n=@ud  ?:(?=([%ball *] vw) (unreadable-in ball.vw) 0)
+  ?:  =(0 n)  (pure:m ~)
+  ;<  ~  bind:m
+    (trace:io ~[leaf+"urmail: {<n>} stored copies this build cannot read"])
+  (note root 'unreadable' & (crip (scow %ud n)))
+::
 ++  migrate-flat
   |=  root=path
   =/  m  (fiber:fiber:nexus ,~)
@@ -2035,23 +2093,23 @@
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  (send-err eyre-id 400 'bad thread id')
   ;<  root=path  bind:m  nexus-root
-  ;<  ss=(map path stored-msg:uc)  bind:m  (read-thread-slots root u.t)
+  ::  one peek, walked twice: once for the copies a reader can produce
+  ::  and once for the ones it cannot. The second number is what stops
+  ::  a thread holding only pre-break grubs from rendering as an empty
+  ::  thread with no explanation - see +unreadable-in.
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (tdir root u.t)] ~)
+  =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
+  =/  ss=(map path stored-msg:uc)  (collect-slots b)
+  =/  lost=@ud  (unreadable-in b)
   ::  an empty thread dir and an absent one are the same thing to a
   ::  reader. The client turns this 404 into "no longer exists", which is
-  ::  what a thread deleted in another tab actually is.
-  ?:  =(~ ss)  (send-err eyre-id 404 'no such thread')
+  ::  what a thread deleted in another tab actually is. A thread whose
+  ::  every copy is UNREADABLE is neither, so it is served rather than
+  ::  404'd: the messages are on disk, this build cannot read them, and
+  ::  saying so is the whole point of counting.
+  ?:  &(=(~ ss) =(0 lost))  (send-err eyre-id 404 'no such thread')
   ;<  mt=meta:uc  bind:m  (read-meta root u.t)
-  (send-json eyre-id (thread-json u.t ss mt))
-::
-::  +read-thread-slots: one thread's message grubs.
-::
-++  read-thread-slots
-  |=  [root=path t=thread-id:uc]
-  =/  m  (fiber:fiber:nexus ,(map path stored-msg:uc))
-  ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (tdir root t)] ~)
-  ?.  ?=([%ball *] vw)  (pure:m ~)
-  (pure:m (collect-slots ball.vw))
+  (send-json eyre-id (thread-json u.t ss mt lost))
 ::
 ::  +collect-metas: every thread's meta leaf, out of the same deep peek
 ::  +collect-threads walks for message grubs.
@@ -2111,7 +2169,7 @@
   ==
 ::
 ++  thread-json
-  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc]
+  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc lost=@ud]
   ^-  json
   ::  +chain-of re-imposes the canonical order, which the tree does not
   ::  store: slots are named by (sham [id sig]) and a map has no order.
@@ -2122,6 +2180,10 @@
       ['messages' [%a (turn c |=(m=msg:uc (msg-json vs read.mt m)))]]
       ['participants' [%a (turn ~(tap in (participants:uc c)) |=(s=ship [%s (scot %p s)]))]]
       ['last' (time:enjs:format (last-sent:uc c))]
+    ::  copies stored here that THIS BUILD cannot read - grubs written
+    ::  under a pre-body-mime shape, refused rather than relabelled by
+    ::  +read-stored. Reported so a thread that renders short says why.
+      ['unreadable' (numb:enjs:format lost)]
   ==
 ::
 ::  +inbox-json: the listing. Deliberately not the full chains - the list
