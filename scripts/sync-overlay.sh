@@ -146,9 +146,14 @@ count() { [ -d "$1" ] || { echo 0; return 0; }; find "$1" "${@:2}" | wc -l; }
 LIB=$(count "$DEST/gub/lib" -maxdepth 1 -name 'urmail-*.hoon')
 TST=$(count "$DEST/tests" -name 'urmail-*.hoon')
 NEX=$(count "$DEST/gub/nex/urmail" -type f)
+UIA=$(count "$DEST/gub/nex/urmail/ui-app" -type f)
 MAR=$(count "$DEST/gub/mar/urmail" -type f)
 WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'urmail-*.hoon')
-echo "synced overlay -> $DEST (urmail libs: $LIB, tests: $TST, nex: $NEX, marcs: $MAR, wire marcs: $WIR)"
+echo "synced overlay -> $DEST (urmail libs: $LIB, tests: $TST, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
+if [ "$UIA" -ne 2 ]; then
+  echo "WARNING: ui-app should be exactly index.html and app.js; found $UIA" >&2
+  echo "  Run (cd ui && npm run build) and sync again, or /apps/urmail will 404." >&2
+fi
 if [ "$LIB" -eq 0 ]; then
   echo "WARNING: overlay did not land - do NOT commit the desk" >&2
   exit 68
@@ -166,6 +171,7 @@ next, in the ~<ship> dojo - one command at a time, verify each echo:
   |suspend %grubbery
   |revive %grubbery
   -test /=grubbery=/tests/lib/urmail-chain ~
+  -test /=grubbery=/tests/lib/urmail-web ~
 NEXT
 
 # ---------------------------------------------------------------------------

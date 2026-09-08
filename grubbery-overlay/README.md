@@ -20,9 +20,17 @@ grubbery-overlay/
                                the three verdicts, +merge, +prune,
                                +thread-key, +freeze, the input caps, and
                                the shapes the tree persists.
-  tests/lib/urmail-chain.hoon  39 tests: the 31 ported unchanged, plus
-                               eight on the attachment layer
-  nex/urmail/app.hoon          the nexus: /main.sig, the mail tree
+  lib/urmail-web.hoon          the JSON request decoders: the one part of
+                               the HTTP path no Hoon type has checked
+  tests/lib/urmail-chain.hoon  the ported chain suite
+  tests/lib/urmail-web.hoon    13 tests on the decoders, most of them on
+                               what a malformed body does
+  nex/urmail/app.hoon          the nexus: /main.sig, the mail tree, and
+                               the web surface under /ui
+  nex/urmail/ui-app/           the BUILT client, two committed files.
+                               `npm run build` in ../ui writes them; the
+                               overlay is the deploy source, so an
+                               artifact not in it does not ship
   mar/urmail/{msg,meta,idx,    the PERSISTED marcs -> gub/mar/urmail/
              blob,blobvis}
   mar-gub/urmail-{chain,action} the WIRE marcs -> gub/mar/ (top level)
@@ -97,8 +105,12 @@ Every lattice overlay lib is import-free for the same reason.
 ## Deploy loop
 
 ```bash
+(cd ui && npm run build)          # only when ui/src changed
 scripts/sync-overlay.sh /home/sneagan/software/wex/grubbery
 ```
+
+The client build writes into `nex/urmail/ui-app/` and the sync carries it, so
+a UI change that skips the build deploys the previous one silently.
 
 then, in that ship's dojo, one command at a time (a dojo drops keystrokes typed
 while an event runs, so verify each echo before sending the next):
@@ -108,6 +120,7 @@ while an event runs, so verify each echo before sending the next):
 |suspend %grubbery
 |revive %grubbery
 -test /=grubbery=/tests/lib/urmail-chain ~
+-test /=grubbery=/tests/lib/urmail-web ~
 ```
 
 The bounce is not optional once a fiber runs here: pushing source recompiles the
