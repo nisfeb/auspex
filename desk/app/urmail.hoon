@@ -2,6 +2,10 @@
 /+  default-agent, dbug, urmail
 |%
 +$  card  card:agent:gall
+++  max-chain   1.000        ::  messages per chain
+++  max-body    100.000      ::  bytes per body
+++  max-subj    1.000        ::  bytes per subject
+++  max-to      100          ::  recipients per message
 --
 %-  agent:dbug
 =|  state-0:sur
@@ -43,6 +47,10 @@
       =^  cards  state  (send:hc +.act)
       [cards this]
     ==
+  ::
+      %urmail-chain
+    =^  cards  state  (receive:hc !<(chain:sur vase))
+    [cards this]
   ==
 --
 ::  helper core: every scry in the desk lives here, plus the send path.
@@ -140,4 +148,46 @@
   |=  who=ship
   ^-  card
   [%pass /send/(scot %uv rid) %agent [who %urmail] %poke %urmail-chain !>(new)]
+::
+::  +receive: accept a chain from any ship.
+::
+::    src.bowl is deliberately not checked against the participants. Anyone
+::    may hand us a chain; the signatures are the authority, not the
+::    courier. That is what makes chains portable, and it is the property
+::    that separates this from a chat app.
+::
+++  receive
+  |=  c=chain:sur
+  ^-  (quip card _state)
+  ?:  =(~ c)  `state
+  ::  reject rather than truncate. A chain that violates a limit is not
+  ::  partially trustworthy.
+  ?>  (lte (lent c) max-chain)
+  ?>  %-  levy  :_  |=(m=msg:sur (lte (met 3 body.unsigned.m) max-body))  c
+  ?>  %-  levy  :_  |=(m=msg:sur (lte (met 3 subj.unsigned.m) max-subj))  c
+  ?>  %-  levy  :_  |=(m=msg:sur (lte ~(wyt in to.unsigned.m) max-to))    c
+  ::  verify before storing anything
+  =/  vs  (verify-chain:urmail (key-map c) c)
+  =/  rid=thread-id:sur  (root:urmail c)
+  =/  old=thread:sur
+    (~(gut by threads) rid *thread:sur)
+  =/  new=chain:sur  (merge:urmail chain.old c)
+  ::  per-poke caps do not bound a thread's growth: +merge keeps copies that
+  ::  share an id but differ in signature, so an attacker can re-send one
+  ::  message with N junk signatures across N pokes, each individually legal.
+  ::  Cap the merged result and reject rather than truncate.
+  ?>  (lte (lent new) max-chain)
+  =.  threads
+    %+  ~(put by threads)  rid
+    [new (participants:urmail new) (last-sent:urmail new)]
+  ::  a verdict is keyed [id sig], so the two copies of one id that +merge
+  ::  deliberately keeps are labeled separately and never collide here. The
+  ::  first-write-wins guard is only for the same signed copy arriving twice.
+  =.  verdicts
+    %+  roll  vs
+    |=  [[k=[msg-id:sur @ux] v=verdict:sur] acc=_verdicts]
+    ?:  (~(has by acc) k)  acc
+    (~(put by acc) k v)
+  =.  inbox  [rid (skip inbox |=(t=thread-id:sur =(t rid)))]
+  `state
 --
