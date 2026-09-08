@@ -4,105 +4,145 @@ How urmail gets from "runs on two fake ships" to "installable from
 ~ricsul-bilwyt alongside lattice". No production changes are proposed here;
 this is the sequence and the gates.
 
+Current as of 2026-09-08, after the branching slice and the final fix round.
+
 ## Where it actually stands
 
 **Done and proven.** The signed-chain core: signing with the ship key,
 per-message `%verified` / `%unverified` / `%forged`, `[id sig]` anti-shadowing,
-content-derived thread identity, the caps, `+prune`. 39 tests, green on both
-ships. The nexus stores and serves chains, verifies before storing, and accepts
-a chain from any ship because signatures are the authority. Attachments are
-inside the signature, fetched by keen with no permission needed — the property
-the migration was for. Cross-ship delivery works, including the three-party
-case: a chain authored by a ship neither party has spoken to still verifies.
+content-derived thread identity, the caps, `+prune`, and the tree arms that
+make a thread branch. **71 tests** in two import-free overlay libs — 56 on the
+chain, 15 on the web decoders — green on both dev ships. The nexus stores and
+serves chains, verifies before storing, and accepts a chain from any ship
+because signatures are the authority. Attachments are inside the signature and
+fetched by keen with no permission needed — the property the migration was for.
+Cross-ship delivery works, including the three-party case: a chain authored by
+a ship neither party has spoken to still verifies. A forward ships the
+root-to-leaf path and **not** the sibling branch, demonstrated negatively on
+two ships. The React client runs on the nexus, live over the change beacon.
 
-**Not done.** None of the eleven
-mail-client features — labels, folders, archive, mark-unread, drafts, filters,
-search, pagination, sent, recipient validation — exist on the nexus. The
-attachment fix wave is in flight. The chain format has broken once already.
+**Not done.** None of the ten remaining mail-client features — labels, folders,
+archive, mark-unread, sent, drafts, filters, search, pagination, recipient
+validation — exist on the nexus. The web API cannot express attachments at all:
+the writer implements `%fetch-blob`, `%restrict-blob`, `%publish-blob` and files
+on `%send`, and no route reaches any of them, so a message carrying a file
+renders with no sign of it. **That gap is being closed now, in parallel with
+this document.**
 
-**The honest summary:** the hard, unusual part is finished and well tested.
-The ordinary mail-client part is mostly unbuilt. That is the opposite of how
-most projects arrive at a release, and it means the remaining work is largely
+**The honest summary:** the hard, unusual part is finished and well tested. The
+ordinary mail-client part is mostly unbuilt. That is the opposite of how most
+projects arrive at a release, and it means the remaining work is largely
 predictable rather than risky.
 
 ## Gates
 
 Each must be true before the next phase starts. None is a formality.
 
-### Gate 1 — the format is frozen
+### Gate 1 — the format is frozen — DONE
 
-The chain format broke when attachments were added: `unsigned` gained a field,
-every prior signature died, and old grubs are refused as unreadable. That was
-the correct handling and it cost nothing, because the only mail in that format
-was ours.
+`unsigned` is closed at nine fields: `from`, `life`, `to`, `subj`, `body`,
+`body-mime`, `sent`, `prev`, `attachments`. Reply-to, expiry, multi-parent and
+a signed BCC set were each considered and rejected, with the reasoning in the
+spec rather than in a commit message.
 
-**It cannot happen again after anyone real uses this.** A format break is not a
-migration you can write, because a signature covers a shape; rewriting the
-shape produces a message whose signature no longer matches, and every peer
-reads that as forged. Manufacturing forgeries out of genuine mail is the worst
-failure this system has.
+**It broke twice getting there**, and both breaks are recorded as breaks:
 
-So: freeze `unsigned` before release, or accept that early adopters lose
-everything on the next change. Freezing means deciding now whether anything
-else belongs inside the signature — read receipts, expiry, a reply-to, a
-thread subject distinct from the message subject. Adding any of them later is
-a break.
+1. `%0` → `%1`, when `attachments` went inside the signature.
+2. `%1` → `%2`, when `body-mime` did.
+
+`$stored-msg` is at version 2 and versions 0 and 1 are **refused, not
+migrated**. There is no migration for a signed format: `msg-id` and the
+signature both cover the shape, so rewriting an old message into the new shape
+produces a message whose signature no longer matches its own contents, and every
+peer reads that as forged. Manufacturing forgeries out of genuine mail is the
+worst failure this system has, so an old grub is dropped before verification and
+renders `unreadable` instead.
+
+Both breaks cost nothing because the only mail in those formats was ours. **A
+third break after anyone real uses this would cost them everything**, which is
+what the freeze exists to prevent. Nothing after this may change `unsigned`.
 
 ### Gate 2 — feature parity with what a mail client is
 
-The eleven features, all of which are tree walks on this architecture rather
-than the hand-rolled maps the Gall design was going to need:
+The ten remaining features, all of which are tree walks on this architecture
+rather than the hand-rolled maps the old design was going to need. The designs
+are in the spec, under `# Specified but unbuilt`.
 
 | Feature | Shape on the tree |
 |---|---|
 | Labels | `meta` carries them; a label view is a walk |
 | Folders | views over labels, not a second taxonomy |
-| Archive | `meta` flag; new mail un-archives, or mail vanishes |
+| Archive | `meta` flag, already present and defaulted; new mail un-archives, or mail vanishes |
 | Mark unread | inverse of the existing read action |
 | Sent | threads containing a message we authored |
 | Drafts | `/mail/draft/<id>`, unsigned, never renderable as a message |
-| Filters | applied after verification, may label and archive, may not delete or mark read |
+| Filters | `/mail/rule/<id>`, applied after verification, may label and archive, may not delete or mark read |
 | Search | linear sweep, includes forged messages, labels them |
 | Pagination | bounded tree listing plus a total |
 | Recipient validation | `@p` parse in the UI; the nexus keeps its own |
-| Attachments | done |
 
-### Gate 3 — a UI on the nexus — DONE
+Attachments are done on the ship. Attachments are **not** done on the web
+surface — see Gate 3.
+
+### Gate 3 — a UI on the nexus — DONE, with one gap
 
 Two routes were open, and lattice runs both:
 
-- **Serve the React app as grubs**, the way lattice serves `ui-app/`. The
-  client exists, works, and has been reviewed; it would be repointed from the
-  Gall scries to the nexus routes. Fastest, and keeps the reviewed UI.
+- **Serve the React app as grubs**, the way lattice serves `ui-app/`.
 - **Server-rendered views with per-request fibers**, the way lattice serves
   `/ui/views/page.html`. More native, no client build, but discards working
   code.
 
 The first was taken, as recommended: the client already renders per-message
-verdict badges, honest copy counts, editable reply recipients and forward,
-all of which took review rounds to get right and none of which was worth
-rebuilding to be idiomatic. What changed was the transport under it. The
-route surface is specified in `# v3`'s `## The web surface`; live updates
-ride grubbery's keep-SSE over the nexus's change beacon rather than polling.
+verdict badges, honest copy counts, editable reply recipients and forward, all
+of which took review rounds to get right and none of which was worth rebuilding
+to be idiomatic. What changed was the transport under it. The route surface is
+in the spec, under `# The web surface`; live updates ride grubbery's keep-SSE
+over the nexus's change beacon rather than polling.
 
-This gate covers the five things a client cannot work without — listing,
-thread, send, mark-read, delete. The eleven mail-client features are Gate 2
-and are still unbuilt, and the client has no attachment control: a message
-that carries a file renders with no sign of it. Both are views over the same
-routes, not new transports.
+This gate covers the five things a client cannot work without — listing, thread,
+send, mark-read, delete — and those are live and driven from a browser against
+both ships.
 
-### Gate 4 — the format refusal is demonstrated, not read
+**The gap: the API cannot express attachments.** `POST /api/send` sends
+`files=~` unconditionally and there is no route for fetch, restrict or publish.
+The nexus half has been working since the attachments slice; the surface over it
+does not exist. Being fixed in parallel with this document, and this gate is not
+finished until it is.
 
-The refusal of old-format grubs is the most consequential behavior in the
-current build and it has never been exercised on a live ship: the old grubs
-were deleted before the deploy that would have tested them. A reading is not
-evidence, and this project has already shipped a test that passed the bug it
-existed to catch. Produce the transcript before release.
+### Gate 4 — the format refusal is demonstrated on the shipping build
+
+**Partly paid, and not for the build that would ship.**
+
+What exists: during the attachments follow-up round, `~feb` was rolled back to
+the slice-2 overlay, made to write a genuine `%0` grub, and then upgraded to the
+frozen code over it, while still carrying a `%1` grub from an earlier deploy.
+Both rendered `unreadable`, neither was labelled or rejected or counted, a reply
+naming either was refused with `unknown prev`, and a version-0 `$meta` upgraded
+in place in the same reload. That transcript is real and it is the strongest
+evidence this project has for the most consequential behavior in the build.
+
+What it does not cover: it was produced **before the branching slice**, against
+the flat `msg/<slot>` layout. The shipping build stores a message under its
+ancestry and runs `+migrate-flat` at writer rise. The migration was demonstrated
+separately, on live threads on both ships, and it is idempotent — but *an old
+grub met by the migration* is a case neither transcript exercises, and it is
+exactly where the two mechanisms interact: `+migrate-flat` re-places what
+`+read-stored` returned, and `+read-stored` returns nothing for a `%0` or `%1`
+grub.
+
+What it would take, and it is an afternoon: roll one dev ship back to `c1b7ccf`
+or earlier, write a `%0` and a `%1` grub with the code that produced them,
+deploy the current overlay over the top, and record — verbatim — the writer's
+trace at rise, the tree after migration, both grubs still present and both
+rendering `unreadable`, the inbox listing's unreadable count, and a reply naming
+each refused with `unknown prev`. A reading is not evidence, and this project has
+already shipped a test that passed the bug it existed to catch.
 
 ### Gate 5 — the distribution change
 
-urmail cannot ship until grubbery's launcher comes back, because today
-`~ricsul-bilwyt` distributes a grubbery whose app tier was deliberately
+Untouched. urmail cannot ship until grubbery's launcher comes back, because
+today `~ricsul-bilwyt` distributes a grubbery whose app tier was deliberately
 stripped: lattice is the only app and it *is* the product, with the docket
 pointing Landscape straight at `/apps/lattice`.
 
@@ -118,18 +158,24 @@ Four changes on `dist/lattice-only`:
 Step 4 is visible on every installed ship. The Landscape tile stops saying
 Lattice, which is a change to lattice's users, not just ours.
 
+There is a fifth thing this gate has to answer that is not on the list:
+**urmail's own install row lives in grubbery's `lib/root.hoon`, outside this
+repo, and a grubbery pull reverts it.** `sync-overlay.sh` greps for the row and
+prints it when it is missing; that is a check, not a fix. Whatever carries
+lattice's row through a distribution has to carry urmail's.
+
 ## Sequence
 
-1. Finish the attachment fix wave and produce the format-refusal transcript.
-2. Freeze `unsigned`. Decide what else belongs inside a signature; add it now
-   or never.
-3. Build the eleven features on the tree.
-4. ~~Repoint the client at the nexus.~~ Done.
-5. Rehearse the distribution change on `~wex`, then `~feb`.
-6. Release.
+1. ~~Finish the attachment fix wave.~~ Done.
+2. ~~Freeze `unsigned`.~~ Done. Nothing after this may change it.
+3. ~~Repoint the client at the nexus.~~ Done.
+4. Close the attachment gap in the web API (in flight).
+5. Produce the format-refusal transcript against the shipping build (Gate 4).
+6. Build the ten features on the tree (Gate 2).
+7. Rehearse the distribution change on `~wex`, then `~feb` (Gate 5).
+8. Release.
 
-Phases 2 and 3 are independent of 5 and can run in parallel. Nothing after
-step 2 may change `unsigned`.
+Steps 5 and 6 are independent of 7 and can run in parallel.
 
 ## Releasing to ~ricsul-bilwyt
 
@@ -154,13 +200,24 @@ alters the chain format.
 
 ## What could still go wrong
 
-**The format is wrong and we find out late.** Mitigated only by gate 1. There
-is no migration path for a signed format, so this is a decision, not a risk to
-manage.
+**The format is wrong and we find out late.** Gate 1 is closed, which means this
+is now a decision that has been made rather than a risk being managed. There is
+no migration path for a signed format. If something else turns out to belong
+inside a signature, the answer is a new application, not a new version.
+
+**The refusal misbehaves on a real upgrade.** Gate 4 is why. The failure mode is
+not subtle — mail that reads `unreadable` when it should read, or worse, mail
+relabelled — but it has not been exercised against the layout that would ship.
 
 **Restriction is misunderstood.** Restricting an attachment withdraws our copy;
 it does not recall bytes anyone already fetched, and it never will. If the UI
-presents it as permission, users will trust it for something it cannot do.
+presents it as permission, users will trust it for something it cannot do. The
+attachment surface being built now is the first place that lie can be told.
+
+**A restricted blob is withdrawn but ungranted.** A nexus cannot create a
+usergroup, so the peek grant that would serve named ships is skipped, loudly,
+when the group does not exist. Restriction currently means withdrawal and
+nothing more.
 
 **Two ships on different grubbery generations.** `~wex` and `~feb` already
 print delivery timeouts on correct deliveries for this reason. Installers on
