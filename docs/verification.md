@@ -14,10 +14,20 @@ notes" at the end.
 
 ## The headline gap: no agent-test harness exists
 
-`desk/tests/` contains exactly one file: `lib/urmail.hoon`, 19 tests, all
-passing (`-test /=urmail=/tests` → `ok=%.y`, confirmed as the current state
-of the branch: `grep -c '^++  test-' desk/tests/lib/urmail.hoon` → `19`).
-There is no `desk/tests/app/`.
+**Update, 2026-09-08 (final fix round).** The gap this section describes is
+substantially closed, but not by building an agent harness — by moving the
+logic out of the agent. `+prune`, `+thread-key`, the verdict-freeze fold
+and the four input caps were pure functions of their arguments sitting in
+the agent by placement, not necessity. They now live in
+`desk/lib/urmail.hoon` (still free of `.^`, confirmed by `grep`), the agent
+keeps thin call sites, and the suite grew from 19 tests to **31**, green on
+both `~wex` and `~feb`. What follows describes why no `desk/tests/app/`
+exists and remains accurate; the "zero automated coverage" consequence
+below is superseded by "What the library tests now cover", further down.
+
+`desk/tests/` contains exactly one file: `lib/urmail.hoon`, 31 tests, all
+passing (`-test /=urmail=/tests` → `ok=%.y`). There is no
+`desk/tests/app/`.
 
 That's not an oversight. `desk/tests/app/urmail.hoon` was written once, in
 Task 5, and could not be made to build. `/+  *test-agent` — the vendored
@@ -53,19 +63,25 @@ instead. That live evidence exists — see below — but it is **live evidence,
 not a regression test**. Nothing will catch a future regression in it
 automatically.
 
-**Consequence, stated plainly: every security-relevant property fixed in
-Task 5 — the `+thread-key` identity fix, the distinct-id and per-copy
-caps, the thread-count cap, the `%unverified`→`%verified`/`%forged` upgrade
-path, and the `+prune` shed-not-reject behavior — has zero automated test
-coverage.** All of it is backed only by the live dojo transcripts recorded
-below and in `task-5-report.md`. This is the single largest gap in the
-project. A future change to `desk/app/urmail.hoon` that reintroduces any of
-these bugs will not be caught by `-test /=urmail=/tests` — that command only
-ever exercises the pure library in `desk/lib/urmail.hoon`.
+**Consequence as of Task 8, now largely superseded:** every
+security-relevant property fixed in Task 5 — the `+thread-key` identity
+fix, the distinct-id and per-copy caps, the thread-count cap, the
+`%unverified`→`%verified`/`%forged` upgrade path, and the `+prune`
+shed-not-reject behavior — had zero automated test coverage. The final fix
+round moved all of those except the thread-count cap into
+`desk/lib/urmail.hoon` and covered them; see below.
 
-## What the 19 library tests actually cover
+**What still has no automated coverage**, because it genuinely needs a
+bowl or a live agent: the jael scry wrappers (`+our-life`, `+our-ring`,
+`+fake-ship`, `+peer-pass`, `+key-map`), the signing step in `+send`, the
+card emission, the `%urmail-update` fact, the `on-poke` source gate
+(`=(our.bowl src.bowl)`), the JSON encoders, the thread-count cap, and the
+sequencing of `+receive` itself. Those remain backed by live dojo evidence
+only.
 
-All 19 live in `desk/tests/lib/urmail.hoon` and exercise only pure code
+## What the library tests now cover
+
+All 31 live in `desk/tests/lib/urmail.hoon` and exercise only pure code
 (`desk/lib/urmail.hoon` — no `.^`, confirmed by `grep`). They cover, in
 summary (see the file itself for exact assertions):
 
@@ -92,11 +108,30 @@ The opus review of Task 3 confirmed this suite is not vacuously green: a
 hard-coded `%verified` passes the marquee test but fails both tamper tests,
 and vice versa, so the suite is mutually non-vacuous.
 
-**None of these 19 tests touch `desk/app/urmail.hoon`.** `+receive`,
-`+thread-key`, `+prune`, the four input-validation caps, the distinct-id and
-per-copy caps, the thread-count cap, and the verdict-freeze logic are all
-agent-layer code, and the agent layer has no test file at all, for the
-reason above.
+Twelve more were added in the final fix round, against the logic moved out
+of the agent:
+
+- `+prune`: sheds rather than rejects; never sheds a `%verified` copy;
+  ranks `%unverified` above `%forged` in the fill bucket; and the full
+  three-way ranking. Each ranking assertion is made in **both input
+  orders**, because `+add:ja` prepends and a single-order fixture passes
+  the broken code by luck — the first draft of these tests did exactly
+  that. Confirmed discriminating by reverting the fill to the old
+  `(skip ms verified)` form on `~wex` and watching two of them go red,
+  then restoring it and watching them go green.
+- `+thread-key`: identity from content rather than list order; identity
+  ignoring the attacker-chosen `sent` field; an established thread's
+  identity immutable against a poke carrying a fresh `prev=~` message;
+  and first contact tolerating a shadowed (junk-signed) root.
+- `+freeze`: a `%verified` or `%forged` verdict is never overwritten;
+  an `%unverified` one can still be upgraded.
+- The input caps as predicates, and `+distinct-ids` counting ids rather
+  than signed copies.
+
+**These tests still do not touch `desk/app/urmail.hoon`.** They cover the
+arms that used to live there. `+receive`'s sequencing, the thread-count
+cap, the scry wrappers and the JSON encoders remain agent-layer and
+uncovered.
 
 ## The three-ship provenance test: not run
 
@@ -311,20 +346,26 @@ are secret and none of them were fixed in this project:
   chain's messages match content already stored under two distinct
   thread-ids, `+thread-key` files everything under whichever match it finds
   first rather than detecting or resolving the collision.
-- **`+prune`'s fill bucket doesn't rank `%unverified` above `%forged`.**
-  When shedding excess copies of one message id, a known-`%forged` copy can
-  be kept over a genuine-but-currently-`%unverified` one (a comet/moon
-  sender, or a jael snapshot gap) purely by chance of grouping order. It's
-  self-healing — the next send of that thread re-ships the whole chain and
-  can restore the shed copy — but the property is not itself guaranteed at
-  any given instant.
+- ~~**`+prune`'s fill bucket doesn't rank `%unverified` above
+  `%forged`.**~~ Fixed in the final fix round: the fill is now strictly
+  `%verified`, then `%unverified`, then `%forged`, with tests in both
+  input orders.
 
 Two further items, smaller and outside authenticity: `+merge`'s and
 `+prune`'s sort runs twice per poke (once in each), and shed `[id sig]`
 verdict entries are never garbage-collected from the `verdicts` map, so a
 single poke of junk-signature copies grows `verdicts` even though the
 stored chain itself stays bounded — inside the spec's stated "storage is
-unbounded" allowance, but worth knowing.
+unbounded" allowance, but worth knowing. `%delete-thread` does clear the
+`verdicts` and `read` entries for the thread it removes, so the residue is
+now bounded by whatever the user chooses to keep.
+
+Every capacity limit above is now *recoverable* rather than permanent:
+`[%delete-thread =thread-id]`, added in the final fix round and gated on
+`=(our.bowl src.bowl)`, removes a thread, its inbox entry, its verdicts
+and its read marks. A user whose thread is frozen at the distinct-id cap,
+or whose state is at `max-threads`, no longer has `|nuke` as the only
+remedy.
 
 ## Sourcing notes
 
@@ -348,3 +389,37 @@ rounds, and task-4, task-5, and task-6 reports each independently confirm
 19 `OK` lines with no further growth or shrinkage for the remainder of the
 project. The current repository state matches: `desk/tests/lib/urmail.hoon`
 contains 19 `++  test-*` arms as of this writing.
+
+## Final fix round, 2026-09-08
+
+Seven review findings were closed on this branch after the document above
+was written. Full detail is in
+`.superpowers/sdd/2026-09-07-urmail/final-fix-report.md`; the live evidence
+is summarized here so this file stays the single record of what was run.
+
+- **Suite: 19 → 31 tests**, `ok=%.y` on `~wex` and on `~feb`.
+  `+vats %urmail` shows `app status: running` with matching `%cz` hashes
+  (`d4k4o`) on both ships.
+- **Reply audience is user-editable.** Driven live in headless Chromium
+  against `vite dev` proxying to `~wex`: the composer rendered the chips
+  `~palnet-sampel` and `~sampel-palnet`, `~sampel-palnet` was removed with
+  its × control, a reply was sent, and a scry of the thread on `~wex`
+  showed the new message's `to` as exactly `~[~palnet-sampel]`. The
+  removed ship did not receive the chain.
+- **The inbox list carries a verdict.** The same session rendered rows as
+  e.g. `~sampel-palnet | verified | + forged | 2 copies | post-refactor`,
+  drawn from the newest non-`%forged` copy, with `+ forged` flagging a
+  thread that also holds a signature-failed copy.
+- **`+send` enforces the receive-side limits.** A 100,001-byte body poked
+  through the dojo on `~wex` nacked with `urmail-body-too-long`; a normal
+  send in the same session succeeded.
+- **`%delete-thread` works from both the dojo and the UI.** Dojo: inbox
+  13 entries → 12, subject gone. UI: 13 rows → 12, selection cleared, the
+  deleted subject absent from the page.
+- **Compose still delivers cross-ship.** A message composed in the UI on
+  `~wex` arrived on `~feb` and scried there as `verdict: verified`.
+- **`+receive` still accepts a stranger's chain after the refactor.** A
+  `~sampel-palnet → ~palnet-sampel` chain carrying one genuine and one
+  junk-signed copy of the same message was poked into `~wex`; it filed
+  under a content-derived thread id, the summary was drawn from the
+  `verified` copy, and the row flagged `forged: true`.
