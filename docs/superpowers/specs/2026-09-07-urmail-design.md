@@ -574,6 +574,19 @@ silent at the point of failure.
    snapshot and commits wholesale, reverting every file changed since the last
    sync. Deploy the full overlay or nothing.
 
+## The writer, and the change beacon
+
+`/main.sig` is a single long-lived fiber that serialises every mutation, the
+shape lattice uses to avoid index races: rise, then loop on `take-poke`, apply,
+bump, recurse. Every write goes through it. Nothing else mutates the tree.
+
+After each applied action the writer bumps a change beacon so open readers live-
+reload. **Marking a message read must not bump it.** Lattice learned this with
+page history: every view recorded a visit, every visit bumped the beacon, and
+every open reader reloaded — a reload storm produced by nothing a reader could
+see. Read state is not content. In urmail the beacon bumps for new mail, sends,
+deletes, label and archive changes; never for read-marks.
+
 ## What ports unchanged
 
 `lib/urmail.hoon` and `sur/urmail.hoon` have no Gall dependency — 944 lines
