@@ -5,13 +5,34 @@
 ::                                 only) and %urmail-chain (any ship) pokes
 ::                                 and serialises every mutation. Nothing
 ::                                 else in this nexus writes.
-::    /mail/thread/<tid>/msg/<slot>  one SIGNED COPY per grub, verdict and
-::                                 all. <slot> is (sham [id sig]), so the
-::                                 [id sig] anti-shadowing key IS the
-::                                 storage key: two copies of one message
-::                                 that differ in signature are two grubs
-::                                 with two verdicts, and neither can
-::                                 overwrite the other.
+::    /mail/thread/<tid>/msg/<id>/<id>/.../<slot>
+::                                 THE THREAD, AS THE TREE IT ALWAYS WAS.
+::                                 `prev` makes a thread BRANCH - two
+::                                 replies to one message are siblings,
+::                                 and mail threads branch constantly -
+::                                 so each message id is a DIRECTORY and
+::                                 its replies are subdirectories keyed
+::                                 by their own ids. A message's path is
+::                                 its ancestry, two branches are two
+::                                 sibling directories, and reading a
+::                                 chain is walking one path instead of
+::                                 sorting a set and chasing pointers
+::                                 through it.
+::                                 <slot> is one SIGNED COPY, verdict and
+::                                 all, filed as a FILE inside its own
+::                                 message's directory. It is still
+::                                 (sham [id sig]), so the [id sig]
+::                                 anti-shadowing key IS the storage key:
+::                                 two copies of one message differing in
+::                                 signature are two grubs with two
+::                                 verdicts at ONE node, and neither can
+::                                 overwrite the other. Files and
+::                                 subdirectories are separate maps in a
+::                                 ball, so a node carries both its
+::                                 copies and its replies with no
+::                                 collision possible - lattice's
+::                                 fixed-leaf trick, with a leaf per copy
+::                                 rather than one.
 ::    /mail/thread/<tid>/meta      local state: read marks, archive, labels.
 ::                                 Never signed, never travels.
 ::    /mail/blob/<hash>            ATTACHMENT BYTES, content-addressed.
@@ -166,6 +187,7 @@
         =/  root=path  path.here
         ;<  ~  bind:m  (grant-public root)
         ;<  ~  bind:m  (republish-all root)
+        ;<  ~  bind:m  (migrate-flat root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ;<  ~  bind:m  (apply root from sage)
@@ -227,6 +249,21 @@
 ::
 ++  slot  |=([i=msg-id:uc s=@ux] ^-(@ta (scot %uv (sham [i s]))))
 ::
+::  +node-dir: the directory one message's copies live in, relative to
+::  the thread's msg/ directory. Its segments ARE the message's ancestry,
+::  root first, so the path a copy is stored at is the whole answer to
+::  "what conversation led to this".
+::
+++  node-dir  |=(place=(list msg-id:uc) ^-(path (id-path:uc place)))
+::
+::  +sorted-dirs: directories shallowest first, which is the only order
+::  in which they can be made - a directory needs its parent.
+::
+++  sorted-dirs
+  |=  ds=(set path)
+  ^-  (list path)
+  (sort ~(tap in ds) |=([a=path b=path] (lth (lent a) (lent b))))
+::
 ::  ── writes ──────────────────────────────────────────────────────────
 ::
 ::  +put-file: create-or-overwrite one grub. %over's forced make creates
@@ -247,6 +284,19 @@
   ;<  ex=?  bind:m  (peek-exists:io road)
   ?:  ex  (pure:m ~)
   (make:io road &+empty-dir:loader)
+::
+::  +ensure-nodes: make each of these node directories, in order.
+::
+::    Recursion by ARM NAME, not by $: a $ with arguments inside a ;<
+::    continuation cannot find the trap.
+::
+++  ensure-nodes
+  |=  [dir=path ps=(list path)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  ps  (pure:m ~)
+  ;<  ~  bind:m  (ensure-dir (weld dir i.ps))
+  (ensure-nodes dir t.ps)
 ::
 ++  ensure-thread
   |=  [root=path t=thread-id:uc]
@@ -408,7 +458,7 @@
   |=  root=path
   =/  m  (fiber:fiber:nexus ,(set @uv))
   ^-  form:m
-  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   (pure:m (chain-hashes:uc (zing (turn ~(val by loaded) chain-of))))
 ::
 ::  +make-room: shed unreferenced blobs until one more of `bytes` fits.
@@ -444,7 +494,7 @@
   ;<  ~  bind:m  (cull-if-there (blob-rail root i.hs))
   (evict root t.hs)
 ::
-::  +read-threads: every stored thread, as slot maps.
+::  +read-threads: every stored thread, as copy maps keyed by TREE PATH.
 ::
 ::    One deep peek of /mail/thread rather than a walk per thread. This is
 ::    the O(total stored messages) read the spec already records against
@@ -453,7 +503,7 @@
 ::
 ++  read-threads
   |=  root=path
-  =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map @ta stored-msg:uc)))
+  =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map path stored-msg:uc)))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
@@ -461,49 +511,86 @@
 ::
 ++  collect-threads
   |=  b=ball:tarball
-  ^-  (map thread-id:uc (map @ta stored-msg:uc))
-  %-  ~(gas by *(map thread-id:uc (map @ta stored-msg:uc)))
+  ^-  (map thread-id:uc (map path stored-msg:uc))
+  %-  ~(gas by *(map thread-id:uc (map path stored-msg:uc)))
   %+  murn  ~(tap by dir.b)
   |=  [seg=@ta kid=ball:tarball]
-  ^-  (unit [thread-id:uc (map @ta stored-msg:uc)])
+  ^-  (unit [thread-id:uc (map path stored-msg:uc)])
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  ~
   `[u.t (collect-slots kid)]
 ::
+::  +collect-slots: one thread's copies, each under its own tree path.
+::
+::    The key is the path RELATIVE TO msg/ - the message's ancestry as
+::    directories, then the copy's slot - so the map that comes back
+::    carries the branching, not just the messages.
+::
+::    A copy sitting directly under msg/ has a path of length one and is
+::    a PRE-TREE grub, from before this layout. It reads back perfectly
+::    (nothing downstream of here cares where a copy was stored), which
+::    is what lets the migration be a background tidy rather than a gate
+::    on reading the mailbox. See +migrate-flat.
+::
 ++  collect-slots
   |=  kid=ball:tarball
-  ^-  (map @ta stored-msg:uc)
+  ^-  (map path stored-msg:uc)
   =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
   ?~  sub  ~
-  ?~  fil.u.sub  ~
-  %-  ~(gas by *(map @ta stored-msg:uc))
-  %+  murn  ~(tap by contents.u.fil.u.sub)
-  |=  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
-  ^-  (unit [@ta stored-msg:uc])
-  ?:  (is-boom:tarball sang.c)  ~
-  =/  s=(unit stored-msg:uc)  (read-stored (sang-noun:tarball sang.c))
-  ?~(s ~ `[nm u.s])
+  (collect-node ~ u.sub)
 ::
-::  +chain-of: a thread's slots as a chain. +merge with an empty `old` is
-::  what re-imposes the canonical order, which the tree does not store.
+::  +collect-node: one node of the message tree and everything under it.
+::
+::    Files are this message's signed copies; subdirectories are its
+::    replies. A ball keeps those in two separate maps, so the two can
+::    never collide however the names are chosen - which is the whole
+::    reason a node can be both a message and a parent.
+::
+++  collect-node
+  |=  [base=path b=ball:tarball]
+  ^-  (map path stored-msg:uc)
+  =/  here=(map path stored-msg:uc)
+    ?~  fil.b  ~
+    %-  ~(gas by *(map path stored-msg:uc))
+    %+  murn  ~(tap by contents.u.fil.b)
+    |=  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
+    ^-  (unit [path stored-msg:uc])
+    ?:  (is-boom:tarball sang.c)  ~
+    =/  s=(unit stored-msg:uc)  (read-stored (sang-noun:tarball sang.c))
+    ?~(s ~ `[(snoc base nm) u.s])
+  =/  kids=(list [seg=@ta kid=ball:tarball])  ~(tap by dir.b)
+  |-  ^-  (map path stored-msg:uc)
+  ?~  kids  here
+  =.  here  (~(uni by here) (collect-node (snoc base seg.i.kids) kid.i.kids))
+  $(kids t.kids)
+::
+::  +chain-of: a thread's copies as one chain, WHOLE TREE INCLUDED.
+::
+::    This is the local view: opening a thread shows every branch of it,
+::    which is what a mail client does. Only a SEND narrows to a
+::    root-to-leaf path - see +do-send and +path-chain:uc.
+::
+::    +merge with an empty `old` is what re-imposes the canonical display
+::    order across branches. Sibling order matters for display and never
+::    for identity, so it is imposed here rather than stored.
 ::
 ++  chain-of
-  |=  ss=(map @ta stored-msg:uc)
+  |=  ss=(map path stored-msg:uc)
   ^-  chain:uc
   (merge:uc ~ (turn ~(val by ss) |=(s=stored-msg:uc msg.s)))
 ::
 ++  verdicts-of
-  |=  ss=(map @ta stored-msg:uc)
+  |=  ss=(map path stored-msg:uc)
   ^-  (map [msg-id:uc @ux] verdict:uc)
   %-  ~(gas by *(map [msg-id:uc @ux] verdict:uc))
   %+  turn  ~(val by ss)
   |=(s=stored-msg:uc [[(id:uc unsigned.msg.s) sig.msg.s] verdict.s])
 ::
 ++  threads-of
-  |=  loaded=(map thread-id:uc (map @ta stored-msg:uc))
+  |=  loaded=(map thread-id:uc (map path stored-msg:uc))
   ^-  (map thread-id:uc thread:uc)
   %-  ~(run by loaded)
-  |=  ss=(map @ta stored-msg:uc)
+  |=  ss=(map path stored-msg:uc)
   ^-  thread:uc
   =/  c=chain:uc  (chain-of ss)
   [c (participants:uc c) (last-sent:uc c)]
@@ -607,11 +694,19 @@
 ::    the same action addressed elsewhere. The chain that travels is the
 ::    payload, and that is the whole design.
 ::
+::    WHAT TRAVELS IS A ROOT-TO-LEAF PATH, not the thread. Shipping the
+::    whole thread was a leak: two participants have a side exchange on
+::    one branch, one of them forwards a message on another branch
+::    onward, and the third party receives the side exchange - signed,
+::    permanent, attributable, and nobody asked for it. The path from the
+::    thread root to `prev` is what a recipient needs to verify this
+::    message and is all it needs; see +path-chain:uc.
+::
 ::    The bounds +deliver enforces are enforced here too. Every send ships
-::    the whole accumulated chain, so one oversized compose would poison a
-::    thread permanently: every later message in it rejected by every
-::    recipient, silently, forever. Failing at compose time is the only
-::    point where a human can still do something about it.
+::    the path it is replying into, so one oversized compose would poison
+::    a thread permanently: every later message on that path rejected by
+::    every recipient, silently, forever. Failing at compose time is the
+::    only point where a human can still do something about it.
 ::
 ++  do-send
   |=  $:  root=path
@@ -643,7 +738,7 @@
   ;<  room=?  bind:m  (room-for root fresh)
   ?.  room
     (reject root 'blob store full')
-  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
   ::  message's full contents, so it names exactly one message and
   ::  therefore exactly one chain.
@@ -651,7 +746,7 @@
     ?~  prev  ~
     =/  hits
       %+  skim  ~(tap by loaded)
-      |=  [t=thread-id:uc ss=(map @ta stored-msg:uc)]
+      |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
       %+  lien  ~(val by ss)
       |=(s=stored-msg:uc =((id:uc unsigned.msg.s) u.prev))
     ?~(hits ~ `p.i.hits)
@@ -674,7 +769,13 @@
   ::  exists while staying testable against any guessed ship.
   =/  u=unsigned:uc  [our lyf to subj body body-mime now prev as]
   =/  mg=msg:uc     [u (sign-with:uc rng (digest:uc u))]
-  =/  old=chain:uc  ?~(tid ~ (chain-of (~(gut by loaded) u.tid ~)))
+  ::  `full` is the whole stored thread, every branch of it; `old` is the
+  ::  ONE PATH this message answers, root to `prev`. The difference
+  ::  between them is exactly what no longer travels.
+  =/  full=chain:uc  ?~(tid ~ (chain-of (~(gut by loaded) u.tid ~)))
+  =/  old=chain:uc
+    ?~  prev  ~
+    (with-root:uc full (path-chain:uc full u.prev))
   =/  new=chain:uc  (merge:uc old ~[mg])
   ::  the outgoing chain must clear the same length bound the recipient
   ::  will apply on arrival, or the send is a silent no-op at the far end
@@ -695,26 +796,31 @@
   ::  and a fetch that waits out our deadline.
   ;<  ~  bind:m  (store-files root fresh)
   ;<  ~  bind:m  (ensure-thread root rid)
-  ;<  ~  bind:m  (write-msg root rid mg %verified)
+  ::  where this message sits in the tree: its own ancestry, root first.
+  ::  Derived from `prev` against the WHOLE thread, not against the path
+  ::  that travels - the two agree, and the whole thread is what is
+  ::  actually on disk.
+  =/  place=(list msg-id:uc)  (place-of:uc (merge:uc full ~[mg]) (id:uc u))
+  ;<  ~  bind:m  (write-msg root rid place mg %verified)
   ;<  ~  bind:m  (mark-read root rid (id:uc u))
   ::  record who we blind-copied, LOCALLY, so our own Sent view is
   ::  accurate. This never travels and is not part of any signature.
   ;<  ~  bind:m  (record-bcc root rid (id:uc u) bcc)
   ;<  ~  bind:m  (touch-idx root rid)
   ;<  ~  bind:m  (note root 'send' & (scot %uv rid))
-  ::  ship the WHOLE chain to every recipient, visible and blind alike.
-  ::  A ship added at message forty receives one through forty, each
-  ::  independently verifiable.
+  ::  ship the PATH to every recipient, visible and blind alike. A ship
+  ::  added at message forty receives the forty on this path, each
+  ::  independently verifiable, and nothing off it.
   (fan-out root new ~(tap in (~(del in (~(uni in to) bcc)) our)))
 ::
 ++  do-read
   |=  [root=path mid=msg-id:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   =/  hits
     %+  skim  ~(tap by loaded)
-    |=  [t=thread-id:uc ss=(map @ta stored-msg:uc)]
+    |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
     (lien ~(val by ss) |=(s=stored-msg:uc =((id:uc unsigned.msg.s) mid)))
   ?~  hits  (reject root 'unknown message')
   (mark-read root p.i.hits mid)
@@ -784,7 +890,7 @@
   ;<  keys=(map [ship @ud] (unit pass))  bind:m
     (key-map fake ~(tap in (signers:uc c)) ~)
   =/  vs=(list [[msg-id:uc @ux] verdict:uc])  (verify-chain:uc keys c)
-  ;<  loaded=(map thread-id:uc (map @ta stored-msg:uc))  bind:m  (read-threads root)
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  thread identity is never (root:uc c). `c` is attacker-controlled and
   ::  unsorted, so the head-as-supplied is not a stable identity.
   ::  +thread-key crashes on a first-contact chain with no unique prev=~
@@ -792,7 +898,7 @@
   =/  rk  (mule |.((thread-key:uc (threads-of loaded) c)))
   ?:  ?=(%| -.rk)  (reject root 'no unique root')
   =/  rid=thread-id:uc  p.rk
-  =/  ss=(map @ta stored-msg:uc)  (~(gut by loaded) rid ~)
+  =/  ss=(map path stored-msg:uc)  (~(gut by loaded) rid ~)
   =/  new=chain:uc  (merge:uc (chain-of ss) c)
   ::  a genuine state-capacity limit, and it stays a reject: shedding a
   ::  distinct non-root id would orphan the prev pointers of later
@@ -1231,60 +1337,166 @@
 ::
 ::  ── slot writing ────────────────────────────────────────────────────
 ::
+::  +write-msg: one copy, at its own node in the tree.
+::
+::    `place` is the message's ancestry, root first, and it becomes the
+::    directories the copy is filed under. The node directories are made
+::    shallowest-first because a directory needs its parent; a reply's
+::    ancestors are already there, and only the message's own node is
+::    actually new.
+::
 ++  write-msg
-  |=  [root=path t=thread-id:uc mg=msg:uc v=verdict:uc]
+  |=  [root=path t=thread-id:uc place=(list msg-id:uc) mg=msg:uc v=verdict:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  (put-file [%& %& (mdir root t) (slot (id:uc unsigned.mg) sig.mg)] [/urmail %msg] [%2 mg v])
+  =/  dir=path  (mdir root t)
+  =/  pax=path  (node-dir place)
+  ;<  ~  bind:m  (ensure-nodes dir (prefixes:uc pax))
+  %^  put-file  [%& %& (weld dir pax) (slot (id:uc unsigned.mg) sig.mg)]
+    [/urmail %msg]
+  [%2 mg v]
+::
+::  +want-slots: where every copy of a chain BELONGS in the tree.
+::
+::    One ancestor-map over the whole chain rather than a walk per
+::    message, then each copy's key is its message's ancestry as
+::    directories plus its own slot. Two copies of one id land at one
+::    node with two leaves; two replies to one message land as two
+::    sibling directories.
 ::
 ++  want-slots
   |=  [c=chain:uc vs=(map [msg-id:uc @ux] verdict:uc)]
-  ^-  (map @ta stored-msg:uc)
-  %-  ~(gas by *(map @ta stored-msg:uc))
+  ^-  (map path stored-msg:uc)
+  =/  am=(map msg-id:uc (list msg-id:uc))  (ancestor-map:uc c)
+  %-  ~(gas by *(map path stored-msg:uc))
   %+  turn  c
   |=  mg=msg:uc
-  ^-  [@ta stored-msg:uc]
+  ^-  [path stored-msg:uc]
   =/  i=msg-id:uc  (id:uc unsigned.mg)
-  [(slot i sig.mg) [%2 mg (~(gut by vs) [i sig.mg] %unverified)]]
+  :-  (snoc (node-dir (~(gut by am) i ~[i])) (slot i sig.mg))
+  [%2 mg (~(gut by vs) [i sig.mg] %unverified)]
 ::
 ::  +sync-slots: make the thread's grubs equal `want`.
 ::
 ::    Cull what +prune shed, write what is new or whose verdict moved,
 ::    leave the rest alone. Redelivering a chain we already hold writes
-::    nothing at all.
+::    nothing at all, and nothing here is a peek.
+::
+::    Two kinds of cull, because the layout has two kinds of thing. A
+::    NODE DIRECTORY the tree no longer wants goes whole - that is the
+::    case where a message's ancestry changed, which happens when an
+::    orphan is finally joined to its parent, and it takes the orphan's
+::    own descendants with it. Then any remaining copy FILE that is not
+::    wanted goes on its own, which is what +prune's shedding looks like
+::    and what the pre-tree migration looks like.
+::
+::    Only the MINIMAL stale directories are culled, and a copy already
+::    inside one of them is not culled again: a cull of a road that a
+::    parent cull already removed is at best waste.
 ::
 ++  sync-slots
   |=  $:  root=path
           t=thread-id:uc
-          have=(map @ta stored-msg:uc)
-          want=(map @ta stored-msg:uc)
+          have=(map path stored-msg:uc)
+          want=(map path stored-msg:uc)
       ==
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  =/  dir=path  (mdir root t)
+  =/  wn=(set path)  (node-dirs:uc ~(tap in ~(key by want)))
+  =/  stale=(set path)
+    %-  ~(gas in *(set path))
+    %+  skip  ~(tap in (node-dirs:uc ~(tap in ~(key by have))))
+    |=(pk=path (~(has in wn) pk))
+  =/  puts=(list [pk=path st=stored-msg:uc])
+    %+  skip  ~(tap by want)
+    |=([pk=path st=stored-msg:uc] =(`st (~(get by have) pk)))
+  ;<  ~  bind:m  (cull-dirs dir (minimal-dirs:uc stale))
   ;<  ~  bind:m
-    %+  cull-slots  (mdir root t)
-    (skip ~(tap by have) |=([nm=@ta *] (~(has by want) nm)))
-  %+  put-slots  (mdir root t)
-  (skip ~(tap by want) |=([nm=@ta s=stored-msg:uc] =(`s (~(get by have) nm))))
+    %+  cull-slots  dir
+    %+  skip  ~(tap in ~(key by have))
+    |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
+  ;<  ~  bind:m  (ensure-nodes dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
+  (put-slots dir puts)
 ::
 ::  recursion by ARM NAME, not by $. A $ with arguments inside a ;<
 ::  continuation cannot find the trap (-find.$.+2).
 ::
-++  cull-slots
-  |=  [dir=path xs=(list [@ta stored-msg:uc])]
+++  cull-dirs
+  |=  [dir=path ps=(list path)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ?~  xs  (pure:m ~)
-  ;<  *  bind:m  (cull-soft:io [%& %& dir -.i.xs])
-  (cull-slots dir t.xs)
+  ?~  ps  (pure:m ~)
+  ;<  ~  bind:m  (cull-if-there [%& %| (weld dir i.ps)])
+  (cull-dirs dir t.ps)
+::
+++  cull-slots
+  |=  [dir=path ps=(list path)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  ps  (pure:m ~)
+  ;<  *  bind:m  (cull-soft:io [%& %& (weld dir (snip i.ps)) (rear i.ps)])
+  (cull-slots dir t.ps)
 ::
 ++  put-slots
-  |=  [dir=path xs=(list [@ta stored-msg:uc])]
+  |=  [dir=path xs=(list [pk=path st=stored-msg:uc])]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
-  ;<  ~  bind:m  (put-file [%& %& dir -.i.xs] [/urmail %msg] +.i.xs)
+  ;<  ~  bind:m
+    %^  put-file  [%& %& (weld dir (snip pk.i.xs)) (rear pk.i.xs)]
+      [/urmail %msg]
+    st.i.xs
   (put-slots dir t.xs)
+::
+::  ── the pre-tree migration ──────────────────────────────────────────
+::
+::  +migrate-flat: move a mailbox stored flat into the tree.
+::
+::    Before this layout every copy sat directly under msg/<slot>. Those
+::    grubs READ back perfectly - nothing outside the storage layer cares
+::    where a copy was filed, and +collect-slots keys them by a
+::    one-segment path - so this is a tidy, not a gate: a ship that
+::    somehow never ran it still shows all its mail.
+::
+::    IT IS A LAYOUT MIGRATION AND NOTHING ELSE, which is why it may
+::    happen in place at all. The two format breaks recorded in
+::    +read-stored could not, because a signature covers a shape and
+::    rewriting the shape turns genuine mail into apparent forgeries.
+::    Here every byte a signature covers is untouched: the same grub is
+::    written at a different path.
+::
+::    Runs once at writer rise, gated on a thread actually holding a flat
+::    copy, so a migrated ship pays one peek of /mail/thread per reload
+::    and writes nothing. +sync-slots does the work, so the migration and
+::    the delivery path cannot disagree about where a message goes.
+::
+++  migrate-flat
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
+  (migrate-loop root ~(tap by loaded))
+::
+++  migrate-loop
+  |=  [root=path ts=(list [t=thread-id:uc ss=(map path stored-msg:uc)])]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  ts  (pure:m ~)
+  ;<  ~  bind:m  (migrate-one root t.i.ts ss.i.ts)
+  (migrate-loop root t.ts)
+::
+++  migrate-one
+  |=  [root=path t=thread-id:uc ss=(map path stored-msg:uc)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ::  a one-segment path is a copy directly under msg/, which is what a
+  ::  pre-tree grub is and what a tree grub can never be.
+  ?.  (lien ~(tap in ~(key by ss)) |=(pk=path =(1 (lent pk))))
+    (pure:m ~)
+  ;<  ~  bind:m
+    (sync-slots root t ss (want-slots (chain-of ss) (verdicts-of ss)))
+  (note root 'migrate' & (scot %uv t))
 ::
 ::  +record-bcc: the sender's own note of who it blind-copied.
 ::
@@ -1702,7 +1914,7 @@
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  (send-err eyre-id 400 'bad thread id')
   ;<  root=path  bind:m  nexus-root
-  ;<  ss=(map @ta stored-msg:uc)  bind:m  (read-thread-slots root u.t)
+  ;<  ss=(map path stored-msg:uc)  bind:m  (read-thread-slots root u.t)
   ::  an empty thread dir and an absent one are the same thing to a
   ::  reader. The client turns this 404 into "no longer exists", which is
   ::  what a thread deleted in another tab actually is.
@@ -1714,7 +1926,7 @@
 ::
 ++  read-thread-slots
   |=  [root=path t=thread-id:uc]
-  =/  m  (fiber:fiber:nexus ,(map @ta stored-msg:uc))
+  =/  m  (fiber:fiber:nexus ,(map path stored-msg:uc))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io [%& %| (tdir root t)] ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
@@ -1778,7 +1990,7 @@
   ==
 ::
 ++  thread-json
-  |=  [t=thread-id:uc ss=(map @ta stored-msg:uc) mt=meta:uc]
+  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc]
   ^-  json
   ::  +chain-of re-imposes the canonical order, which the tree does not
   ::  store: slots are named by (sham [id sig]) and a map has no order.
@@ -1800,7 +2012,7 @@
 ::
 ++  inbox-json
   |=  $:  order=(list thread-id:uc)
-          loaded=(map thread-id:uc (map @ta stored-msg:uc))
+          loaded=(map thread-id:uc (map path stored-msg:uc))
           metas=(map thread-id:uc meta:uc)
       ==
   ^-  json
@@ -1808,12 +2020,12 @@
   %+  murn  order
   |=  t=thread-id:uc
   ^-  (unit json)
-  =/  ss=(map @ta stored-msg:uc)  (~(gut by loaded) t ~)
+  =/  ss=(map path stored-msg:uc)  (~(gut by loaded) t ~)
   ?:  =(~ ss)  ~
   `(entry-json t ss (~(gut by metas) t *meta:uc))
 ::
 ++  entry-json
-  |=  [t=thread-id:uc ss=(map @ta stored-msg:uc) mt=meta:uc]
+  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc]
   ^-  json
   =/  c=chain:uc  (chain-of ss)
   =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
