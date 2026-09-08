@@ -418,8 +418,8 @@ for a change that had already landed locally.
 
 ## Marcs
 
-Every path ships a marc. Persisted, under `mar/urmail/`: `msg`, `meta`, `idx`, `draft`, `rule`,
-`blob`, `blobvis`, `fetchreq`, `blob-in`. Wire, at the top level of `gub/mar/`:
+Every path ships a marc. Persisted, under `mar/urmail/`: `msg`, `meta`, `idx`,
+`draft`, `rule`, `blob`, `blobvis`, `fetchreq`, `blob-in`. Wire, at the top level of `gub/mar/`:
 `urmail-chain` (a whole signed chain, poked by any ship) and `urmail-action`
 (the local action). A wire marc must be top-level, because a blot with a path
 prefix is unreachable from the two surfaces a peer actually uses — the
