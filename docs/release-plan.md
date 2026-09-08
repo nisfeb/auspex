@@ -141,6 +141,30 @@ already shipped a test that passed the bug it existed to catch.
 
 ### Gate 5 — the distribution change
 
+**Status, 2026-09-08.** Rehearsed on `~feb`: launcher back (`/apps/grubbery`,
+14 tiles, lattice among them from its own `tile.json`), docket reads Grubbery
+1.1.0, lattice and urmail both still bound, memory store reads. Commit
+`5ea5700` on **`dist/launcher-restore`**, deliberately not `dist/lattice-only`,
+because another session is committing to that branch with production as its
+next step. Merge `--ff-only` when the launcher is meant to ship.
+
+Two things the rehearsal did **not** prove:
+
+- **`~feb` is the wrong shape.** It runs full upstream `7117ae1` plus urmail —
+  the app tier present, no lattice row in `root.hoon`. Production has the app
+  tier *absent*. `~wex` carries the dist-shaped `root.hoon`, so the rehearsal
+  that matters is on `~wex`, after the features work there lands.
+- `tiles.hoon` came from upstream `d839ede`, the last pre-split revision — at
+  `7117ae1` the file is a data store and the launcher UI is `shell.hoon`, eleven
+  files needing deleted dependencies. Pre-split tiles is one self-contained file
+  that already reads app-advertised `tile.json`. Its notifications bell hits
+  nexuses the dist desk deleted: permanently grey on production, invisible on
+  `~feb`. ~60 lines to strip; decision pending.
+
+Still open under this gate: urmail's sources and `root.hoon` row are not
+vendored into the dist desk. The docket's `base` also changed
+`lattice` → `grubbery`, which was not in the four listed changes and is correct.
+
 Untouched. urmail cannot ship until grubbery's launcher comes back, because
 today `~ricsul-bilwyt` distributes a grubbery whose app tier was deliberately
 stripped: lattice is the only app and it *is* the product, with the docket
