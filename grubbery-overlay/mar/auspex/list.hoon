@@ -1,4 +1,4 @@
-::  mar/urmail/list: one MAILING LIST's members, at /mail/list/<name>.
+::  mar/auspex/list: one MAILING LIST's members, at /mail/list/<name>.
 ::
 ::    A LIST NAME NEVER TRAVELS, and this marc is where that is easiest
 ::    to see: there is no `name` field here at all. The name is the path
@@ -10,7 +10,7 @@
 ::    operation rather than a guess: the list was never in the message,
 ::    so there is nothing to recover, only ships to re-save.
 ::
-::    Local and unsigned, like mar/urmail/rule and mar/urmail/draft.
+::    Local and unsigned, like mar/auspex/rule and mar/auspex/draft.
 ::    Nothing here is signed, nothing here is sent, and two ships may
 ::    hold lists of the same name with entirely different members.
 ::
@@ -19,7 +19,7 @@
 ::    so moving the type booms every list on disk. The shape ladder
 ::    lives in the nexus, under mule.
 ::
-/<  uc  /lib/urmail-chain.hoon
+/<  uc  /lib/auspex-chain.hoon
 |_  n=*
 ++  grad  %noun
 ++  grow

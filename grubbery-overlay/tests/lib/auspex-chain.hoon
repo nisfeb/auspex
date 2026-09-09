@@ -1,13 +1,15 @@
-::  Unit tests for /lib/urmail-chain. Ported verbatim from the %urmail
-::  desk's tests/lib/urmail.hoon; only the imports differ.
+::  Unit tests for /lib/auspex-chain. Ported verbatim from the %urmail
+::  desk's tests/lib/urmail.hoon - the app was called urmail until
+::  2026-09-09 - and only the imports and the face names differ.
 ::
 ::    The desk split types (/sur/urmail) from arms (/lib/urmail) and this
-::    file named them `sur` and `urmail`. The overlay has no sur/, so both
-::    faces are bound to the one lib. Two faces on one file keeps every
-::    assertion below byte-identical to the reviewed original, which is
-::    the point of a port.
+::    file named them `sur` and `urmail`; the faces are `sur` and
+::    `auspex` here. The overlay has no sur/, so both faces are bound to
+::    the one lib. Two faces on one file keeps every assertion below
+::    structurally identical to the reviewed original, which is the
+::    point of a port.
 ::
-/+  *test, urmail=urmail-chain, sur=urmail-chain
+/+  *test, auspex=auspex-chain, sur=auspex-chain
 |%
 ::  +forge: build a genuinely signed message as any ship, using the fake-ship
 ::  key derivation. This is what lets the third-party forward case be tested
@@ -30,7 +32,7 @@
       ==
   ^-  msg:sur
   =/  u=unsigned:sur  [who 1 to subj body '' sent prev as]
-  [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
+  [u (sign-with:auspex (fake-ring:auspex who) (digest:auspex u))]
 ::
 ::  +fake-from: a message SIGNED BY ONE SHIP AND CLAIMING TO BE ANOTHER.
 ::
@@ -45,7 +47,7 @@
   |=  [signer=ship claim=ship subj=@t body=@t sent=@da]
   ^-  msg:sur
   =/  u=unsigned:sur  [claim 1 (sy ~[~palnet-sampel]) subj body '' sent ~ ~]
-  [u (sign-with:urmail (fake-ring:urmail signer) (digest:urmail u))]
+  [u (sign-with:auspex (fake-ring:auspex signer) (digest:auspex u))]
 ::
 ::  +forge hardcodes life 1, so the map is keyed on [w 1] for every ship
 ::  passed in.
@@ -54,26 +56,26 @@
   ^-  (map [ship @ud] (unit pass))
   %-  malt
   %+  turn  who
-  |=(w=ship [[w 1] `(fake-pass:urmail w)])
+  |=(w=ship [[w 1] `(fake-pass:auspex w)])
 ::
 ::  a signature made with a ship's key verifies against that ship's key
 ++  test-sign-verify-roundtrip
   =/  who   ~sampel-palnet
-  =/  msg   (shaf %urmail (sham [%hello 'world']))
-  =/  sig   (sign-with:urmail (fake-ring:urmail who) msg)
-  (expect !>((verify-with:urmail (fake-pass:urmail who) sig msg)))
+  =/  msg   (shaf %auspex (sham [%hello 'world']))
+  =/  sig   (sign-with:auspex (fake-ring:auspex who) msg)
+  (expect !>((verify-with:auspex (fake-pass:auspex who) sig msg)))
 ::
 ::  a signature does not verify against a different ship's key
 ++  test-sign-wrong-key-fails
-  =/  msg   (shaf %urmail (sham [%hello 'world']))
-  =/  sig   (sign-with:urmail (fake-ring:urmail ~sampel-palnet) msg)
-  (expect !>(!(verify-with:urmail (fake-pass:urmail ~palnet-sampel) sig msg)))
+  =/  msg   (shaf %auspex (sham [%hello 'world']))
+  =/  sig   (sign-with:auspex (fake-ring:auspex ~sampel-palnet) msg)
+  (expect !>(!(verify-with:auspex (fake-pass:auspex ~palnet-sampel) sig msg)))
 ::
 ::  a signature does not verify against a different message
 ++  test-sign-wrong-message-fails
   =/  who   ~sampel-palnet
-  =/  sig   (sign-with:urmail (fake-ring:urmail who) (shaf %urmail (sham 'a')))
-  (expect !>(!(verify-with:urmail (fake-pass:urmail who) sig (shaf %urmail (sham 'b')))))
+  =/  sig   (sign-with:auspex (fake-ring:auspex who) (shaf %auspex (sham 'a')))
+  (expect !>(!(verify-with:auspex (fake-pass:auspex who) sig (shaf %auspex (sham 'b')))))
 ::
 ::  +digest is what every later task signs and verifies over, so it is
 ::  tested directly rather than reimplemented by its callers.
@@ -81,19 +83,19 @@
   =/  u=unsigned:sur
     [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   %+  expect-eq
-    !>  (shaf %urmail (sham u))
-    !>  (digest:urmail u)
+    !>  (shaf %auspex (sham u))
+    !>  (digest:auspex u)
 ::
 ::  domain separation: the salted digest must differ from the unsalted hash
 ::  and from the same message salted for another protocol. This is the
-::  property that stops an urmail signature being replayed as an ames one,
+::  property that stops an auspex signature being replayed as an ames one,
 ::  and it is mandatory per the spec.
 ++  test-digest-domain-separated
   =/  u=unsigned:sur
     [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   ;:  weld
-    (expect !>(!=((digest:urmail u) (sham u))))
-    (expect !>(!=((digest:urmail u) (shaf %ames (sham u)))))
+    (expect !>(!=((digest:auspex u) (sham u))))
+    (expect !>(!=((digest:auspex u) (shaf %ames (sham u)))))
   ==
 ::
 ::  a msg-id is a hash over every signed field, so changing any field
@@ -102,22 +104,22 @@
 ++  test-msg-id-covers-every-field
   =/  base=unsigned:sur
     [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
-  =/  d  (digest:urmail base)
+  =/  d  (digest:auspex base)
   ;:  weld
-    (expect !>(!=(d (digest:urmail base(body 'other')))))
-    (expect !>(!=(d (digest:urmail base(subj 'other')))))
-    (expect !>(!=(d (digest:urmail base(life 2)))))
-    (expect !>(!=(d (digest:urmail base(from ~palnet-sampel)))))
-    (expect !>(!=(d (digest:urmail base(sent ~2026.1.2)))))
-    (expect !>(!=(d (digest:urmail base(to (sy ~[~sampel-palnet]))))))
-    (expect !>(!=(d (digest:urmail base(prev `0v1)))))
+    (expect !>(!=(d (digest:auspex base(body 'other')))))
+    (expect !>(!=(d (digest:auspex base(subj 'other')))))
+    (expect !>(!=(d (digest:auspex base(life 2)))))
+    (expect !>(!=(d (digest:auspex base(from ~palnet-sampel)))))
+    (expect !>(!=(d (digest:auspex base(sent ~2026.1.2)))))
+    (expect !>(!=(d (digest:auspex base(to (sy ~[~sampel-palnet]))))))
+    (expect !>(!=(d (digest:auspex base(prev `0v1)))))
     ::  attachments are inside `unsigned`, so the id covers them too and
     ::  swapping a file cannot leave the signature standing.
-    (expect !>(!=(d (digest:urmail base(attachments ~[['f' 3 'text/plain' 0v2]])))))
+    (expect !>(!=(d (digest:auspex base(attachments ~[['f' 3 'text/plain' 0v2]])))))
     ::  the rendering instruction is part of the message: "render me as
     ::  HTML" and "render me as plain text" are different messages, and
     ::  an intermediary must not be able to switch which one is read.
-    (expect !>(!=(d (digest:urmail base(body-mime 'text/html')))))
+    (expect !>(!=(d (digest:auspex base(body-mime 'text/html')))))
   ==
 ::
 ::  THE MARQUEE TEST. ~sampel writes to ~palnet; ~palnet forwards the chain
@@ -128,12 +130,12 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   =/  keys  (all-keys ~[~sampel-palnet ~palnet-sampel])
   %+  expect-eq
     !>  ~[%verified %verified]
-    !>  (turn (verify-chain:urmail keys ~[a b]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:auspex keys ~[a b]) |=([* v=verdict:sur] v))
 ::
 ::  a tampered body flips the verdict to %forged, not %unverified
 ++  test-tampered-body-is-forged
@@ -142,7 +144,7 @@
   =/  keys  (all-keys ~[~sampel-palnet])
   %+  expect-eq
     !>  ~[%forged]
-    !>  (turn (verify-chain:urmail keys ~[bad]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:auspex keys ~[bad]) |=([* v=verdict:sur] v))
 ::
 ::  a tampered life looks up a [ship life] pair we hold no key for. That is
 ::  indistinguishable, from the verifier's side, from an honest ship whose
@@ -155,14 +157,14 @@
   =/  keys  (all-keys ~[~sampel-palnet])
   %+  expect-eq
     !>  ~[%unverified]
-    !>  (turn (verify-chain:urmail keys ~[bad]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:auspex keys ~[bad]) |=([* v=verdict:sur] v))
 ::
 ::  no key available means %unverified, never %forged. Moons land here.
 ++  test-missing-key-is-unverified
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'real' ~2026.1.1 ~)
   %+  expect-eq
     !>  ~[%unverified]
-    !>  (turn (verify-chain:urmail (malt ~[[[~sampel-palnet 1] ~]]) ~[a]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:auspex (malt ~[[[~sampel-palnet 1] ~]]) ~[a]) |=([* v=verdict:sur] v))
 ::
 ::  merging the same chain twice is a no-op: double delivery must not
 ::  duplicate messages
@@ -171,11 +173,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
     !>  ~[a b]
-    !>  (merge:urmail ~[a b] ~[a b])
+    !>  (merge:auspex ~[a b] ~[a b])
 ::
 ::  merge keeps messages in sent order regardless of arrival order
 ++  test-merge-orders-by-sent
@@ -183,11 +185,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
     !>  ~[a b]
-    !>  (merge:urmail ~[b] ~[a])
+    !>  (merge:auspex ~[b] ~[a])
 ::
 ::  the root of a chain is the id of its first message, and every ship
 ::  computes the same one because the root message is byte-identical
@@ -196,11 +198,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
-    !>  (id:urmail unsigned.a)
-    !>  (root:urmail ~[a b])
+    !>  (id:auspex unsigned.a)
+    !>  (root:auspex ~[a b])
 ::
 ::  participants is the union of from and to across the whole chain, so a
 ::  ship added by a forward is a participant
@@ -209,11 +211,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd'  'two'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
     !>  (sy ~[~sampel-palnet ~palnet-sampel ~marbud-marbud])
-    !>  (participants:urmail ~[a b])
+    !>  (participants:auspex ~[a b])
 ::
 ::  a forged copy must not shadow the genuine message. Same id, different
 ::  signature: both survive the merge so +verify-chain can label them.
@@ -222,13 +224,13 @@
   =/  bad  a(sig 0x0)
   %+  expect-eq
     !>  2
-    !>  (lent (merge:urmail ~[bad] ~[a]))
+    !>  (lent (merge:auspex ~[bad] ~[a]))
 ::
 ::  a peer-supplied chain that repeats a message must not produce a chain
 ::  with duplicates. `old` is empty here: this is the first-contact case.
 ++  test-merge-dedupes-within-new
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
-  %+  expect-eq  !>(~[a])  !>((merge:urmail ~ ~[a a]))
+  %+  expect-eq  !>(~[a])  !>((merge:auspex ~ ~[a a]))
 ::
 ::  the true third-party case: ~marbud holds the forwarder's key but not the
 ::  original author's, so one chain yields two different verdicts. Catches a
@@ -238,12 +240,12 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   =/  keys  (all-keys ~[~palnet-sampel])
   %+  expect-eq
     !>  ~[%unverified %verified]
-    !>  (turn (verify-chain:urmail keys ~[a b]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:auspex keys ~[a b]) |=([* v=verdict:sur] v))
 ::
 ::  the positive rotation case: a message signed under life 2 verifies when
 ::  the map carries that ship's key at life 2. Without this, a lookup that
@@ -253,11 +255,11 @@
   =/  u=unsigned:sur
     [who 2 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
   =/  m=msg:sur
-    [u (sign-with:urmail (fake-ring:urmail who) (digest:urmail u))]
-  =/  keys  (malt ~[[[who 2] `(fake-pass:urmail who)]])
+    [u (sign-with:auspex (fake-ring:auspex who) (digest:auspex u))]
+  =/  keys  (malt ~[[[who 2] `(fake-pass:auspex who)]])
   %+  expect-eq
     !>  ~[%verified]
-    !>  (turn (verify-chain:urmail keys ~[m]) |=([* v=verdict:sur] v))
+    !>  (turn (verify-chain:auspex keys ~[m]) |=([* v=verdict:sur] v))
 ::
 ::  the verdict's key names one specific signed copy. Two copies sharing an
 ::  id but differing in signature must get separate, correctly-paired
@@ -267,8 +269,8 @@
   =/  bad  a(sig 0x0)
   =/  keys  (all-keys ~[~sampel-palnet])
   %+  expect-eq
-    !>  ~[[[(id:urmail unsigned.a) sig.a] %verified] [[(id:urmail unsigned.a) 0x0] %forged]]
-    !>  (verify-chain:urmail keys ~[a bad])
+    !>  ~[[[(id:auspex unsigned.a) sig.a] %verified] [[(id:auspex unsigned.a) 0x0] %forged]]
+    !>  (verify-chain:auspex keys ~[a bad])
 ::
 ::  +prune sheds the excess instead of rejecting. Five copies of one id
 ::  against max-copies=4 must produce a four-message chain, not a crash and
@@ -277,8 +279,8 @@
 ++  test-prune-sheds-excess-rather-than-rejecting
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
-  =/  vs  (malt (verify-chain:urmail (all-keys ~[~sampel-palnet]) cs))
-  %+  expect-eq  !>(4)  !>((lent (prune:urmail cs vs 4)))
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
+  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs 4)))
 ::
 ::  a %verified copy is never shed, however many forged copies crowd it and
 ::  whatever order they arrive in. Both orders, same reason as above.
@@ -286,10 +288,10 @@
   =/  a    (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  cs   ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
   =/  cs2  ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)]
-  =/  vs   (malt (verify-chain:urmail (all-keys ~[~sampel-palnet]) cs))
+  =/  vs   (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
   ;:  weld
-    (expect-eq !>(~[a]) !>((prune:urmail cs vs 1)))
-    (expect-eq !>(~[a]) !>((prune:urmail cs2 vs 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs vs 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs 1)))
   ==
 ::
 ::  the fill bucket ranks %unverified above %forged. This is not a nicety:
@@ -306,7 +308,7 @@
 ::  old (skip ms verified) form fails this test.
 ++  test-prune-prefers-unverified-over-forged
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
-  =/  i   (id:urmail unsigned.a)
+  =/  i   (id:auspex unsigned.a)
   =/  vs=(map [msg-id:sur @ux] verdict:sur)
     %-  malt
     ^-  (list [[msg-id:sur @ux] verdict:sur])
@@ -318,10 +320,10 @@
   ;:  weld
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:urmail ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 1)
   ==
 ::
 ::  the whole ranking in one shot: %verified, then %unverified, then
@@ -329,7 +331,7 @@
 ::  unverified one, never a forged one.
 ++  test-prune-ranks-verified-then-unverified-then-forged
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
-  =/  i   (id:urmail unsigned.a)
+  =/  i   (id:auspex unsigned.a)
   =/  vs=(map [msg-id:sur @ux] verdict:sur)
     %-  malt
     ^-  (list [[msg-id:sur @ux] verdict:sur])
@@ -340,8 +342,8 @@
         [[i sig.a] %verified]
     ==
   ::  both input orders, for the +add:ja reversal reason given above
-  =/  one  (prune:urmail ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
-  =/  two  (prune:urmail ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 2)
+  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
+  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 2)
   ;:  weld
     (expect-eq !>(2) !>((lent one)))
     (expect !>((lien one |=(m=msg:sur =(sig.m sig.a)))))
@@ -361,11 +363,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
-    !>  (id:urmail unsigned.a)
-    !>  (thread-key:urmail ~ ~[b a])
+    !>  (id:auspex unsigned.a)
+    !>  (thread-key:auspex ~ ~[b a])
 ::
 ::  nor from `sent`, which is a signed field the sender chooses freely. A
 ::  reply backdated before the root must still resolve to the root.
@@ -374,11 +376,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'backdated'
-        ~2020.1.1  `(id:urmail unsigned.a)
+        ~2020.1.1  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
-    !>  (id:urmail unsigned.a)
-    !>  (thread-key:urmail ~ ~[b a])
+    !>  (id:auspex unsigned.a)
+    !>  (thread-key:auspex ~ ~[b a])
 ::
 ::  once a thread exists, its id is immutable. A poke that carries one
 ::  message we already hold plus a brand-new prev=~ message - the shape
@@ -388,14 +390,14 @@
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  evil
     (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'hi' 'new root' ~2020.1.1 ~)
-  =/  tid  (id:urmail unsigned.a)
+  =/  tid  (id:auspex unsigned.a)
   =/  stored=(map thread-id:sur thread:sur)
-    (malt ~[[tid `thread:sur`[~[a] (participants:urmail ~[a]) ~2026.1.1]]])
+    (malt ~[[tid `thread:sur`[~[a] (participants:auspex ~[a]) ~2026.1.1]]])
   ;:  weld
-    (expect-eq !>(tid) !>((thread-key:urmail stored ~[evil a])))
-    (expect-eq !>(tid) !>((thread-key:urmail stored ~[a evil])))
+    (expect-eq !>(tid) !>((thread-key:auspex stored ~[evil a])))
+    (expect-eq !>(tid) !>((thread-key:auspex stored ~[a evil])))
     ::  and the new root does NOT become the id
-    (expect !>(!=((id:urmail unsigned.evil) (thread-key:urmail stored ~[evil a]))))
+    (expect !>(!=((id:auspex unsigned.evil) (thread-key:auspex stored ~[evil a]))))
   ==
 ::
 ::  a forged copy of the root carries the same prev=~ and the same id as
@@ -406,8 +408,8 @@
 ++  test-thread-key-tolerates-a-shadowed-root
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   %+  expect-eq
-    !>  (id:urmail unsigned.a)
-    !>  (thread-key:urmail ~ ~[a a(sig 0x0)])
+    !>  (id:auspex unsigned.a)
+    !>  (thread-key:auspex ~ ~[a a(sig 0x0)])
 ::
 ::  +freeze: a definitive verdict is never overwritten. %verified and
 ::  %forged are both definitive for a fixed [id sig] - digest and key are
@@ -415,13 +417,13 @@
 ::  attack, and either way must not win.
 ++  test-freeze-keeps-a-definitive-verdict
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
-  =/  k  [(id:urmail unsigned.a) sig.a]
+  =/  k  [(id:auspex unsigned.a) sig.a]
   =/  old=(map [msg-id:sur @ux] verdict:sur)  (malt ~[[k `verdict:sur`%verified]])
   ;:  weld
     %+  expect-eq  !>(`verdict:sur`%verified)
-      !>  (~(got by (freeze:urmail old ~[[k %unverified]])) k)
+      !>  (~(got by (freeze:auspex old ~[[k %unverified]])) k)
     %+  expect-eq  !>(`verdict:sur`%verified)
-      !>  (~(got by (freeze:urmail old ~[[k %forged]])) k)
+      !>  (~(got by (freeze:auspex old ~[[k %forged]])) k)
   ==
 ::
 ::  but %unverified is not a finding about the signature - only that the
@@ -429,13 +431,13 @@
 ::  arriving after we have fetched the key must be able to upgrade it.
 ++  test-freeze-upgrades-an-unverified
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
-  =/  k  [(id:urmail unsigned.a) sig.a]
+  =/  k  [(id:auspex unsigned.a) sig.a]
   =/  old=(map [msg-id:sur @ux] verdict:sur)  (malt ~[[k `verdict:sur`%unverified]])
   ;:  weld
     %+  expect-eq  !>(`verdict:sur`%verified)
-      !>  (~(got by (freeze:urmail old ~[[k %verified]])) k)
+      !>  (~(got by (freeze:auspex old ~[[k %verified]])) k)
     %+  expect-eq  !>(`verdict:sur`%forged)
-      !>  (~(got by (freeze:urmail old ~[[k %forged]])) k)
+      !>  (~(got by (freeze:auspex old ~[[k %forged]])) k)
   ==
 ::
 ::  the input caps reject rather than truncate: a chain that violates one
@@ -447,14 +449,14 @@
   =/  loud  ok(subj.unsigned (crip (reap 200 'x')))
   =/  many  ok(to.unsigned (sy ~[~sampel-palnet ~palnet-sampel ~marbud-marbud]))
   ;:  weld
-    (expect !>((fits-length:urmail ~[ok ok] 2)))
-    (expect !>(!(fits-length:urmail ~[ok ok] 1)))
-    (expect !>((fits-bodies:urmail ~[ok] 100)))
-    (expect !>(!(fits-bodies:urmail ~[ok big] 100)))
-    (expect !>((fits-subjects:urmail ~[ok] 100)))
-    (expect !>(!(fits-subjects:urmail ~[ok loud] 100)))
-    (expect !>((fits-recipients:urmail ~[ok] 2)))
-    (expect !>(!(fits-recipients:urmail ~[ok many] 2)))
+    (expect !>((fits-length:auspex ~[ok ok] 2)))
+    (expect !>(!(fits-length:auspex ~[ok ok] 1)))
+    (expect !>((fits-bodies:auspex ~[ok] 100)))
+    (expect !>(!(fits-bodies:auspex ~[ok big] 100)))
+    (expect !>((fits-subjects:auspex ~[ok] 100)))
+    (expect !>(!(fits-subjects:auspex ~[ok loud] 100)))
+    (expect !>((fits-recipients:auspex ~[ok] 2)))
+    (expect !>(!(fits-recipients:auspex ~[ok many] 2)))
   ==
 ::
 ::  the state-capacity bound counts distinct message ids, not messages:
@@ -466,11 +468,11 @@
   =/  b
     %-  forge
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're: hi'  'two'
-        ~2026.1.2  `(id:urmail unsigned.a)
+        ~2026.1.2  `(id:auspex unsigned.a)
     ==
   %+  expect-eq
     !>  2
-    !>  (distinct-ids:urmail ~[a a(sig 0x1) a(sig 0x2) b])
+    !>  (distinct-ids:auspex ~[a a(sig 0x1) a(sig 0x2) b])
 
 ::  ── attachments ──────────────────────────────────────────────────────
 ::
@@ -481,9 +483,9 @@
   =/  a=octs  [3 'abc']
   =/  b=octs  [4 'abc']
   ;:  weld
-    (expect !>(=((blob-hash:urmail a) (blob-hash:urmail [3 'abc']))))
-    (expect !>(!=((blob-hash:urmail a) (blob-hash:urmail b))))
-    (expect !>(!=((blob-hash:urmail a) (sham q.a))))
+    (expect !>(=((blob-hash:auspex a) (blob-hash:auspex [3 'abc']))))
+    (expect !>(!=((blob-hash:auspex a) (blob-hash:auspex b))))
+    (expect !>(!=((blob-hash:auspex a) (sham q.a))))
   ==
 ::
 ::  THE ACCEPTANCE RULE. A blob is accepted only if its bytes hash to the
@@ -491,25 +493,25 @@
 ::  irrelevant, and a mismatch is discarded rather than stored.
 ++  test-blob-ok-rejects-wrong-bytes
   =/  good=octs  [11 'hello world']
-  =/  h  (blob-hash:urmail good)
+  =/  h  (blob-hash:auspex good)
   ;:  weld
-    (expect !>((blob-ok:urmail good h)))
-    (expect !>(!(blob-ok:urmail [11 'hello xorld'] h)))
+    (expect !>((blob-ok:auspex good h)))
+    (expect !>(!(blob-ok:auspex [11 'hello xorld'] h)))
     ::  right bytes, wrong declared length: still a different address
-    (expect !>(!(blob-ok:urmail [12 'hello world'] h)))
-    (expect !>(!(blob-ok:urmail good 0v0)))
+    (expect !>(!(blob-ok:auspex [12 'hello world'] h)))
+    (expect !>(!(blob-ok:auspex good 0v0)))
   ==
 ::
 ::  +describe is what puts a file's identity inside the signature. Its
 ::  size and hash must agree with the bytes it was built from.
 ++  test-describe-matches-its-bytes
   =/  f=file:sur  ['note.txt' 'text/plain' [11 'hello world']]
-  =/  a  (describe:urmail f)
+  =/  a  (describe:auspex f)
   ;:  weld
     (expect-eq !>('note.txt') !>(name.a))
     (expect-eq !>(11) !>(size.a))
     (expect-eq !>('text/plain') !>(mime.a))
-    (expect !>((blob-ok:urmail octs.f hash.a)))
+    (expect !>((blob-ok:auspex octs.f hash.a)))
   ==
 ::
 ::  a file whose declared length is BELOW its measured bytes is malformed:
@@ -517,12 +519,12 @@
 ::  send time would not be the address the bytes are re-measured against.
 ++  test-file-ok-rejects-malformed-octs
   ;:  weld
-    (expect !>((file-ok:urmail ['a' 'text/plain' [11 'hello world']])))
-    (expect !>((file-ok:urmail ['a' 'text/plain' [40 'hello world']])))
-    (expect !>(!(file-ok:urmail ['a' 'text/plain' [3 'hello world']])))
-    (expect !>(!(file-ok:urmail ['a' 'text/plain' [1.000.000 'x']])))
-    (expect !>(!(file-ok:urmail [(crip (reap 300 'n')) 'text/plain' [1 'x']])))
-    (expect !>(!(file-ok:urmail ['a' (crip (reap 200 'm')) [1 'x']])))
+    (expect !>((file-ok:auspex ['a' 'text/plain' [11 'hello world']])))
+    (expect !>((file-ok:auspex ['a' 'text/plain' [40 'hello world']])))
+    (expect !>(!(file-ok:auspex ['a' 'text/plain' [3 'hello world']])))
+    (expect !>(!(file-ok:auspex ['a' 'text/plain' [1.000.000 'x']])))
+    (expect !>(!(file-ok:auspex [(crip (reap 300 'n')) 'text/plain' [1 'x']])))
+    (expect !>(!(file-ok:auspex ['a' (crip (reap 200 'm')) [1 'x']])))
   ==
 ::
 ::  +attach-ok is +file-ok WITHOUT THE BYTES, and the send path that
@@ -531,23 +533,23 @@
 ::  the two ways into a send cannot drift on the caps.
 ++  test-attach-ok-enforces-the-same-caps
   ;:  weld
-    (expect !>((attach-ok:urmail ['a' 11 'text/plain' 0v1])))
+    (expect !>((attach-ok:auspex ['a' 11 'text/plain' 0v1])))
     ::  size against max-blob, exactly as +file-ok checks p.octs
-    (expect !>((attach-ok:urmail ['a' 262.144 'text/plain' 0v1])))
-    (expect !>(!(attach-ok:urmail ['a' 262.145 'text/plain' 0v1])))
+    (expect !>((attach-ok:auspex ['a' 262.144 'text/plain' 0v1])))
+    (expect !>(!(attach-ok:auspex ['a' 262.145 'text/plain' 0v1])))
     ::  name and mime through +text-ok, same caps
-    (expect !>(!(attach-ok:urmail [(crip (reap 300 'n')) 1 'text/plain' 0v1])))
-    (expect !>(!(attach-ok:urmail ['a' 1 (crip (reap 200 'm')) 0v1])))
+    (expect !>(!(attach-ok:auspex [(crip (reap 300 'n')) 1 'text/plain' 0v1])))
+    (expect !>(!(attach-ok:auspex ['a' 1 (crip (reap 200 'm')) 0v1])))
   ==
 ::
 ::  the count cap, and it is max-attach and not a number of its own.
 ++  test-attaches-ok-caps-the-count
   =/  one=attachment:sur  ['a' 1 'text/plain' 0v1]
   ;:  weld
-    (expect !>((attaches-ok:urmail (reap 16 one))))
-    (expect !>(!(attaches-ok:urmail (reap 17 one))))
+    (expect !>((attaches-ok:auspex (reap 16 one))))
+    (expect !>(!(attaches-ok:auspex (reap 17 one))))
     ::  and one bad member fails the list, however short it is
-    (expect !>(!(attaches-ok:urmail ~[one ['a' 262.145 'text/plain' 0v1]])))
+    (expect !>(!(attaches-ok:auspex ~[one ['a' 262.145 'text/plain' 0v1]])))
   ==
 ::
 ::  name and mime are attacker-supplied and arrive PRE-SIGNED, so a
@@ -570,12 +572,12 @@
         ~[['f' 3 crlf 0v1]]
     ==
   ;:  weld
-    (expect !>((text-ok:urmail 'text/plain' 128)))
-    (expect !>(!(text-ok:urmail crlf 128)))
-    (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 lf 'b')) 128)))
-    (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 cr 'b')) 128)))
-    (expect !>(!(text-ok:urmail (cat 3 'a' (cat 3 del 'b')) 128)))
-    (expect !>(!(fits-attachments:urmail ~[bad] 16)))
+    (expect !>((text-ok:auspex 'text/plain' 128)))
+    (expect !>(!(text-ok:auspex crlf 128)))
+    (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 lf 'b')) 128)))
+    (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 cr 'b')) 128)))
+    (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 del 'b')) 128)))
+    (expect !>(!(fits-attachments:auspex ~[bad] 16)))
     ::  body-mime is checked exactly the same way, and for the same
     ::  reason: it is signed, so a recipient cannot repair it, and it is
     ::  headed for a render boundary.
@@ -592,12 +594,12 @@
   :_  ~
   =/  u=unsigned:sur
     [~sampel-palnet 1 (sy ~[~palnet-sampel]) 's' 'b' bm ~2026.1.1 ~ ~]
-  [u (sign-with:urmail (fake-ring:urmail ~sampel-palnet) (digest:urmail u))]
+  [u (sign-with:auspex (fake-ring:auspex ~sampel-palnet) (digest:auspex u))]
 ::
 ++  not-fits-mime
   |=  c=chain:sur
   ^-  ?
-  !(fits-body-mimes:urmail c max-mime:urmail)
+  !(fits-body-mimes:auspex c max-mime:auspex)
 ::
 ::  the eviction order: blobs no stored message mentions, oldest first.
 ::  A referenced blob is never evictable however old, and %delete-thread
@@ -613,12 +615,12 @@
   =/  hs  |=(l=(list blob-row:sur) (turn l |=(r=blob-row:sur h.r)))
   ;:  weld
     ::  0v2 and 0v4 are referenced, so 0v3 (older) then 0v1
-    (expect-eq !>(~[0v3 0v1]) !>((hs (unreferenced:urmail held (sy ~[0v2 0v4])))))
+    (expect-eq !>(~[0v3 0v1]) !>((hs (unreferenced:auspex held (sy ~[0v2 0v4])))))
     ::  nothing referenced: strict age order over all four
-    (expect-eq !>(~[0v2 0v3 0v1 0v4]) !>((hs (unreferenced:urmail held ~))))
+    (expect-eq !>(~[0v2 0v3 0v1 0v4]) !>((hs (unreferenced:auspex held ~))))
     ::  everything referenced: nothing is evictable, however old
-    (expect-eq !>(~) !>((hs (unreferenced:urmail held (sy ~[0v1 0v2 0v3 0v4])))))
-    (expect-eq !>(100) !>((held-bytes:urmail held)))
+    (expect-eq !>(~) !>((hs (unreferenced:auspex held (sy ~[0v1 0v2 0v3 0v4])))))
+    (expect-eq !>(100) !>((held-bytes:auspex held)))
   ==
 ::
 ::  +shed-for is what makes max-blobs a store that can be full rather
@@ -630,18 +632,18 @@
     ~[[0v1 ~2026.1.1 10] [0v2 ~2026.1.2 20]]
   ;:  weld
     ::  fits already: no shedding, and nothing is culled speculatively
-    (expect-eq !>([%.y ~]) !>((shed-for:urmail held (sy ~[0v1 0v2]) 0 0)))
+    (expect-eq !>([%.y ~]) !>((shed-for:auspex held (sy ~[0v1 0v2]) 0 0)))
     ::  over the COUNT bound and nothing is unreferenced: refuse, and
     ::  refuse with an empty drop list, so a caller that culls first and
     ::  checks second cannot lose files for nothing
-    (expect-eq !>([%.n ~]) !>((shed-for:urmail held (sy ~[0v1 0v2]) max-blobs:urmail 0)))
+    (expect-eq !>([%.n ~]) !>((shed-for:auspex held (sy ~[0v1 0v2]) max-blobs:auspex 0)))
     ::  over the COUNT bound, and shedding the unreferenced one is enough
-    (expect-eq !>([%.y ~[0v2]]) !>((shed-for:urmail held (sy ~[0v1]) (dec max-blobs:urmail) 0)))
+    (expect-eq !>([%.y ~[0v2]]) !>((shed-for:auspex held (sy ~[0v1]) (dec max-blobs:auspex) 0)))
     ::  the BYTE bound binds independently of the count: one blob, well
     ::  under max-blobs, and still no room
     %+  expect-eq  !>([%.y ~[0v1]])
-    !>  %^    shed-for:urmail
-            ~[[0v1 ~2026.1.1 max-blob-bytes:urmail]]
+    !>  %^    shed-for:auspex
+            ~[[0v1 ~2026.1.1 max-blob-bytes:auspex]]
           ~
         [1 100]
   ==
@@ -655,13 +657,13 @@
   =/  a
     %-  forge-with
     :*  ~sampel-palnet  (sy ~[~palnet-sampel])  'hi'  'see attached'
-        ~2026.1.1  ~  ~[(describe:urmail f)]
+        ~2026.1.1  ~  ~[(describe:auspex f)]
     ==
-  =/  swapped=msg:sur  a(attachments.unsigned ~[(describe:urmail g)])
+  =/  swapped=msg:sur  a(attachments.unsigned ~[(describe:auspex g)])
   =/  keys  (all-keys ~[~sampel-palnet])
   ;:  weld
-    (expect-eq !>(~[%verified]) !>((turn (verify-chain:urmail keys ~[a]) |=([* v=verdict:sur] v))))
-    (expect-eq !>(~[%forged]) !>((turn (verify-chain:urmail keys ~[swapped]) |=([* v=verdict:sur] v))))
+    (expect-eq !>(~[%verified]) !>((turn (verify-chain:auspex keys ~[a]) |=([* v=verdict:sur] v))))
+    (expect-eq !>(~[%forged]) !>((turn (verify-chain:auspex keys ~[swapped]) |=([* v=verdict:sur] v))))
   ==
 ::
 ::  the incoming bound applies per message, and a chain is rejected whole
@@ -681,10 +683,10 @@
   =/  big
     (forge-with ~sampel-palnet (sy ~[~palnet-sampel]) 's' 'b' ~2026.1.3 ~ ~[huge])
   ;:  weld
-    (expect !>((fits-attachments:urmail ~[ok] 2)))
-    (expect !>(!(fits-attachments:urmail ~[ok many] 2)))
+    (expect !>((fits-attachments:auspex ~[ok] 2)))
+    (expect !>(!(fits-attachments:auspex ~[ok many] 2)))
     ::  a size beyond max-blob is refused at the boundary whatever the count
-    (expect !>(!(fits-attachments:urmail ~[big] 16)))
+    (expect !>(!(fits-attachments:auspex ~[big] 16)))
   ==
 ::
 ::  +chain-hashes is what a reader walks to know which bytes it is missing.
@@ -697,11 +699,11 @@
   =/  b
     %-  forge-with
     :*  ~palnet-sampel  (sy ~[~sampel-palnet])  're'  'two'  ~2026.1.2
-        `(id:urmail unsigned.a)  ~[['h' 3 'text/plain' 0v2]]
+        `(id:auspex unsigned.a)  ~[['h' 3 'text/plain' 0v2]]
     ==
   %+  expect-eq
     !>  (sy ~[0v1 0v2])
-    !>  (chain-hashes:urmail ~[a b])
+    !>  (chain-hashes:auspex ~[a b])
 ::
 ::  THE PATHS. A blob is bound at its hash with NO revision segment: the
 ::  content is its own address, so there is nothing to discover and the
@@ -711,15 +713,15 @@
 ++  test-blob-paths-are-content-addressed
   =/  h  0v1.23456
   ;:  weld
-    (expect-eq !>(/urmail/blob/'0v1.23456') !>((blob-spur:urmail h)))
+    (expect-eq !>(/auspex/blob/'0v1.23456') !>((blob-spur:auspex h)))
     %+  expect-eq
-      !>  `path`[%g %x %'1' %grubbery %$ %'1' %urmail %blob '0v1.23456' ~]
-      !>  (blob-keen-path:urmail %grubbery h 1)
+      !>  `path`[%g %x %'1' %grubbery %$ %'1' %auspex %blob '0v1.23456' ~]
+      !>  (blob-keen-path:auspex %grubbery h 1)
     ::  the case is a segment of the path, so a probe at a later case is a
     ::  different read of the SAME immutable binding.
     %+  expect-eq
-      !>  `path`[%g %x %'2' %grubbery %$ %'1' %urmail %blob '0v1.23456' ~]
-      !>  (blob-keen-path:urmail %grubbery h 2)
+      !>  `path`[%g %x %'2' %grubbery %$ %'1' %auspex %blob '0v1.23456' ~]
+      !>  (blob-keen-path:auspex %grubbery h 2)
   ==
 ::
 ::  ── the thread as a tree ────────────────────────────────────────────
@@ -734,9 +736,9 @@
   |=  ~
   ^-  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]
   =/  r   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'root' ~2026.1.1 ~)
-  =/  ri  (id:urmail unsigned.r)
+  =/  ri  (id:auspex unsigned.r)
   =/  a   (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'subj' 'side one' ~2026.1.2 `ri)
-  =/  ai  (id:urmail unsigned.a)
+  =/  ai  (id:auspex unsigned.a)
   =/  a2  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'side two' ~2026.1.3 `ai)
   =/  b   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'other branch' ~2026.1.4 `ri)
   [r a a2 b]
@@ -744,18 +746,18 @@
 ::  a message's ancestry is the ids from the root down to it, inclusive.
 ++  test-ancestors-are-root-first
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  ps  (prev-map:urmail ~[r a a2 b])
+  =/  ps  (prev-map:auspex ~[r a a2 b])
   ;:  weld
     %+  expect-eq
-      !>  ~[(id:urmail unsigned.r)]
-      !>  (ancestors:urmail ps (id:urmail unsigned.r))
+      !>  ~[(id:auspex unsigned.r)]
+      !>  (ancestors:auspex ps (id:auspex unsigned.r))
     %+  expect-eq
-      !>  ~[(id:urmail unsigned.r) (id:urmail unsigned.a) (id:urmail unsigned.a2)]
-      !>  (ancestors:urmail ps (id:urmail unsigned.a2))
+      !>  ~[(id:auspex unsigned.r) (id:auspex unsigned.a) (id:auspex unsigned.a2)]
+      !>  (ancestors:auspex ps (id:auspex unsigned.a2))
     ::  B is a SIBLING of A, so A is nowhere in its ancestry.
     %+  expect-eq
-      !>  ~[(id:urmail unsigned.r) (id:urmail unsigned.b)]
-      !>  (ancestors:urmail ps (id:urmail unsigned.b))
+      !>  ~[(id:auspex unsigned.r) (id:auspex unsigned.b)]
+      !>  (ancestors:auspex ps (id:auspex unsigned.b))
   ==
 ::
 ::  the copies of one message share a `prev`, so they share a NODE: two
@@ -764,20 +766,20 @@
 ++  test-prev-map-is-keyed-by-id-not-signature
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
   =/  fake=msg:sur  r(sig 0xdead.beef)
-  =/  ps  (prev-map:urmail ~[r fake a])
+  =/  ps  (prev-map:auspex ~[r fake a])
   ;:  weld
     (expect-eq !>(2) !>(~(wyt by ps)))
     %+  expect-eq
-      !>  ~[(id:urmail unsigned.r)]
-      !>  (ancestors:urmail ps (id:urmail unsigned.r))
+      !>  ~[(id:auspex unsigned.r)]
+      !>  (ancestors:auspex ps (id:auspex unsigned.r))
   ==
 ::
 ::  THE LEAK, CLOSED. Forwarding B ships the path root-to-B; the sibling
 ::  branch, and everything under it, does not travel.
 ++  test-path-chain-omits-the-sibling-branch
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
-  =/  p=chain:sur  (path-chain:urmail c (id:urmail unsigned.b))
+  =/  c=chain:sur  (merge:auspex ~ ~[r a a2 b])
+  =/  p=chain:sur  (path-chain:auspex c (id:auspex unsigned.b))
   ;:  weld
     (expect-eq !>(~[r b]) !>(p))
     ::  stated again as the property, because the list above is the thing
@@ -789,10 +791,10 @@
 ::  and the deep branch travels whole when IT is what was forwarded.
 ++  test-path-chain-carries-the-whole-path
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
+  =/  c=chain:sur  (merge:auspex ~ ~[r a a2 b])
   %+  expect-eq
     !>  ~[r a a2]
-    !>  (path-chain:urmail c (id:urmail unsigned.a2))
+    !>  (path-chain:auspex c (id:auspex unsigned.a2))
 ::
 ::  a forwarded path is a VALID CHAIN on its own: it holds the unique
 ::  prev=~ root, every prev in it resolves inside it, and +thread-key
@@ -801,9 +803,9 @@
 ::  refused at the far end.
 ++  test-path-chain-is-a-fileable-chain
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
-  =/  p=chain:sur  (path-chain:urmail c (id:urmail unsigned.b))
-  =/  ids  (~(gas in *(set msg-id:sur)) (turn p |=(m=msg:sur (id:urmail unsigned.m))))
+  =/  c=chain:sur  (merge:auspex ~ ~[r a a2 b])
+  =/  p=chain:sur  (path-chain:auspex c (id:auspex unsigned.b))
+  =/  ids  (~(gas in *(set msg-id:sur)) (turn p |=(m=msg:sur (id:auspex unsigned.m))))
   =/  closed=?
     %+  levy  p
     |=(m=msg:sur ?~(prev.unsigned.m & (~(has in ids) u.prev.unsigned.m)))
@@ -811,8 +813,8 @@
     (expect-eq !>(1) !>((lent (skim p |=(m=msg:sur ?=(~ prev.unsigned.m))))))
     (expect !>(closed))
     %+  expect-eq
-      !>  (thread-key:urmail ~ c)
-      !>  (thread-key:urmail ~ p)
+      !>  (thread-key:auspex ~ c)
+      !>  (thread-key:auspex ~ p)
   ==
 ::
 ::  every copy at a node on the path travels, not one chosen copy.
@@ -821,8 +823,8 @@
 ++  test-path-chain-keeps-both-copies-of-a-node
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
   =/  fake=msg:sur  r(sig 0xdead.beef)
-  =/  c=chain:sur   (merge:urmail ~ ~[r fake b])
-  =/  p=chain:sur   (path-chain:urmail c (id:urmail unsigned.b))
+  =/  c=chain:sur   (merge:auspex ~ ~[r fake b])
+  =/  p=chain:sur   (path-chain:auspex c (id:auspex unsigned.b))
   ;:  weld
     (expect-eq !>(3) !>((lent p)))
     (expect !>((lien p |=(m=msg:sur =(sig.m sig.r)))))
@@ -837,10 +839,10 @@
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
   =/  lost
     (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'subj' 'orphan' ~2026.1.9 `0vdead)
-  =/  ps  (prev-map:urmail ~[r lost])
+  =/  ps  (prev-map:auspex ~[r lost])
   %+  expect-eq
-    !>  ~[(id:urmail unsigned.lost)]
-    !>  (ancestors:urmail ps (id:urmail unsigned.lost))
+    !>  ~[(id:auspex unsigned.lost)]
+    !>  (ancestors:auspex ps (id:auspex unsigned.lost))
 ::
 ::  a prev cycle TERMINATES. It needs a hash preimage loop and so cannot
 ::  really happen, but +ancestors runs on attacker-supplied input inside
@@ -848,7 +850,7 @@
 ++  test-ancestors-survives-a-cycle
   =/  ps=(map msg-id:sur (unit msg-id:sur))
     (malt ~[[0v1 `0v2] [0v2 `0v3] [0v3 `0v1]])
-  (expect !>((lte (lent (ancestors:urmail ps 0v1)) 4)))
+  (expect !>((lte (lent (ancestors:auspex ps 0v1)) 4)))
 ::
 ::  +with-root fires only for an orphan path. A well-formed path already
 ::  holds the root and comes back untouched; a rootless one gets the
@@ -856,11 +858,11 @@
 ::  whole chain.
 ++  test-with-root-only-adds-when-the-root-is-missing
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  c=chain:sur  (merge:urmail ~ ~[r a a2 b])
-  =/  good  (path-chain:urmail c (id:urmail unsigned.b))
+  =/  c=chain:sur  (merge:auspex ~ ~[r a a2 b])
+  =/  good  (path-chain:auspex c (id:auspex unsigned.b))
   ;:  weld
-    (expect-eq !>(good) !>((with-root:urmail c good)))
-    (expect-eq !>(~[r a]) !>((with-root:urmail c ~[a])))
+    (expect-eq !>(good) !>((with-root:auspex c good)))
+    (expect-eq !>(~[r a]) !>((with-root:auspex c ~[a])))
   ==
 ::
 ::  ── the forest, as storage paths ────────────────────────────────────
@@ -869,23 +871,23 @@
 ::  sibling directories under the message they both answer.
 ++  test-ancestor-map-places-siblings-side-by-side
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  am  (ancestor-map:urmail (merge:urmail ~ ~[r a a2 b]))
-  =/  ri  `@ta`(scot %uv (id:urmail unsigned.r))
-  =/  ai  `@ta`(scot %uv (id:urmail unsigned.a))
+  =/  am  (ancestor-map:auspex (merge:auspex ~ ~[r a a2 b]))
+  =/  ri  `@ta`(scot %uv (id:auspex unsigned.r))
+  =/  ai  `@ta`(scot %uv (id:auspex unsigned.a))
   ;:  weld
     %+  expect-eq
-      !>  `path`~[ri ai `@ta`(scot %uv (id:urmail unsigned.a2))]
-      !>  (id-path:urmail (~(got by am) (id:urmail unsigned.a2)))
+      !>  `path`~[ri ai `@ta`(scot %uv (id:auspex unsigned.a2))]
+      !>  (id-path:auspex (~(got by am) (id:auspex unsigned.a2)))
     %+  expect-eq
-      !>  `path`~[ri `@ta`(scot %uv (id:urmail unsigned.b))]
-      !>  (id-path:urmail (~(got by am) (id:urmail unsigned.b)))
+      !>  `path`~[ri `@ta`(scot %uv (id:auspex unsigned.b))]
+      !>  (id-path:auspex (~(got by am) (id:auspex unsigned.b)))
   ==
 ::
 ::  directories are made shallowest first: a directory needs its parent.
 ++  test-prefixes-are-shortest-first
   %+  expect-eq
     !>  ~[/a /a/b /a/b/c]
-    !>  (prefixes:urmail /a/b/c)
+    !>  (prefixes:auspex /a/b/c)
 ::
 ::  a copy path is <ancestry>/<slot>, so its directories are the prefixes
 ::  of everything but the slot. A ONE-SEGMENT path needs no directory at
@@ -893,12 +895,12 @@
 ::  how the migration recognises one.
 ++  test-node-dirs-drops-the-slot-and-keeps-the-ancestry
   ;:  weld
-    (expect-eq !>((sy ~[/a /a/b])) !>((node-dirs:urmail ~[/a/b/slot])))
-    (expect-eq !>(*(set path)) !>((node-dirs:urmail ~[/flat-slot])))
+    (expect-eq !>((sy ~[/a /a/b])) !>((node-dirs:auspex ~[/a/b/slot])))
+    (expect-eq !>(*(set path)) !>((node-dirs:auspex ~[/flat-slot])))
     ::  two branches under one node share that node's directory
     %+  expect-eq
       !>  (sy ~[/r /r/a /r/b])
-      !>  (node-dirs:urmail ~[/r/a/s1 /r/b/s2])
+      !>  (node-dirs:auspex ~[/r/a/s1 /r/b/s2])
   ==
 ::
 ::  culling a directory takes its subtree, so only the shallowest stale
@@ -907,9 +909,9 @@
 ++  test-minimal-dirs-and-under-any
   =/  ds  (sy ~[/r /r/a /r/a/b])
   ;:  weld
-    (expect-eq !>(~[/r]) !>((minimal-dirs:urmail ds)))
-    (expect !>((under-any:urmail /r/a/b/slot ds)))
-    (expect !>(!(under-any:urmail /other/slot ds)))
+    (expect-eq !>(~[/r]) !>((minimal-dirs:auspex ds)))
+    (expect !>((under-any:auspex /r/a/b/slot ds)))
+    (expect !>(!(under-any:auspex /other/slot ds)))
   ==
 ::
 ::  +max-ancestry is what the depth cap is measured against: the DEEPEST
@@ -918,12 +920,12 @@
 ++  test-max-ancestry-is-the-deepest-path
   =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
   ;:  weld
-    (expect-eq !>(3) !>((max-ancestry:urmail ~[r a a2 b])))
-    (expect-eq !>(1) !>((max-ancestry:urmail ~[r])))
-    (expect-eq !>(0) !>((max-ancestry:urmail ~)))
+    (expect-eq !>(3) !>((max-ancestry:auspex ~[r a a2 b])))
+    (expect-eq !>(1) !>((max-ancestry:auspex ~[r])))
+    (expect-eq !>(0) !>((max-ancestry:auspex ~)))
     ::  the cap refuses at the boundary the way every other one does
-    (expect !>((fits-depth:urmail ~[r a a2 b] 3)))
-    (expect !>(!(fits-depth:urmail ~[r a a2 b] 2)))
+    (expect !>((fits-depth:auspex ~[r a a2 b] 3)))
+    (expect !>(!(fits-depth:auspex ~[r a a2 b] 2)))
   ==
 ::
 ::  the signer cap counts the DISTINCT KEY SET, not the messages, because
@@ -944,15 +946,15 @@
   =/  a-later  a1(life.unsigned 2)
   ;:  weld
     ::  three messages, one signer: the cap is not a message count
-    (expect !>((fits-signers:urmail ~[a1 a2 a3] 1)))
+    (expect !>((fits-signers:auspex ~[a1 a2 a3] 1)))
     ::  three messages, three signers, refused at two
-    (expect !>((fits-signers:urmail ~[a1 b c] 3)))
-    (expect !>(!(fits-signers:urmail ~[a1 b c] 2)))
+    (expect !>((fits-signers:auspex ~[a1 b c] 3)))
+    (expect !>(!(fits-signers:auspex ~[a1 b c] 2)))
     ::  an empty chain names nobody and costs nothing
-    (expect !>((fits-signers:urmail ~ 0)))
+    (expect !>((fits-signers:auspex ~ 0)))
     ::  the same ship at two lives is two keys and two scries
-    (expect !>(!(fits-signers:urmail ~[a1 a-later] 1)))
-    (expect !>((fits-signers:urmail ~[a1 a-later] 2)))
+    (expect !>(!(fits-signers:auspex ~[a1 a-later] 1)))
+    (expect !>((fits-signers:auspex ~[a1 a-later] 2)))
   ==
 ::
 ::  ── the mail-client layer ───────────────────────────────────────────
@@ -968,24 +970,24 @@
 ::  HTTP connection that never answers.
 ++  test-label-ok-rejects-a-non-term
   ;:  weld
-    (expect !>((label-ok:urmail %work)))
-    (expect !>((label-ok:urmail %to-read-2)))
+    (expect !>((label-ok:auspex %work)))
+    (expect !>((label-ok:auspex %to-read-2)))
     ::  empty, capitalised, spaced, leading digit: none of them is a @tas
-    (expect !>(!(label-ok:urmail %$)))
-    (expect !>(!(label-ok:urmail `@tas`'Work')))
-    (expect !>(!(label-ok:urmail `@tas`'to read')))
-    (expect !>(!(label-ok:urmail `@tas`'2fa')))
-    (expect !>(!(label-ok:urmail `@tas`'work!')))
+    (expect !>(!(label-ok:auspex %$)))
+    (expect !>(!(label-ok:auspex `@tas`'Work')))
+    (expect !>(!(label-ok:auspex `@tas`'to read')))
+    (expect !>(!(label-ok:auspex `@tas`'2fa')))
+    (expect !>(!(label-ok:auspex `@tas`'work!')))
     ::  and the length cap
-    (expect !>((label-ok:urmail `@tas`(crip (reap 32 'a')))))
-    (expect !>(!(label-ok:urmail `@tas`(crip (reap 33 'a')))))
+    (expect !>((label-ok:auspex `@tas`(crip (reap 32 'a')))))
+    (expect !>(!(label-ok:auspex `@tas`(crip (reap 33 'a')))))
   ==
 ::
 ++  test-labels-ok-bounds-the-set
   ;:  weld
-    (expect !>((labels-ok:urmail (sy ~[%a %b %c]))))
+    (expect !>((labels-ok:auspex (sy ~[%a %b %c]))))
     ::  one bad member fails the set
-    (expect !>(!(labels-ok:urmail (sy ~[%a `@tas`'B']))))
+    (expect !>(!(labels-ok:auspex (sy ~[%a `@tas`'B']))))
   ==
 ::
 ::  the one string primitive the layer has. Case-insensitive on both
@@ -993,16 +995,16 @@
 ::  absent query mean "no filter" with no branch at any call site.
 ++  test-has-sub-is-case-insensitive
   ;:  weld
-    (expect !>((has-sub:urmail 'Quarterly Invoice' 'invoice')))
-    (expect !>((has-sub:urmail 'quarterly invoice' 'INVOICE')))
-    (expect !>((has-sub:urmail 'abc' 'abc')))
-    (expect !>((has-sub:urmail 'abc' 'a')))
-    (expect !>((has-sub:urmail 'abc' 'c')))
-    (expect !>(!(has-sub:urmail 'abc' 'abcd')))
-    (expect !>(!(has-sub:urmail '' 'a')))
+    (expect !>((has-sub:auspex 'Quarterly Invoice' 'invoice')))
+    (expect !>((has-sub:auspex 'quarterly invoice' 'INVOICE')))
+    (expect !>((has-sub:auspex 'abc' 'abc')))
+    (expect !>((has-sub:auspex 'abc' 'a')))
+    (expect !>((has-sub:auspex 'abc' 'c')))
+    (expect !>(!(has-sub:auspex 'abc' 'abcd')))
+    (expect !>(!(has-sub:auspex '' 'a')))
     ::  an empty needle is no constraint
-    (expect !>((has-sub:urmail 'abc' '')))
-    (expect !>((has-sub:urmail '' '')))
+    (expect !>((has-sub:auspex 'abc' '')))
+    (expect !>((has-sub:auspex '' '')))
   ==
 ::
 ::  search reads subject, body and the RENDERED sender, so typing part of
@@ -1010,13 +1012,13 @@
 ++  test-search-covers-subject-body-and-sender
   =/  m  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'Quarterly report' 'the numbers are in' ~2026.1.1 ~)
   ;:  weld
-    (expect !>((matches:urmail 'quarterly' unsigned.m)))
-    (expect !>((matches:urmail 'numbers' unsigned.m)))
-    (expect !>((matches:urmail 'sampel-palnet' unsigned.m)))
-    (expect !>(!(matches:urmail 'nothing here' unsigned.m)))
+    (expect !>((matches:auspex 'quarterly' unsigned.m)))
+    (expect !>((matches:auspex 'numbers' unsigned.m)))
+    (expect !>((matches:auspex 'sampel-palnet' unsigned.m)))
+    (expect !>(!(matches:auspex 'nothing here' unsigned.m)))
     ::  an empty query matches, so a listing with no search term is the
     ::  same code path as one with one
-    (expect !>((matches:urmail '' unsigned.m)))
+    (expect !>((matches:auspex '' unsigned.m)))
   ==
 ::
 ::  SEARCH FINDS A FORGED MESSAGE, and the row it produces is drawn from
@@ -1029,16 +1031,16 @@
   ::  a message ~marbud signed while claiming to be ~sampel-palnet: a
   ::  genuine signature over a lying `from`, which is what a forgery is.
   =/  liar  (fake-from ~marbud-marbud ~sampel-palnet 'invoice' 'PAY HERE INSTEAD' ~2026.1.2)
-  =/  c=chain:sur  (merge:urmail ~ ~[real liar])
+  =/  c=chain:sur  (merge:auspex ~ ~[real liar])
   ::  the newest match for a term only the forgery carries IS the forgery
-  =/  hit  (newest-match:urmail 'pay here' c)
+  =/  hit  (newest-match:auspex 'pay here' c)
   ::  and its verdict, computed the ordinary way, is %forged - so the row
   ::  this message produces is labelled forged
-  =/  vs  (verify-chain:urmail (all-keys ~[~sampel-palnet ~marbud-marbud]) c)
+  =/  vs  (verify-chain:auspex (all-keys ~[~sampel-palnet ~marbud-marbud]) c)
   ;:  weld
     ::  both copies are in the chain, and the query hits the forged one
     (expect-eq !>(2) !>((lent c)))
-    (expect !>((chain-matches:urmail 'pay here' c)))
+    (expect !>((chain-matches:auspex 'pay here' c)))
     (expect !>(?=(^ hit)))
     (expect-eq !>('PAY HERE INSTEAD') !>(?~(hit '' body.unsigned.u.hit)))
     (expect !>((lien vs |=([* v=verdict:sur] =(%forged v)))))
@@ -1048,7 +1050,7 @@
 ::  listing keep its own summary rule.
 ++  test-newest-match-is-empty-without-a-query
   =/  m  (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
-  (expect !>(?=(~ (newest-match:urmail '' ~[m]))))
+  (expect !>(?=(~ (newest-match:auspex '' ~[m]))))
 ::
 ::  INBOX IS PARTICIPANT OR DIRECT. The direct flag is what makes a BCC'd
 ::  recipient's mail visible at all: they are in neither `from` nor `to`
@@ -1058,37 +1060,37 @@
   =/  ps  (sy ~[~palnet-sampel ~marbud-marbud])
   ;:  weld
     ::  not a participant, not direct: not our inbox
-    (expect !>(!(in-inbox:urmail us ps | |)))
+    (expect !>(!(in-inbox:auspex us ps | |)))
     ::  the BCC case: not a participant, but it arrived here
-    (expect !>((in-inbox:urmail us ps | &)))
+    (expect !>((in-inbox:auspex us ps | &)))
     ::  an ordinary participant
-    (expect !>((in-inbox:urmail us (~(put in ps) us) | |)))
+    (expect !>((in-inbox:auspex us (~(put in ps) us) | |)))
     ::  archived beats both
-    (expect !>(!(in-inbox:urmail us (~(put in ps) us) & |)))
-    (expect !>(!(in-inbox:urmail us ps & &)))
+    (expect !>(!(in-inbox:auspex us (~(put in ps) us) & |)))
+    (expect !>(!(in-inbox:auspex us ps & &)))
   ==
 ::
 ++  test-sent-is-threads-we-authored
   =/  mine   (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
   =/  yours  (forge ~palnet-sampel ~ 'a' 'b' ~2026.1.1 ~)
   ;:  weld
-    (expect !>((in-sent:urmail ~sampel-palnet ~[yours mine])))
-    (expect !>(!(in-sent:urmail ~sampel-palnet ~[yours])))
-    (expect !>(!(in-sent:urmail ~sampel-palnet ~)))
+    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine])))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours])))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~)))
   ==
 ::
 ++  test-page-slices-without-losing-the-total
   =/  l=(list @ud)  ~[0 1 2 3 4 5 6 7 8 9]
   ;:  weld
-    (expect-eq !>(`(list @ud)`~[0 1 2]) !>((page:urmail l 0 3)))
-    (expect-eq !>(`(list @ud)`~[3 4 5]) !>((page:urmail l 3 3)))
+    (expect-eq !>(`(list @ud)`~[0 1 2]) !>((page:auspex l 0 3)))
+    (expect-eq !>(`(list @ud)`~[3 4 5]) !>((page:auspex l 3 3)))
     ::  a page past the end is empty, not a crash
-    (expect-eq !>(`(list @ud)`~) !>((page:urmail l 100 3)))
+    (expect-eq !>(`(list @ud)`~) !>((page:auspex l 100 3)))
     ::  a partial last page
-    (expect-eq !>(`(list @ud)`~[9]) !>((page:urmail l 9 3)))
+    (expect-eq !>(`(list @ud)`~[9]) !>((page:auspex l 9 3)))
     ::  limit 0 is an empty page, literally. The route defaults an
     ::  ABSENT limit rather than reading 0 as "everything".
-    (expect-eq !>(`(list @ud)`~) !>((page:urmail l 0 0)))
+    (expect-eq !>(`(list @ud)`~) !>((page:auspex l 0 0)))
   ==
 ::
 ::  A DRAFT IS NOT A MESSAGE, and the shapes are what enforce it: the
@@ -1111,9 +1113,9 @@
   =/  fat=draft:sur  ok(body (crip (reap 100.001 'a')))
   =/  loud=draft:sur  ok(subj (crip (reap 1.001 'a')))
   ;:  weld
-    (expect !>((draft-ok:urmail ok)))
-    (expect !>(!(draft-ok:urmail fat)))
-    (expect !>(!(draft-ok:urmail loud)))
+    (expect !>((draft-ok:auspex ok)))
+    (expect !>(!(draft-ok:auspex fat)))
+    (expect !>(!(draft-ok:auspex loud)))
   ==
 ::
 ::  a rule with no condition matches everything, and with `archive` set
@@ -1124,10 +1126,10 @@
   =/  by-subj=rule:sur  [%0 0v1 ~ `'invoice' ~ &]
   =/  bad-label=rule:sur  by-from(add (sy ~[`@tas`'Work']))
   ;:  weld
-    (expect !>(!(rule-ok:urmail none)))
-    (expect !>((rule-ok:urmail by-from)))
-    (expect !>((rule-ok:urmail by-subj)))
-    (expect !>(!(rule-ok:urmail bad-label)))
+    (expect !>(!(rule-ok:auspex none)))
+    (expect !>((rule-ok:auspex by-from)))
+    (expect !>((rule-ok:auspex by-subj)))
+    (expect !>(!(rule-ok:auspex bad-label)))
   ==
 ::
 ::  AN EMPTY SUBJECT IS NOT A CONDITION. [~ ''] is a cell, so a presence
@@ -1141,15 +1143,15 @@
   =/  real=rule:sur    [%0 0v1 ~ `'invoice' (sy ~[%everything]) &]
   =/  m  (forge ~sampel-palnet ~ 'anything at all' 'body' ~2026.1.1 ~)
   ;:  weld
-    (expect !>(!(rule-ok:urmail hollow)))
-    (expect !>((rule-ok:urmail real)))
+    (expect !>(!(rule-ok:auspex hollow)))
+    (expect !>((rule-ok:auspex real)))
     ::  an empty sender-less rule paired with a real sender is fine: the
     ::  refusal is about having NO condition, not about the empty cord
     ::  being poisonous
-    (expect !>((rule-ok:urmail hollow(from `~sampel-palnet))))
+    (expect !>((rule-ok:auspex hollow(from `~sampel-palnet))))
     ::  and the reason it has to be refused: it matches everything
-    (expect !>((rule-matches:urmail hollow unsigned.m)))
-    (expect !>(!(rule-matches:urmail real unsigned.m)))
+    (expect !>((rule-matches:auspex hollow unsigned.m)))
+    (expect !>(!(rule-matches:auspex real unsigned.m)))
   ==
 ::
 ++  test-rule-matches-and-across-its-conditions
@@ -1158,11 +1160,11 @@
   =/  wrong-who=rule:sur  both(from `~palnet-sampel)
   =/  wrong-what=rule:sur  both(subject `'receipt')
   ;:  weld
-    (expect !>((rule-matches:urmail both unsigned.m)))
-    (expect !>(!(rule-matches:urmail wrong-who unsigned.m)))
-    (expect !>(!(rule-matches:urmail wrong-what unsigned.m)))
+    (expect !>((rule-matches:auspex both unsigned.m)))
+    (expect !>(!(rule-matches:auspex wrong-who unsigned.m)))
+    (expect !>(!(rule-matches:auspex wrong-what unsigned.m)))
     ::  an absent condition is not a condition
-    (expect !>((rule-matches:urmail both(subject ~) unsigned.m)))
+    (expect !>((rule-matches:auspex both(subject ~) unsigned.m)))
   ==
 ::
 ::  A FILTER MAY ADD LABELS AND ARCHIVE, AND NOTHING ELSE. There is no
@@ -1175,12 +1177,12 @@
   =/  r1=rule:sur  [%0 0v1 `~sampel-palnet ~ (sy ~[%work]) |]
   =/  r2=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) &]
   =/  r3=rule:sur  [%0 0v3 `~palnet-sampel ~ (sy ~[%never]) &]
-  =/  got  (apply-rules:urmail ~[r1 r2 r3] c)
+  =/  got  (apply-rules:auspex ~[r1 r2 r3] c)
   ::  no rule fires: no labels, and NOT archived. A bare ? bunts to %.y,
   ::  so an accumulator-shaped fold here would archive everything the
   ::  moment no rule matched.
-  =/  quiet  (apply-rules:urmail ~[r3] c)
-  =/  none   (apply-rules:urmail ~ c)
+  =/  quiet  (apply-rules:auspex ~[r3] c)
+  =/  none   (apply-rules:auspex ~ c)
   ;:  weld
     ::  the two matching rules' labels union; the non-matching one adds
     ::  nothing
@@ -1200,16 +1202,16 @@
 ++  test-a-filter-cannot-hide-a-forgery
   =/  real  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'invoice' 'the real one' ~2026.1.1 ~)
   =/  liar  (fake-from ~marbud-marbud ~sampel-palnet 'invoice' 'pay here instead' ~2026.1.2)
-  =/  c=chain:sur  (merge:urmail ~ ~[real liar])
+  =/  c=chain:sur  (merge:auspex ~ ~[real liar])
   ::  a rule aimed squarely at this thread, archiving it
   =/  r=rule:sur  [%0 0v1 `~sampel-palnet `'invoice' (sy ~[%quarantine]) &]
-  =/  got  (apply-rules:urmail ~[r] c)
+  =/  got  (apply-rules:auspex ~[r] c)
   ;:  weld
     (expect !>(archive.got))
     (expect-eq !>((sy ~[%quarantine])) !>(add.got))
     ::  and the chain the rule was applied to is UNCHANGED: both copies,
     ::  the forgery included, are still there to be stored and shown
     (expect-eq !>(2) !>((lent c)))
-    (expect !>((chain-matches:urmail 'pay here' c)))
+    (expect !>((chain-matches:auspex 'pay here' c)))
   ==
 --

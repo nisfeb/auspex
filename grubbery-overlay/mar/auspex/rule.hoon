@@ -1,4 +1,4 @@
-::  mar/urmail/rule: one delivery FILTER, at /mail/rule/<id>.
+::  mar/auspex/rule: one delivery FILTER, at /mail/rule/<id>.
 ::
 ::    A rule may add labels and it may archive. There is no field here
 ::    for deleting, rejecting or marking read, and that absence is the
@@ -9,7 +9,7 @@
 ::
 ::    Noun passthrough, like every other persisted marc here.
 ::
-/<  uc  /lib/urmail-chain.hoon
+/<  uc  /lib/auspex-chain.hoon
 |_  n=*
 ++  grad  %noun
 ++  grow

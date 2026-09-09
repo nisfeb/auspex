@@ -1,4 +1,4 @@
-::  Unit tests for /lib/urmail-web: the JSON request decoders.
+::  Unit tests for /lib/auspex-web: the JSON request decoders.
 ::
 ::    Every case a browser can produce, plus the cases only a broken or
 ::    hostile client produces. The point of these is the second group: a
@@ -6,7 +6,7 @@
 ::    fiber is a connection that never answers, so "returns ~" is the
 ::    behaviour under test, not an afterthought.
 ::
-/+  *test, web=urmail-web
+/+  *test, web=auspex-web
 |%
 ::  +jo: parse a JSON literal, so each case below reads as the bytes the
 ::  browser actually sends rather than as a hand-built $json tree.

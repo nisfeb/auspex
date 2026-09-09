@@ -1,4 +1,4 @@
-::  mar/urmail/blob-in: a fetch fiber's answer, poked at the writer.
+::  mar/auspex/blob-in: a fetch fiber's answer, poked at the writer.
 ::
 ::    A NOUN PASSTHROUGH, and the reversal of an earlier decision that
 ::    is worth stating rather than quietly undoing.

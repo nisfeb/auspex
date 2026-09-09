@@ -1,4 +1,4 @@
-::  mar/urmail/msg: one stored signed copy, at /mail/thread/<tid>/msg/<slot>.
+::  mar/auspex/msg: one stored signed copy, at /mail/thread/<tid>/msg/<slot>.
 ::
 ::    A NOUN PASSTHROUGH, deliberately. A marc written `|_ s=stored-msg:uc`
 ::    re-validates every stored grub against the live type on every read, so
@@ -13,7 +13,7 @@
 ::    the same reason: a shape it does not recognise must not crash the
 ::    reader, only render as unreadable.
 ::
-/<  uc  /lib/urmail-chain.hoon
+/<  uc  /lib/auspex-chain.hoon
 |_  n=*
 ++  grad  %noun
 ++  grow

@@ -1,7 +1,7 @@
-# urmail — the web client
+# auspex — the web client
 
-React + TypeScript + Vite. It talks to the **urmail grubbery nexus**: every call
-is a same-origin `fetch` against a route the nexus binds under `/apps/urmail`,
+React + TypeScript + Vite. It talks to the **auspex grubbery nexus**: every call
+is a same-origin `fetch` against a route the nexus binds under `/apps/auspex`,
 carrying the session cookie Eyre already set. There is no ship name to
 configure and no way to aim the client at one ship while authenticating
 against another, because it is served *by* the ship it talks to and asks that
@@ -11,13 +11,13 @@ ship who it is.
 
 | | |
 |---|---|
-| `GET /apps/urmail/api/whoami` | our own `@p`, so a reply can drop us from its recipients |
-| `GET /apps/urmail/api/inbox` | the thread listing |
-| `GET /apps/urmail/api/thread/<id>` | one thread, every message with its own verdict |
-| `POST /apps/urmail/api/send` | compose, reply and forward — all one action |
-| `POST /apps/urmail/api/read` | mark one message read |
-| `POST /apps/urmail/api/delete-thread` | remove a thread from this ship |
-| `GET /grubbery/api/keep/apps/urmail.urmail_app/beacon/rev` | grubbery's keep-SSE stream over the nexus's change beacon |
+| `GET /apps/auspex/api/whoami` | our own `@p`, so a reply can drop us from its recipients |
+| `GET /apps/auspex/api/inbox` | the thread listing |
+| `GET /apps/auspex/api/thread/<id>` | one thread, every message with its own verdict |
+| `POST /apps/auspex/api/send` | compose, reply and forward — all one action |
+| `POST /apps/auspex/api/read` | mark one message read |
+| `POST /apps/auspex/api/delete-thread` | remove a thread from this ship |
+| `GET /grubbery/api/keep/apps/auspex.auspex_app/beacon/rev` | grubbery's keep-SSE stream over the nexus's change beacon |
 
 Every route is owner-gated and every response is JSON, errors included, so the
 client has one shape to parse and one failure to render.
@@ -35,9 +35,9 @@ npm run build
 ```
 
 The output is **not** `dist/`. It lands in
-`../grubbery-overlay/nex/urmail/ui-app/` as exactly four files — `index.html`,
+`../grubbery-overlay/nex/auspex/ui-app/` as exactly four files — `index.html`,
 `app.js`, `manifest.json` and `sw.js` — which the nexus lays down as grubs in
-`+on-load` and serves under `/apps/urmail/`. The CSS is inlined into the shell
+`+on-load` and serves under `/apps/auspex/`. The CSS is inlined into the shell
 and the build fails rather than emit a fifth: every asset request costs about
 two seconds on a serialized pier and burns its own request fiber, which is why
 lattice ships one document plus one script and why the *app* here is still one
@@ -45,7 +45,7 @@ document and one script. The manifest and the service worker are not part of
 that budget — the browser fetches each once, not the app.
 
 `sw.js` is copied from `ui/sw.js` rather than bundled (it is not a module of
-the app), with a build hash stamped into `__URMAIL_BUILD__` as its cache key;
+the app), with a build hash stamped into `__AUSPEX_BUILD__` as its cache key;
 `manifest.json` is copied from `ui/public/`. It is called `.json` and not
 `.webmanifest` because grubbery converts each non-hoon gub file to a `%mime`
 grub through the clay tube for its extension, and this desk has no
@@ -89,9 +89,9 @@ npm run dev                                     # ~wex, http://localhost:8081
 SHIP_URL=http://localhost:8080 npm run dev      # ~feb
 ```
 
-Open **http://localhost:5173/apps/urmail/**, not the bare root: the client
-builds every URL from `/apps/urmail`, so serving it anywhere else would only
-work by accident. The dev server proxies `/apps/urmail/api` and `/grubbery` to
+Open **http://localhost:5173/apps/auspex/**, not the bare root: the client
+builds every URL from `/apps/auspex`, so serving it anywhere else would only
+work by accident. The dev server proxies `/apps/auspex/api` and `/grubbery` to
 that ship, so the module graph is local and every request that matters is the
 ship's own answer. Both proxied prefixes need the ship's session cookie — log
 into it in the same browser first, or the nexus answers 403 and the client
@@ -99,5 +99,5 @@ surfaces that as an error rather than as empty state.
 
 What `vite dev` does **not** serve is the shell the nexus lays down; it serves
 Vite's own `index.html`. Everything about how the built page is assembled — CSS
-inlining, the two-grub shape, the absolute `/apps/urmail/` asset URLs — is only
+inlining, the two-grub shape, the absolute `/apps/auspex/` asset URLs — is only
 exercised by `npm run build`. Build once before deploying, not only at the end.

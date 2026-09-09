@@ -1,4 +1,4 @@
-::  mar/urmail/blob: one attachment's BYTES, at /mail/blob/<hash>.
+::  mar/auspex/blob: one attachment's BYTES, at /mail/blob/<hash>.
 ::
 ::    The dumbest marc in the overlay, on purpose. A blob is bytes, the
 ::    grub name is their content address, and there is nothing here worth
@@ -22,7 +22,7 @@
 ::    on the bytes below it. Read the file as: take `size`, take the hex,
 ::    left-pad with zeros to `size` bytes, LITTLE-ENDIAN.
 ::
-/<  uc  /lib/urmail-chain.hoon
+/<  uc  /lib/auspex-chain.hoon
 |_  n=*
 ++  grad  %noun
 ++  grow

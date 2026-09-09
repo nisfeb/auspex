@@ -1,10 +1,10 @@
-# urmail — design
+# auspex — design
 
 Date: 2026-09-07, rewritten 2026-09-08
 Status: current. This describes the shipping build — a grubbery nexus — and
 nothing else. Where it states a limit or a cost, that limit is in the code.
 
-urmail was first built as a Gall agent. That build is gone; see `## History`
+auspex was first built as a Gall agent. That build is gone; see `## History`
 at the end for what it was and where it lives now. Nothing in this document
 describes it.
 
@@ -14,11 +14,11 @@ An Urbit-native mail application. It gives you the UX of email — an inbox,
 threads, compose, reply, forward, attachments — without SMTP, IMAP, MIME, or
 any of the machinery that makes email what it is.
 
-It does not bridge to internet email. Both ends run urmail.
+It does not bridge to internet email. Both ends run auspex.
 
 It ships as a **grubbery nexus**: an overlay distributed into the `%grubbery`
 desk, the same way lattice is, owning a subtree of grubbery's ball and serving
-its own HTTP surface under `/apps/urmail`.
+its own HTTP surface under `/apps/auspex`.
 
 ## Why it is not a chat app
 
@@ -55,7 +55,7 @@ and `~feb`.
 ::  our private key ring for a given life
 =/  ring  .^(ring %j /(scot %p our)/vein/(scot %da now)/(scot %ud life))
 =/  cor   (nol:nu:cric:crypto ring)
-=/  sig   (sigh:as:cor (shaf %urmail (sham unsigned)))
+=/  sig   (sigh:as:cor (shaf %auspex (sham unsigned)))
 ```
 
 The `%vein` scry is gated on the requesting ship being `our`, which the nexus
@@ -63,11 +63,11 @@ always is.
 
 ### Domain separation is mandatory
 
-The signature is over `(shaf %urmail (sham unsigned))`, never over raw message
-bytes — `+digest` in `lib/urmail-chain.hoon`. The ship's networking key also
+The signature is over `(shaf %auspex (sham unsigned))`, never over raw message
+bytes — `+digest` in `lib/auspex-chain.hoon`. The ship's networking key also
 signs Ames packets and attestations. A signature produced over attacker-chosen
 bytes with that key is a forgery primitive if the byte space overlaps. The
-`%urmail` salt makes the preimage space disjoint from every other use of the
+`%auspex` salt makes the preimage space disjoint from every other use of the
 key.
 
 This is not optional and it is not a performance question.
@@ -80,7 +80,7 @@ This is not optional and it is not a performance question.
               /(scot %p our)/puby/(scot %da now)/(scot %p from)/(scot %ud life)
           ==)
 ?~  pub  %unverified
-?:  (safe:as:(com:nu:cric:crypto pass.u.pub) sig (shaf %urmail (sham unsigned)))
+?:  (safe:as:(com:nu:cric:crypto pass.u.pub) sig (shaf %auspex (sham unsigned)))
   %verified
 %forged
 ```
@@ -99,7 +99,7 @@ date, and no test can scry jael at all, since a test arm has no bowl.
 Therefore the crypto splits in two: **pure gates** that take keys as arguments
 and do all the signing, verifying and digesting, and **thin wrappers** that
 only the nexus calls, with a live `now`. Everything worth testing lives on the
-pure side, in `lib/urmail-chain.hoon`, which scries nothing. This split is what
+pure side, in `lib/auspex-chain.hoon`, which scries nothing. This split is what
 made the port to a nexus cheap, and it is the same discipline the overlay
 import rule enforces below.
 
@@ -344,7 +344,7 @@ supplying a default misrepresents nothing.
 /tr/last                                  the last writer outcome, as json
 /app/index.html                           the built client: one shell,
 /app/app.js                               css inlined, and one script
-/ui/main.sig                              binds /apps/urmail
+/ui/main.sig                              binds /apps/auspex
 /ui/requests/<id>                         one ephemeral fiber per HTTP request
 /beacon/rev                               the change beacon; nested, never at
                                           the nexus root
@@ -384,8 +384,8 @@ ephemeral fibers and never touch it.
 may hand us a chain. `src` is deliberately not checked against the participants
 on delivery: the signatures are the authority, not the courier. The grant is a
 road, not a mark, so a peer that can deliver a chain can also address the local
-action marc at the writer — the writer's source check on `%urmail-action` and
-`%urmail-blob-in` is what makes that harmless.
+action marc at the writer — the writer's source check on `%auspex-action` and
+`%auspex-blob-in` is what makes that harmless.
 
 **THE WRITER MUST NOT CRASH.** `+rise-wait` restarts a failed process by
 *consuming the next poke without processing it*, so a crash on bad input eats
@@ -418,13 +418,13 @@ for a change that had already landed locally.
 
 ## Marcs
 
-Every path ships a marc. Persisted, under `mar/urmail/`: `msg`, `meta`, `idx`,
+Every path ships a marc. Persisted, under `mar/auspex/`: `msg`, `meta`, `idx`,
 `draft`, `rule`, `blob`, `blobvis`, `fetchreq`, `blob-in`. Wire, at the top level of `gub/mar/`:
-`urmail-chain` (a whole signed chain, poked by any ship) and `urmail-action`
+`auspex-chain` (a whole signed chain, poked by any ship) and `auspex-action`
 (the local action). A wire marc must be top-level, because a blot with a path
 prefix is unreachable from the two surfaces a peer actually uses — the
 `%grub-cmd` agent surface flattens a blot to its bare name, and a dojo poke
-names a bare mark. The `urmail-` prefix keeps a top-level file in a shared tree
+names a bare mark. The `auspex-` prefix keeps a top-level file in a shared tree
 from shadowing grubbery's own.
 
 **Every marc is `|_ n=*` with `++ grab ++ noun *` — wire marcs included.** Two
@@ -491,20 +491,20 @@ runtime surface can set one — grubbery's HTTP `PUT /dir` and `sur/grub`'s
 `%make-dir` both lay `[~ ~ %.n ~]`. Two paths, and both are needed:
 
 - **The durable one** is a covering row in grubbery's own `lib/root.hoon`:
-  `[%fall %| /apps/'urmail.urmail_app' [`[`[/urmail %app] ~ %.n ~] ~]]`.
+  `[%fall %| /apps/'auspex.auspex_app' [`[`[/auspex %app] ~ %.n ~] ~]]`.
   Lattice's row sits beside it and this is the established pattern for an
   overlay distribution. That file is outside this repo, so **a grubbery pull
-  reverts it** — a cost urmail shares with lattice. `sync-overlay.sh`
+  reverts it** — a cost auspex shares with lattice. `sync-overlay.sh`
   deliberately does not write it (an overlay that silently edits its host's
   sources is how the `obelisk-ast` clobber happened); it greps for the row and
   prints the line to add. The check is the mitigation, not a fix.
 - **The fresh-ship bootstrap** is `create_folder {path:'/apps',
-  name:'urmail.urmail_app', nexus:'/urmail/app'}` over the grubbery MCP. Both
+  name:'auspex.auspex_app', nexus:'/auspex/app'}` over the grubbery MCP. Both
   arguments are load-bearing and each is wrong in a different way: a `nexus` of
-  `/urmail` yields the neck `[~ %urmail]`, which looks for a flat
-  `/nex/urmail.hoon` that does not exist, the build fails, and `make` banks an
+  `/auspex` yields the neck `[~ %auspex]`, which looks for a flat
+  `/nex/auspex.hoon` that does not exist, the build fails, and `make` banks an
   **empty node** — scries return nothing and no writer spawns. A `name` of
-  `urmail` rather than the compound `urmail.urmail_app` keys the node where
+  `auspex` rather than the compound `auspex.auspex_app` keys the node where
   nothing looks for it, and writer pokes crash with `inert: no handler` even
   though the tree seeded fine.
 
@@ -512,8 +512,8 @@ Editing the source afterwards does **not** re-seed a wrong-neck node; reload
 gates on neck-match. A bad install has to be removed and redone.
 
 `%register`'s overlap pruning is safe against lattice: `is-prefix` between
-`/apps/urmail.urmail_app` and `/apps/lattice.lattice_app` is false in both
-directions, so registering urmail cannot evict lattice's registration.
+`/apps/auspex.auspex_app` and `/apps/lattice.lattice_app` is false in both
+directions, so registering auspex cannot evict lattice's registration.
 
 ## Which overlay libs may import, and what it costs
 
@@ -529,13 +529,13 @@ built:
   tested.
 
 The rule that follows: **anything worth testing goes in an import-free lib, and
-the nexus glue may import freely.** `lib/urmail-chain.hoon` and
-`lib/urmail-web.hoon` are both import-free and carry all 71 tests between them.
+the nexus glue may import freely.** `lib/auspex-chain.hoon` and
+`lib/auspex-web.hoon` are both import-free and carry all 71 tests between them.
 They stay that way. Types live in the same core as the logic rather than in a
 `sur/`, because an overlay has no `sur/`.
 
 `gub/lib` is shared with grubbery's own libraries, so every file takes an
-`urmail-` prefix to avoid shadowing.
+`auspex-` prefix to avoid shadowing.
 
 ---
 
@@ -544,7 +544,7 @@ They stay that way. Types live in the same core as the logic rather than in a
 The chain travels whole on every send, so bytes must not live in the chain. The
 message carries `name`, `size`, `mime` and `hash` inside `unsigned`, therefore
 signed; the bytes live at `/mail/blob/<hash>` and are published into gall's
-remote-scry farm at `/urmail/blob/<hash>`.
+remote-scry farm at `/auspex/blob/<hash>`.
 
 - Sending stores the bytes locally, puts the hash in the message, signs, ships
   the path as before. Bytes are stored and published **before** the chain goes
@@ -564,7 +564,7 @@ reachable: a message could carry a signed `[name size mime hash]`, the bytes
 could sit at `/mail/blob/<hash>`, and no route moved a single byte between the
 browser and the ship.
 
-**The bytes go up on a route of their own.** `POST /apps/urmail/api/blob` takes
+**The bytes go up on a route of their own.** `POST /apps/auspex/api/blob` takes
 the file as its request body, `application/octet-stream`, nothing wrapped
 around it — the browser passes the `File` handle to `fetch`, which streams it,
 so the client never holds a byte of it in memory. The route hashes what it was
@@ -610,7 +610,7 @@ exactly what the first upload answered.
 The transport this replaced was **base64 inside the JSON `/api/send` body**,
 and it was argued for from a `+de:json:html` benchmark — a 32MB body
 round-trips in ~1.3s — which was real and was not that code's number. `+de:json`
-is jetted; the base64 decoder was urmail's own, an interpreted loop running once
+is jetted; the base64 decoder was auspex's own, an interpreted loop running once
 per character of the encoding (~350K times for one `max-blob` file, sixteen of
 those in a send) on the request fiber holding the connection open. Rewritten
 around a table lookup it still cost **~1.0s per file and 18.7s for the
@@ -734,7 +734,7 @@ press Send.
 Per the mesa work done on lattice, the keen is the kernel scry farm and is the
 *only permissionless channel* — peeks and keeps are both weir-gated, and a
 cross-ship peek between un-granted peers hangs rather than failing. That
-asymmetry is exactly what urmail wants: any ship holding the bytes can serve
+asymmetry is exactly what auspex wants: any ship holding the bytes can serve
 them, and the hash proves them.
 
 Two details the namespace forces:
@@ -742,7 +742,7 @@ Two details the namespace forces:
 - The keen path must mirror `+blob-spur` exactly or every read misses forever,
   and it is built by cons because it contains **the empty segment**, which a
   path literal cannot spell and nobody notices is missing: `/g/x/<case>/<agent>/
-  ''/1/urmail/blob/<hash>`, where `<agent>` is `%grubbery` — the yoke, not the
+  ''/1/auspex/blob/<hash>`, where `<agent>` is `%grubbery` — the yoke, not the
   nexus.
 - There is **no revision segment**. A blob's bytes are fixed by its name, so a
   content-addressed spur binds at case 1 and a re-grow of the same bytes leaves
@@ -990,7 +990,7 @@ covers the sending half of this case; this is the reading half.
 
 # The web surface
 
-Every route is owner-gated. urmail has no unauthenticated surface at all — no
+Every route is owner-gated. auspex has no unauthenticated surface at all — no
 clearweb view, no public form, no unauthenticated asset — and every response,
 errors included, is JSON, so the client has one shape to parse. Eyre's
 authentication flag carries the shell and the script; every API route compares
@@ -1001,18 +1001,18 @@ where there is nothing to mutate, keep the flag alone.
 
 | Method | Route | |
 |---|---|---|
-| GET | `/apps/urmail` | the shell |
-| GET | `/apps/urmail/app.js` | the script |
-| GET | `/apps/urmail/api/whoami` | our own `@p` |
-| GET | `/apps/urmail/api/inbox` | the listing |
-| GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
-| GET | `/apps/urmail/icon.svg` | the launcher tile's icon |
-| GET | `/apps/urmail/api/blob/<hash>` | one attachment's bytes |
-| POST | `/apps/urmail/api/blob` | one attachment's bytes, up — the body IS the file |
-| POST | `/apps/urmail/api/send` | compose, reply and forward, naming uploaded files |
-| POST | `/apps/urmail/api/read` | mark a set of messages read |
-| POST | `/apps/urmail/api/fetch-blob` | pull an attachment's bytes from a peer |
-| POST | `/apps/urmail/api/delete-thread` | remove a thread from this ship |
+| GET | `/apps/auspex` | the shell |
+| GET | `/apps/auspex/app.js` | the script |
+| GET | `/apps/auspex/api/whoami` | our own `@p` |
+| GET | `/apps/auspex/api/inbox` | the listing |
+| GET | `/apps/auspex/api/thread/<id>` | one thread, every copy with its verdict |
+| GET | `/apps/auspex/icon.svg` | the launcher tile's icon |
+| GET | `/apps/auspex/api/blob/<hash>` | one attachment's bytes |
+| POST | `/apps/auspex/api/blob` | one attachment's bytes, up — the body IS the file |
+| POST | `/apps/auspex/api/send` | compose, reply and forward, naming uploaded files |
+| POST | `/apps/auspex/api/read` | mark a set of messages read |
+| POST | `/apps/auspex/api/fetch-blob` | pull an attachment's bytes from a peer |
+| POST | `/apps/auspex/api/delete-thread` | remove a thread from this ship |
 
 The mail-client writes are the same shape and are listed in
 `+handle-request`: `unread`, `label`, `archive`, `draft`, `draft-delete`,
@@ -1046,7 +1046,7 @@ default was silent: aimed at one ship and authenticating as another, with nothin
 obviously wrong until every call failed.
 
 **Live updates are the beacon, not polling.** The client streams
-`/grubbery/api/keep/apps/urmail.urmail_app/beacon/rev` and, on a change, refetches
+`/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev` and, on a change, refetches
 the listing and whatever thread it is showing. The beacon says *that* the tree
 changed, not which thread changed, so one event costs one thread refetch rather
 than one per thread. Polling was the fallback and is not needed: a poll interval
@@ -1170,10 +1170,10 @@ install. `sync-overlay.sh` checks and prints; it does not write.
 # Testing
 
 71 tests, in two import-free overlay libs, run with
-`-test /=grubbery=/tests/lib/urmail-chain ~` and
-`-test /=grubbery=/tests/lib/urmail-web ~`:
+`-test /=grubbery=/tests/lib/auspex-chain ~` and
+`-test /=grubbery=/tests/lib/auspex-web ~`:
 
-- **`tests/lib/urmail-chain.hoon` — 56 tests.** Signing and verification
+- **`tests/lib/auspex-chain.hoon` — 56 tests.** Signing and verification
   round-trips, tamper detection on every signed field including `life` and
   `body-mime`, the three verdicts, `[id sig]` anti-shadowing through `+merge`,
   `+prune`'s verdict ordering and its refusal to shed a `%verified` copy,
@@ -1181,7 +1181,7 @@ install. `sync-overlay.sh` checks and prints; it does not write.
   predicates, blob eviction, and the tree arms — `+ancestors` on orphans and
   cycles, `+path-chain`, `+with-root`, and the path algebra the storage layer
   uses.
-- **`tests/lib/urmail-web.hoon` — 15 tests.** The JSON request decoders: the one
+- **`tests/lib/auspex-web.hoon` — 15 tests.** The JSON request decoders: the one
   part of the HTTP path no Hoon type has checked, most of them on what a
   malformed body does.
 
@@ -1418,13 +1418,13 @@ would stop the moment someone started typing a name.
 
 `/tile.json` and `/icon.svg`, both `%over` rows in `+on-load`, exactly as
 lattice lays its own. The launcher lists only apps that carry a tile;
-without it urmail is installed, running, serving and invisible from the
+without it auspex is installed, running, serving and invisible from the
 grubbery home screen, which reads as "not installed" to everyone but the
 person who types the route by hand. `image` names the app **slug** — the
-name before the first dot in `/apps/urmail.urmail_app` — not the folder.
+name before the first dot in `/apps/auspex.auspex_app` — not the folder.
 
 The icon is a **nexus-root grub with a route of its own**, `GET
-/apps/urmail/icon.svg`, owner-gated like everything else on this surface. It
+/apps/auspex/icon.svg`, owner-gated like everything else on this surface. It
 needs one because `+serve-ui` otherwise looks under `/app`, where the client's
 four files live and the icon does not — the tiles nexus reads it from the root.
 Until that arm existed the path the `+on-load` comment named answered 404, and
@@ -1487,7 +1487,7 @@ written, and an empty name would name the parent. A name that does not fit is a
 than normalised: a list quietly renamed is a list the user will look for under
 the name they typed.
 
-`+list-name-ok` lives in `lib/urmail-web`, which is import-free and therefore
+`+list-name-ok` lives in `lib/auspex-web`, which is import-free and therefore
 testable, and is called from **both** boundaries — the HTTP route and
 `+do-save-list` on the writer. The writer is reachable from a dojo poke that
 never passes through the route, so a check at the boundary is not a substitute
@@ -1565,7 +1565,13 @@ cannot be used.
 
 # History
 
-urmail was first built as a **Gall agent** on its own `%urmail` desk: a
+**2026-09-09: renamed auspex** — the one who reads messages from birds; Talon's
+sibling. It was called **urmail** until then, and every name it owns moved with
+it: the libs, the marcs, the wire marks, the nexus folder, `/apps/auspex`, the
+`%auspex` signature salt and the remote-scry farm prefix. Older records that
+quote a transcript keep the old spelling, because that is what was typed.
+
+auspex was first built as a **Gall agent** on its own `%urmail` desk: a
 `sur/urmail.hoon`, a `lib/urmail.hoon`, a 382-line `app/urmail.hoon`, three
 urmail marks and 37 library tests. It established everything this document still
 claims — signing with the ship key, the three verdicts, `[id sig]`

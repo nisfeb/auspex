@@ -1,4 +1,4 @@
-::  mar/urmail/fetchreq: one in-flight blob fetch, at /fetch/<id>.
+::  mar/auspex/fetchreq: one in-flight blob fetch, at /fetch/<id>.
 ::
 ::    The grub IS the fiber's state: /fetch/*'s on-file process reads it
 ::    with get-state-as and needs nothing passed in. Writing the request
@@ -10,7 +10,7 @@
 ::    boom a stored one the day the shape moves - which for a fiber's
 ::    own state means a fiber spawned onto a bunt.
 ::
-/<  uc  /lib/urmail-chain.hoon
+/<  uc  /lib/auspex-chain.hoon
 |_  n=*
 ++  grad  %noun
 ++  grow

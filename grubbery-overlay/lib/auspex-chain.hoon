@@ -1,8 +1,10 @@
-::  urmail-chain: the pure crypto and chain algebra, plus the types it is
+::  auspex-chain: the pure crypto and chain algebra, plus the types it is
 ::  written against.
 ::
 ::    Ported verbatim from the %urmail desk's lib/urmail.hoon and
-::    sur/urmail.hoon. Every arm keeps its behaviour: signing and
+::    sur/urmail.hoon - the app was called urmail until 2026-09-09, and
+::    that desk still carries the old name. Every arm keeps its
+::    behaviour: signing and
 ::    verification, the three verdicts, [id sig] anti-shadowing, +merge,
 ::    +prune, +thread-key, +freeze and the input caps. Only the imports
 ::    changed.
@@ -814,7 +816,7 @@
 ::  +blob-spur: where a blob is bound in this ship's remote-scry farm.
 ::
 ::    gall's farm is a FLAT namespace shared by every nexus in the
-::    grubbery yoke (lattice grows at /pub/page/...), so urmail names its
+::    grubbery yoke (lattice grows at /pub/page/...), so auspex names its
 ::    own prefix. Content-addressed, and there is NO revision segment:
 ::    lattice needs one because a page is mutable and the namespace
 ::    requires an immutable binding per spur, while a blob's bytes are
@@ -824,7 +826,7 @@
 ++  blob-spur
   |=  h=@uv
   ^-  path
-  /urmail/blob/[(scot %uv h)]
+  /auspex/blob/[(scot %uv h)]
 ::
 ::  +blob-keen-path: the ames spar path of one blob in a PEER's farm.
 ::
@@ -839,7 +841,7 @@
 ::                 content-addressed blob and a re-grow of the same
 ::                 bytes leaves it bound and correct.
 ::      <agent>    the yoke whose farm is read: the gall agent, not the
-::                 nexus. urmail lives inside %grubbery.
+::                 nexus. auspex lives inside %grubbery.
 ::      ''         THE EMPTY SEGMENT, load-bearing. The publisher's ames
 ::                 takes the head of the spur as the beam's desk slot and
 ::                 the tail as s.bem, and gall's +scry sends anything not
@@ -858,18 +860,18 @@
 ::
 ::  +blob-page-mark: the page mark a blob is grown under.
 ::
-++  blob-page-mark  ^-(@tas %urmail-blob)
+++  blob-page-mark  ^-(@tas %auspex-blob)
 ::
-::  +digest: the preimage every urmail signature covers.
+::  +digest: the preimage every auspex signature covers.
 ::
-::    The %urmail salt is load-bearing. The same key signs ames packets
+::    The %auspex salt is load-bearing. The same key signs ames packets
 ::    and attestations; salting keeps those preimage spaces disjoint so
-::    an urmail signature can never be replayed as one of those.
+::    an auspex signature can never be replayed as one of those.
 ::
 ++  digest
   |=  u=unsigned
   ^-  @
-  (shaf %urmail (sham u))
+  (shaf %auspex (sham u))
 ::
 ++  sign-with
   |=  [=ring msg=@]
@@ -901,7 +903,7 @@
 ++  root
   |=  c=chain
   ^-  thread-id
-  ?~  c  ~|(%urmail-empty-chain !!)
+  ?~  c  ~|(%auspex-empty-chain !!)
   (id unsigned.i.c)
 ::
 ++  participants
@@ -1087,7 +1089,7 @@
   =/  roots  (skim c |=(m=msg ?=(~ prev.unsigned.m)))
   =/  root-ids
     (~(gas in *(set msg-id)) (turn roots |=(m=msg (id unsigned.m))))
-  ?.  =(1 ~(wyt in root-ids))  ~|(%urmail-no-unique-root !!)
+  ?.  =(1 ~(wyt in root-ids))  ~|(%auspex-no-unique-root !!)
   (snag 0 ~(tap in root-ids))
 ::
 ::  ── the thread as a tree ────────────────────────────────────────────

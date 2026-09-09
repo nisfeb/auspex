@@ -1,8 +1,8 @@
-::  mar/urmail-action: the LOCAL wire marc. Compose, reply and forward (all
+::  mar/auspex-action: the LOCAL wire marc. Compose, reply and forward (all
 ::  one %send), plus %read and %delete-thread.
 ::
 ::    Reaching the writer with this blot is not itself authority: the writer
-::    checks the poke's source and refuses a foreign %urmail-action, exactly
+::    checks the poke's source and refuses a foreign %auspex-action, exactly
 ::    as the agent's `?>  =(our.bowl src.bowl)` did. The public weir grant
 ::    lattice-style grants a POKE ROAD, not a mark, so a peer that can
 ::    deliver a chain can also address this marc; the source check is what

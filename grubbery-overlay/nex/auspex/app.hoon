@@ -1,8 +1,8 @@
-::  nex/urmail/app: the grubbery-native %urmail nexus.
+::  nex/auspex/app: the grubbery-native %auspex nexus.
 ::
-::  urmail is a nexus, not a gall agent. The tree it owns:
-::    /main.sig                    the WRITER. Takes %urmail-action (local
-::                                 only) and %urmail-chain (any ship) pokes
+::  auspex is a nexus, not a gall agent. The tree it owns:
+::    /main.sig                    the WRITER. Takes %auspex-action (local
+::                                 only) and %auspex-chain (any ship) pokes
 ::                                 and serialises every mutation. Nothing
 ::                                 else in this nexus writes.
 ::    /mail/thread/<tid>/msg/<id>/<id>/.../<slot>
@@ -39,7 +39,7 @@
 ::                                 The message carries name/size/mime/hash
 ::                                 inside `unsigned`; the bytes live here
 ::                                 and are published into gall's remote-scry
-::                                 farm at /urmail/blob/<hash>, where any
+::                                 farm at /auspex/blob/<hash>, where any
 ::                                 ship holding the hash may %keen them.
 ::                                 The hash is the authority and the
 ::                                 courier is irrelevant, so a blob whose
@@ -69,7 +69,7 @@
 ::                                 rather than by the app - once each -
 ::                                 and are what make it installable and
 ::                                 openable offline.
-::    /ui/main.sig                 binds /apps/urmail and dispatches each
+::    /ui/main.sig                 binds /apps/auspex and dispatches each
 ::                                 request into its own fiber.
 ::    /ui/requests/<id>            ONE EPHEMERAL FIBER PER HTTP REQUEST.
 ::                                 Reads peek the tree here; writes poke
@@ -108,10 +108,10 @@
 ::  therefore a branch that returns cleanly, never a ?> or a !!. The one
 ::  arm that can crash on hostile input, +thread-key, is called under mule.
 ::
-/<  uc  /lib/urmail-chain.hoon
-/<  uw  /lib/urmail-web.hoon
+/<  uc  /lib/auspex-chain.hoon
+/<  uw  /lib/auspex-web.hoon
 ::  the built client. Imports resolve relative to THIS file's directory
-::  (/nex/urmail), not /nex. Rebuilt by `npm run build` in ui/, which
+::  (/nex/auspex), not /nex. Rebuilt by `npm run build` in ui/, which
 ::  writes exactly these two files and fails if it would emit a third.
 /<  uih  ui-app/index.html
 /<  uij  ui-app/app.js
@@ -128,8 +128,8 @@
 ::  part a browser reads.
 /<  uim  ui-app/manifest.json
 /<  uisw  ui-app/sw.js
-::  the launcher tile's icon, served at /apps/urmail/icon.svg and
-::  pulled by the tiles nexus through /grubbery/tiles/icon/urmail.
+::  the launcher tile's icon, served at /apps/auspex/icon.svg and
+::  pulled by the tiles nexus through /grubbery/tiles/icon/auspex.
 /<  uicon  icon.svg
 =<  ^-  nexus:nexus
     |%
@@ -142,7 +142,7 @@
       %+  spin:loader  ball
       :~  (manifest:loader 0)
           ::  tile.json: THE LAUNCHER LISTS ONLY APPS THAT CARRY ONE.
-          ::  Without it urmail is installed, running and serving, and
+          ::  Without it auspex is installed, running and serving, and
           ::  invisible from the grubbery home screen - which reads as
           ::  "not installed" to everyone but the person who typed the
           ::  route by hand. %over, not %fall, so a redeploy replaces
@@ -150,17 +150,17 @@
           ::  first loaded, exactly as /app does below.
           ::
           ::  `image` names the app SLUG - the name before the first dot
-          ::  in /apps/urmail.urmail_app - not the folder, and the tiles
+          ::  in /apps/auspex.auspex_app - not the folder, and the tiles
           ::  nexus resolves it against the icon.svg grub laid beside
           ::  this row.
           :^  %over  %&  [/ %'tile.json']
           :-  [/ %json]
           %-  pairs:enjs:format
-          :~  title+s+'Mail'
+          :~  title+s+'Auspex'
               info+s+'Signed mail, verified end to end'
               color+s+'#2563eb'
-              image+s+'/grubbery/tiles/icon/urmail'
-              href+s+'/apps/urmail'
+              image+s+'/grubbery/tiles/icon/auspex'
+              href+s+'/apps/auspex'
           ==
           [%over %& [/ %'icon.svg'] [[/ %mime] uicon]]
           ::  the writer. %fall, so an existing live process is kept.
@@ -179,8 +179,8 @@
           ::  order survives a reload and gets a real default (an empty
           ::  list, versioned) on a first load. A grub laid under a mark
           ::  with no source file gets a BOOM sang, so this names
-          ::  [/urmail %idx], which mar/urmail/idx.hoon is.
-          [%fall %& [/mail %idx] [[/urmail %idx] *mail-idx:uc]]
+          ::  [/auspex %idx], which mar/auspex/idx.hoon is.
+          [%fall %& [/mail %idx] [[/auspex %idx] *mail-idx:uc]]
           ::  /mail/blob: the blob store. Covered for the same reason
           ::  /mail/thread is - the %fall %| on /mail already copies the
           ::  subtree, and this row is what CREATES the directory on a
@@ -189,7 +189,7 @@
           ::  /mail/blobvis: one small grub for every blob's visibility,
           ::  deliberately not a field beside the bytes: changing who may
           ::  read a quarter-megabyte file must not rewrite the file.
-          [%fall %& [/mail %blobvis] [[/urmail %blobvis] *blob-index:uc]]
+          [%fall %& [/mail %blobvis] [[/auspex %blobvis] *blob-index:uc]]
           ::  /mail/draft and /mail/rule: NEW PERSISTENT PATHS, and an
           ::  uncovered persistent path is lost data - spin rebuilds the
           ::  bole from scratch and drops whatever no row names. The
@@ -230,7 +230,7 @@
           ::  the browser gets.
           [%over %& [/app %'manifest.json'] [[/ %mime] uim]]
           [%over %& [/app %'sw.js'] [[/ %mime] uisw]]
-          ::  /ui: the HTTP front end. main.sig binds /apps/urmail and
+          ::  /ui: the HTTP front end. main.sig binds /apps/auspex and
           ::  spawns one fiber per request under /ui/requests.
           [%fall %& [/ui %'main.sig'] [[/ %sig] ~]]
           [%fall %| /ui/requests empty-dir:loader]
@@ -255,7 +255,7 @@
           ::  crashes the fiber, and a crashed sig fiber respawns, so one
           ::  bad road is an infinite crash loop at 100% CPU.
           [~ %'main.sig']
-        ;<  ~  bind:m  (rise-wait:io prod "%urmail writer failed")
+        ;<  ~  bind:m  (rise-wait:io prod "%auspex writer failed")
         ;<  here=rail:tarball  bind:m  get-here-abs:io
         =/  root=path  path.here
         ;<  ~  bind:m  (grant-public root)
@@ -286,18 +286,18 @@
       ::  about to be culled, instead of on the ship's single
       ::  serialisation point for mail.
           [[%fetch ~] @]
-        ;<  ~  bind:m  (rise-wait:io prod "%urmail fetch: failed")
+        ;<  ~  bind:m  (rise-wait:io prod "%auspex fetch: failed")
         (run-fetch name.rail)
       ::  /ui/main.sig: bind the HTTP endpoint and dispatch each request
       ::  into its own fiber under /ui/requests. This fiber never touches
       ::  the mail tree; it only routes.
           [[%ui ~] %'main.sig']
-        ;<  ~  bind:m  (rise-wait:io prod "%urmail /ui/main: failed")
-        ;<  ~  bind:m  (bind-http:io [~ /apps/urmail])
-        (http-dispatch:io %urmail)
+        ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/main: failed")
+        ;<  ~  bind:m  (bind-http:io [~ /apps/auspex])
+        (http-dispatch:io %auspex)
       ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
           [[%ui %requests ~] @]
-        ;<  ~  bind:m  (rise-wait:io prod "%urmail /ui/requests: failed")
+        ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/requests: failed")
         (handle-request name.rail)
       ==
     --
@@ -400,7 +400,7 @@
   ::  than empty. Guarded, so it never clobbers real read marks.
   ;<  ex=?  bind:m  (peek-exists:io [%& %& (tdir root t) %meta])
   ?:  ex  (pure:m ~)
-  (put-file [%& %& (tdir root t) %meta] [/urmail %meta] *meta:uc)
+  (put-file [%& %& (tdir root t) %meta] [/auspex %meta] *meta:uc)
 ::
 ::  ── reads ───────────────────────────────────────────────────────────
 ::
@@ -884,7 +884,7 @@
   |=  [root=path why=@t]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (trace:io ~[leaf+"urmail: rejected: {(trip why)}"])
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: rejected: {(trip why)}"])
   ;<  ~  bind:m  (note root 'reject' | why)
   (pure:m |)
 ::
@@ -899,7 +899,7 @@
 ::    group survive untouched. A direct write to how.weir does none of that.
 ::
 ::    The grant is a ROAD, not a mark: a peer that can reach /main.sig can
-::    address any marc at it, %urmail-action included. +apply's source
+::    address any marc at it, %auspex-action included. +apply's source
 ::    check is what makes that harmless, and it is the same check the
 ::    agent's `?>  =(our.bowl src.bowl)` was.
 ::
@@ -910,7 +910,7 @@
   =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
   ;<  ok=?  bind:m  (peek-exists:io gdir)
   ?.  ok
-    (trace:io ~[leaf+"urmail: no public usergroup, delivery is local only"])
+    (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
   ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
   %+  reg-how:io  /public
   [make=~ poke=(sy ~[`road:tarball`[%& %& root %'main.sig']]) peek=~]
@@ -960,11 +960,11 @@
   ^-  form:m
   ::  a chain from ANYONE. src is deliberately not checked against the
   ::  participants: the signatures are the authority, not the courier.
-  ?:  =([/ %urmail-chain] p.sage)
-    =/  res  (mule |.(~|(%urmail-bad-chain ;;(chain:uc q.q.sage))))
+  ?:  =([/ %auspex-chain] p.sage)
+    =/  res  (mule |.(~|(%auspex-bad-chain ;;(chain:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed chain')
     (deliver root p.res)
-  ?.  ?|(=([/ %urmail-action] p.sage) =([/urmail %blob-in] p.sage))
+  ?.  ?|(=([/ %auspex-action] p.sage) =([/auspex %blob-in] p.sage))
     ::  an unknown blot. Ignore it rather than crash - see the header.
     (pure:m |)
   ;<  our=@p  bind:m  bowl-our
@@ -979,11 +979,11 @@
   ::  a dojo poke cannot name, but a peer poking over ames can - so the
   ::  source check is what makes that harmless. The hash is re-checked
   ::  in +take-blob regardless.
-  ?:  =([/urmail %blob-in] p.sage)
-    =/  res  (mule |.(~|(%urmail-bad-blob-in ;;(blob-in:uc q.q.sage))))
+  ?:  =([/auspex %blob-in] p.sage)
+    =/  res  (mule |.(~|(%auspex-bad-blob-in ;;(blob-in:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed blob-in')
     (take-blob root p.res)
-  =/  res  (mule |.(~|(%urmail-bad-action ;;(action:uc q.q.sage))))
+  =/  res  (mule |.(~|(%auspex-bad-action ;;(action:uc q.q.sage))))
   ?:  ?=(%| -.res)  (reject root 'malformed action')
   (act root p.res)
 ::
@@ -1404,7 +1404,7 @@
   ::  is a request a client makes freely.
   ?:  =(now labels.mt)  (pure:m |)
   ?.  (lte ~(wyt in now) max-labels:uc)  (reject root 'too many labels')
-  ;<  ~  bind:m  (put-file (meta-rail root t) [/urmail %meta] mt(labels now))
+  ;<  ~  bind:m  (put-file (meta-rail root t) [/auspex %meta] mt(labels now))
   ;<  ~  bind:m  (note root 'label' & l)
   (pure:m |)
 ::
@@ -1425,7 +1425,7 @@
   ?.  ex  (reject root 'unknown thread')
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ?:  =(arch archived.mt)  (pure:m |)
-  ;<  ~  bind:m  (put-file (meta-rail root t) [/urmail %meta] mt(archived arch))
+  ;<  ~  bind:m  (put-file (meta-rail root t) [/auspex %meta] mt(archived arch))
   ;<  ~  bind:m  (note root 'archive' & (scot %uv t))
   (pure:m |)
 ::
@@ -1457,7 +1457,7 @@
           (lth (lent ds) max-drafts:uc)
       ==
     (reject root 'too many drafts')
-  ;<  ~  bind:m  (put-file (draft-rail root id.d) [/urmail %draft] d)
+  ;<  ~  bind:m  (put-file (draft-rail root id.d) [/auspex %draft] d)
   ;<  ~  bind:m  (note root 'save-draft' & (scot %uv id.d))
   (pure:m |)
 ::
@@ -1518,7 +1518,7 @@
           (lth (lent rs) max-rules:uc)
       ==
     (reject root 'too many rules')
-  ;<  ~  bind:m  (put-file (rule-rail root id.r) [/urmail %rule] r)
+  ;<  ~  bind:m  (put-file (rule-rail root id.r) [/auspex %rule] r)
   ;<  ~  bind:m  (note root 'save-rule' & (scot %uv id.r))
   (pure:m |)
 ::
@@ -1569,7 +1569,7 @@
       ==
     (reject root 'too many lists')
   ;<  ~  bind:m
-    (put-file (list-rail root name) [/urmail %list] `mail-list:uc`[%0 members])
+    (put-file (list-rail root name) [/auspex %list] `mail-list:uc`[%0 members])
   ;<  ~  bind:m  (note root 'save-list' & name)
   (pure:m |)
 ::
@@ -1621,7 +1621,7 @@
   =/  ls=(set @tas)  ?:((lte ~(wyt in want) max-labels:uc) want labels.mt)
   ?:  &(=(arch archived.mt) =(ls labels.mt))  (pure:m ~)
   ;<  ~  bind:m
-    (put-file (meta-rail root t) [/urmail %meta] mt(archived arch, labels ls))
+    (put-file (meta-rail root t) [/auspex %meta] mt(archived arch, labels ls))
   (note root 'file-arrival' & (scot %uv t))
 ::
 ::  +do-delete: the escape hatch. Every capacity limit here is otherwise
@@ -1637,7 +1637,7 @@
   ;<  ~  bind:m  (cull-if-there road)
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
   ;<  ~  bind:m
-    %^  put-file  [%& %& (mail-dir root) %idx]  [/urmail %idx]
+    %^  put-file  [%& %& (mail-dir root) %idx]  [/auspex %idx]
     ix(inbox (skip inbox.ix |=(o=thread-id:uc =(o t))))
   ;<  ~  bind:m  (note root 'delete-thread' & (scot %uv t))
   (pure:m &)
@@ -1798,7 +1798,7 @@
   ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
   ?:  ex  (pure:m ~)
   ;<  now=@da  bind:m  bowl-now
-  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%1 octs now])
+  ;<  ~  bind:m  (put-file (blob-rail root h) [/auspex %blob] [%1 octs now])
   (publish-blob h octs |)
 ::
 ::  +unheld-files: the files in a send we do not already hold.
@@ -1831,11 +1831,11 @@
 ::    between un-granted peers HANGS rather than failing, while a keen at
 ::    a bound spur is answered by the publisher's kernel without waking
 ::    %grubbery at all. So "the hash is the authority, the courier is
-::    irrelevant" is not a policy urmail enforces - it is what the
+::    irrelevant" is not a policy auspex enforces - it is what the
 ::    transport already is.
 ::
 ::    gall's farm is a FLAT namespace shared by every nexus in this yoke
-::    (lattice grows at /pub/page/...), hence the /urmail prefix.
+::    (lattice grows at /pub/page/...), hence the /auspex prefix.
 ::
 ++  publish-blob
   |=  [h=@uv =octs force=?]
@@ -1871,7 +1871,7 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  n=noun  bind:m
-    (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %urmail %blob])
+    (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %auspex %blob])
   =/  res  (mule |.(;;((list path) n)))
   ::  a read we could not understand must not be taken as "absent",
   ::  because "absent" is the branch that grows and raises a case.
@@ -1901,7 +1901,7 @@
   ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
   ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
   ;<  n=noun  bind:m
-    (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %urmail %blob])
+    (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %auspex %blob])
   =/  res  (mule |.(;;((list path) n)))
   ?:  ?=(%| -.res)  (pure:m ~)
   =/  bound=(set path)  (~(gas in *(set path)) p.res)
@@ -1922,14 +1922,14 @@
   ;<  ~  bind:m
     ?~  o  (pure:m ~)
     ;<  ~  bind:m  (grow:io (blob-spur:uc h.i.rs) [blob-page-mark:uc u.o])
-    (trace:io ~[leaf+"urmail: republished blob {<h.i.rs>}"])
+    (trace:io ~[leaf+"auspex: republished blob {<h.i.rs>}"])
   (republish-loop root t.rs)
 ::
 ::  ── the blob fetch ──────────────────────────────────────────────────
 ::
 ::  +mesa-agent: the gall agent whose scry farm holds the bindings.
-::  urmail is a NEXUS inside %grubbery, so the spurs live under
-::  %grubbery's yoke, not under an agent named %urmail. A fiber cannot
+::  auspex is a NEXUS inside %grubbery, so the spurs live under
+::  %grubbery's yoke, not under an agent named %auspex. A fiber cannot
 ::  read its own `dap`, so this is a constant and it must track the
 ::  desk's agent name.
 ::
@@ -2018,7 +2018,7 @@
   ::  spawning a second fiber to race the first.
   =/  id=@ta  (scot %uv (sham [h who]))
   ;<  ~  bind:m
-    (put-file [%& %& (weld root /fetch) id] [/urmail %fetchreq] [%0 h who])
+    (put-file [%& %& (weld root /fetch) id] [/auspex %fetchreq] [%0 h who])
   ::  %.n, AND +take-blob ANSWERS %.n TOO: neither queueing the fetch
   ::  nor the bytes arriving moves /beacon/rev, so nothing on this path
   ::  ever bumps it. A queued request is not something any reader
@@ -2055,7 +2055,7 @@
   ;<  rq=fetch-req:uc  bind:m  (get-state-as:io ,fetch-req:uc)
   ;<  got=(unit octs)  bind:m  (keen-blob from.rq hash.rq 1)
   %+  poke:io  [%& %& root %'main.sig']
-  [[/urmail %blob-in] [%0 id hash.rq got]]
+  [[/auspex %blob-in] [%0 id hash.rq got]]
 ::
 ::  +take-blob: the writer's half of a fetch. Local only.
 ::
@@ -2087,7 +2087,7 @@
     (reject root 'blob store full')
   ;<  now=@da  bind:m  bowl-now
   ;<  ~  bind:m
-    (put-file (blob-rail root hash.b) [/urmail %blob] [%1 u.res.b now])
+    (put-file (blob-rail root hash.b) [/auspex %blob] [%1 u.res.b now])
   ::  we hold the bytes now, so we can serve them: a blob request is
   ::  answerable by ANYONE holding the bytes, not only the author,
   ::  exactly as a chain is forwardable by anyone. That is also why
@@ -2120,7 +2120,7 @@
 ::    has no weir on it at all. What remains is the grubbery peek road,
 ::    which is deny-by-default for foreign ships and opens only through a
 ::    usergroup, so the named ships are granted by adding this blob's own
-::    road to a group at /urmail/<hash>.
+::    road to a group at /auspex/<hash>.
 ::
 ::    THE GROUP IS NOT CREATED HERE, and that is a platform limit rather
 ::    than a choice. $registry-action carries no group-lifecycle op, so a
@@ -2143,7 +2143,7 @@
   ::  lookup crashes on the emptied plot a previous cull left.
   ;<  ~  bind:m  (unpublish-if-public cur h)
   ;<  ~  bind:m
-    %^  put-file  (vis-rail root)  [/urmail %blobvis]
+    %^  put-file  (vis-rail root)  [/auspex %blobvis]
     ix(vis (~(put by vis.ix) h [%restricted ships]))
   ;<  ~  bind:m  (grant-blob root h)
   ;<  ~  bind:m  (note root 'restrict-blob' & (scot %uv h))
@@ -2181,7 +2181,7 @@
     ;<  ~  bind:m  (note root 'publish-blob' & 'already public')
     (pure:m |)
   ;<  ~  bind:m
-    %^  put-file  (vis-rail root)  [/urmail %blobvis]
+    %^  put-file  (vis-rail root)  [/auspex %blobvis]
     ix(vis (~(del by vis.ix) h))
   ;<  ~  bind:m  (publish-blob h u.have &)
   ;<  ~  bind:m  (note root 'publish-blob' & (scot %uv h))
@@ -2198,14 +2198,14 @@
   |=  [root=path h=@uv]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  =/  grp=path  /urmail/[(scot %uv h)]
-  =/  gdir=path  (weld /sys/ames/usergroups/urmail /[(cat 3 (scot %uv h) '.grp')])
+  =/  grp=path  /auspex/[(scot %uv h)]
+  =/  gdir=path  (weld /sys/ames/usergroups/auspex /[(cat 3 (scot %uv h) '.grp')])
   ;<  ok=?  bind:m  (peek-exists:io [%& %& gdir %'who.ships'])
   ?.  ok
     %-  trace:io
     :_  ~
     :-  %leaf
-    "urmail: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
+    "auspex: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
   ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
   %+  reg-how:io  grp
   [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
@@ -2228,7 +2228,7 @@
   =/  pax=path  (node-dir place)
   ;<  ~  bind:m  (ensure-nodes dir (prefixes:uc pax))
   %^  put-file  [%& %& (weld dir pax) (slot (id:uc unsigned.mg) sig.mg)]
-    [/urmail %msg]
+    [/auspex %msg]
   [%2 mg v]
 ::
 ::  +want-slots: where every copy of a chain BELONGS in the tree.
@@ -2347,7 +2347,7 @@
   ?~  xs  (pure:m ~)
   ;<  ~  bind:m
     %^  put-file  [%& %& (weld dir (snip pk.i.xs)) (rear pk.i.xs)]
-      [/urmail %msg]
+      [/auspex %msg]
     st.i.xs
   (put-slots dir t.xs)
 ::
@@ -2426,7 +2426,7 @@
   ^-  form:m
   ?:  =(~ bcc)  (pure:m ~)
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
+  %^  put-file  [%& %& (tdir root t) %meta]  [/auspex %meta]
   mt(bcc (~(put by bcc.mt) i bcc))
 ::
 ::  +mark-direct: this thread reached us through a DELIVERY POKE.
@@ -2444,7 +2444,7 @@
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ?:  direct.mt  (pure:m |)
   ;<  ~  bind:m
-    %^  put-file  [%& %& (tdir root t) %meta]  [/urmail %meta]
+    %^  put-file  [%& %& (tdir root t) %meta]  [/auspex %meta]
     mt(direct &)
   (pure:m &)
 ::
@@ -2471,7 +2471,7 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  %^  put-file  (meta-rail root t)  [/urmail %meta]
+  %^  put-file  (meta-rail root t)  [/auspex %meta]
   mt(read ?:(rd (~(uni in read.mt) is) (~(dif in read.mt) is)))
 ::
 ++  touch-idx
@@ -2479,7 +2479,7 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
-  %^  put-file  [%& %& (mail-dir root) %idx]  [/urmail %idx]
+  %^  put-file  [%& %& (mail-dir root) %idx]  [/auspex %idx]
   ix(inbox [t (skip inbox.ix |=(o=thread-id:uc =(o t)))])
 ::
 ::  ── delivery out ────────────────────────────────────────────────────
@@ -2497,7 +2497,7 @@
 ::    Bounded by a deadline, and soft. This runs INSIDE the writer, which
 ::    is the ship's single serialisation point for mail; an unreachable
 ::    recipient must not wedge it forever, and a nack from a peer running
-::    a different urmail must not crash it.
+::    a different auspex must not crash it.
 ::
 ++  send-one
   |=  [root=path c=chain:uc who=ship]
@@ -2505,16 +2505,16 @@
   ^-  form:m
   =/  rd=road:tarball  (remote-road [%& %& root %'main.sig'] who)
   ;<  res=(unit (unit tang))  bind:m
-    ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ %urmail-chain] c]))
+    ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ %auspex-chain] c]))
   ?~  res
-    (trace:io ~[leaf+"urmail: send to {<who>} timed out"])
+    (trace:io ~[leaf+"auspex: send to {<who>} timed out"])
   ?~  u.res  (pure:m ~)
-  (trace:io ~[leaf+"urmail: send to {<who>} nacked"])
+  (trace:io ~[leaf+"auspex: send to {<who>} nacked"])
 ::
 ++  send-timeout  ^-(@dr ~s20)
 ::
 ::  +remote-road: rewrite an absolute road into its /sys/ames mirror on
-::  `shp`, so a dart routes to that ship. The peer's urmail sits at the
+::  `shp`, so a dart routes to that ship. The peer's auspex sits at the
 ::  same absolute path its own root nexus gave it.
 ::
 ++  remote-road
@@ -2597,7 +2597,7 @@
 ::  ── bowl reads ──────────────────────────────────────────────────────
 ::
 ::  +bowl-our / +bowl-now: our/now, with the reply MARK-FILTERED. The
-::  writer is a busy fiber: a %urmail-chain poke queued while it was
+::  writer is a busy fiber: an %auspex-chain poke queued while it was
 ::  mid-work must be skipped back to the loop, not stolen by a bowl read.
 ::
 ++  bowl-our
@@ -2638,7 +2638,7 @@
   =/  mr  (fiber:fiber:nexus ,result)
   |=  [time=@dr computation=form:mr]
   ^-  form:m
-  ;<  =wire    bind:m  (nonce:io /urmail-to)
+  ;<  =wire    bind:m  (nonce:io /auspex-to)
   ;<  now=@da  bind:m  get-time:io
   ;<  ~        bind:m  (set-timer:io wire (add now time))
   |=  input:fiber:nexus
@@ -2762,10 +2762,10 @@
   ;<  [src=@p req=inbound-request:eyre]  bind:m
     (get-state-as:io ,[src=@p inbound-request:eyre])
   =/  parsed  (parse-url:http-utils url.request.req)
-  ::  drop the /apps/urmail prefix; the remainder is the route.
+  ::  drop the /apps/auspex prefix; the remainder is the route.
   =/  suffix=path  (slag 2 site.parsed)
   ::  a trailing '/' parses as a trailing empty knot, so without this
-  ::  /apps/urmail/ would miss the shell route and fall to the 404 - and
+  ::  /apps/auspex/ would miss the shell route and fall to the 404 - and
   ::  a trailing slash is exactly what a browser adds when the app is
   ::  opened from a bookmark.
   =/  suffix=path
@@ -2773,7 +2773,7 @@
       (snip `path`suffix)
     suffix
   =/  meth=@tas  method.request.req
-  ::  THE OWNER GATE. urmail has no unauthenticated surface at all: no
+  ::  THE OWNER GATE. auspex has no unauthenticated surface at all: no
   ::  clearweb view, no public form, no unauthenticated asset. Eyre
   ::  stamps a request authenticated to our own web login, so this flag
   ::  IS the src==our check and it is already in hand - reading `our`
@@ -2787,7 +2787,7 @@
     (serve-ui eyre-id %'app.js')
   ::  the PWA's two files, served out of the same /app directory and
   ::  through the same arm. BEHIND THE OWNER GATE like everything else:
-  ::  urmail has no unauthenticated surface, and these two are not an
+  ::  auspex has no unauthenticated surface, and these two are not an
   ::  exception carved for convenience. A manifest is fetched
   ::  anonymously by default, so the shell asks for it with
   ::  crossorigin="use-credentials"; a browser that ignores that gets a
@@ -2799,7 +2799,7 @@
     (serve-ui eyre-id %'sw.js')
   ::  the launcher tile's icon, and the manifest's. It is a NEXUS-ROOT
   ::  grub rather than one of the four under /app - the tiles nexus
-  ::  pulls it from there through /grubbery/tiles/icon/urmail - so it
+  ::  pulls it from there through /grubbery/tiles/icon/auspex - so it
   ::  needs a route of its own even though +serve-ui serves it. Without
   ::  this arm the path +on-load's comment names 404s, which is what
   ::  drove the manifest to carry the icon as a data: URI instead.
@@ -3114,7 +3114,7 @@
 ::    should have to agree separately about what order lists come in.
 ::
 ::    `members` is ships, rendered. A list name is a key on this ship and
-::    goes no further - see mar/urmail/list.
+::    goes no further - see mar/auspex/list.
 ::
 ++  serve-lists
   |=  [src=@p eyre-id=@ta]
@@ -3306,7 +3306,7 @@
     ::  UNREPRESENTABLE: with no field here, a message carrying a file
     ::  was indistinguishable through this API from one carrying none,
     ::  and no client could have shown it however it was written. The
-    ::  storage marc has rendered them all along (see mar/urmail/msg),
+    ::  storage marc has rendered them all along (see mar/auspex/msg),
     ::  which is what made the gap easy to miss - the data was one
     ::  route away the whole time.
     ::
@@ -3517,7 +3517,7 @@
   |=  a=action:uc
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  (poke:io [%| 2 %& ~ %'main.sig'] [[/ %urmail-action] a])
+  (poke:io [%| 2 %& ~ %'main.sig'] [[/ %auspex-action] a])
 ::
 ::  +do-web-send: compose, reply and forward. `prev` is the only thing
 ::  that tells them apart, here as everywhere else.
@@ -3705,7 +3705,7 @@
   ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
   ?:  ex  (blob-uploaded eyre-id h p.bts)
   ;<  now=@da  bind:m  bowl-now
-  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%1 bts now])
+  ;<  ~  bind:m  (put-file (blob-rail root h) [/auspex %blob] [%1 bts now])
   ::  PUBLISHED, exactly as an outbound attachment is: an uploaded blob
   ::  is OUR file and a recipient must be able to keen it the instant
   ::  the chain lands. Visibility is %public by absence from

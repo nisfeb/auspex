@@ -142,7 +142,7 @@ export default function Sidebar({
           onClick={onTheme}
           aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}
           title="Light or dark. Your choice is remembered in this browser; without one,
-            urmail follows the theme your system asks for."
+            auspex follows the theme your system asks for."
           className="btn touch w-full justify-start"
         >
           {theme === 'dark' ? 'Light theme' : 'Dark theme'}
@@ -151,7 +151,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onInstall}
-            title="Install urmail as an app on this device. It opens in its own window
+            title="Install auspex as an app on this device. It opens in its own window
               and, thanks to its service worker, starts and shows cached mail even
               when the ship is unreachable."
             className="btn touch w-full justify-start"

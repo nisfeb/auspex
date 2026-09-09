@@ -1,6 +1,6 @@
-# Releasing urmail
+# Releasing auspex
 
-How urmail gets from "runs on two fake ships" to "installable from
+How auspex gets from "runs on two fake ships" to "installable from
 ~ricsul-bilwyt alongside lattice". No production changes are proposed here;
 this is the sequence and the gates.
 
@@ -169,14 +169,14 @@ already shipped a test that passed the bug it existed to catch.
 
 **Status, 2026-09-08.** Rehearsed on `~feb`: launcher back (`/apps/grubbery`,
 14 tiles, lattice among them from its own `tile.json`), docket reads Grubbery
-1.1.0, lattice and urmail both still bound, memory store reads. Commit
+1.1.0, lattice and auspex both still bound, memory store reads. Commit
 `5ea5700` on **`dist/launcher-restore`**, deliberately not `dist/lattice-only`,
 because another session is committing to that branch with production as its
 next step. Merge `--ff-only` when the launcher is meant to ship.
 
 Two things the rehearsal did **not** prove:
 
-- **`~feb` is the wrong shape.** It runs full upstream `7117ae1` plus urmail —
+- **`~feb` is the wrong shape.** It runs full upstream `7117ae1` plus auspex —
   the app tier present, no lattice row in `root.hoon`. Production has the app
   tier *absent*. `~wex` carries the dist-shaped `root.hoon`, so the rehearsal
   that matters is on `~wex`, after the features work there lands.
@@ -214,14 +214,14 @@ by that ship's ball history:
 from the pinned dir's case, not from `now` — and reported 57 OK against a
 72-test file. Every earlier "green" run in this project that used that form is
 suspect in count (not in outcome; the older arms passed). Use an explicit
-revision: `-test /~wex/grubbery/<rev>/tests/lib/urmail-chain ~`, and read the OK
+revision: `-test /~wex/grubbery/<rev>/tests/lib/auspex-chain ~`, and read the OK
 count from the run.
 
-Still open under this gate: urmail's sources and `root.hoon` row are not
+Still open under this gate: auspex's sources and `root.hoon` row are not
 vendored into the dist desk. The docket's `base` also changed
 `lattice` → `grubbery`, which was not in the four listed changes and is correct.
 
-Untouched. urmail cannot ship until grubbery's launcher comes back, because
+Untouched. auspex cannot ship until grubbery's launcher comes back, because
 today `~ricsul-bilwyt` distributes a grubbery whose app tier was deliberately
 stripped: lattice is the only app and it *is* the product, with the docket
 pointing Landscape straight at `/apps/lattice`.
@@ -230,7 +230,7 @@ Four changes on `dist/lattice-only`:
 
 1. Restore `gub/nex/tiles.hoon` from upstream `7117ae1` — deleted in `1ad7a5e`.
 2. Restore its `%fall` row in `root.hoon`.
-3. Give urmail a `tile.json` in `on-load`; lattice already writes one, and its
+3. Give auspex a `tile.json` in `on-load`; lattice already writes one, and its
    own comment notes the launcher lists only apps that carry one.
 4. Rewrite the docket: title Lattice → Grubbery, `site` from `/apps/lattice`
    to the launcher.
@@ -239,10 +239,10 @@ Step 4 is visible on every installed ship. The Landscape tile stops saying
 Lattice, which is a change to lattice's users, not just ours.
 
 There is a fifth thing this gate has to answer that is not on the list:
-**urmail's own install row lives in grubbery's `lib/root.hoon`, outside this
+**auspex's own install row lives in grubbery's `lib/root.hoon`, outside this
 repo, and a grubbery pull reverts it.** `sync-overlay.sh` greps for the row and
 prints it when it is missing; that is a check, not a fix. Whatever carries
-lattice's row through a distribution has to carry urmail's.
+lattice's row through a distribution has to carry auspex's.
 
 ## The real-key path — proven
 
@@ -263,7 +263,7 @@ Closed on 2026-09-08 on `~martyr-sanryg`, by the user in the dojo:
 
 Transcripts in `docs/verification.md`. What remains is not a gate: the nexus's
 own `+peer-pass` `%puby` branch executes for the first time on the first real
-ship that runs urmail. The crypto beneath it is now known good.
+ship that runs auspex. The crypto beneath it is now known good.
 
 ## Sequence
 

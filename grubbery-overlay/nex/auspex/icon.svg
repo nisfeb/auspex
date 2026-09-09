@@ -1,0 +1,29 @@
+<!-- the auspex logo — an auspex reads messages in the flight of birds, so:
+     three birds, drawn as the open chevrons a child draws, in the shared
+     palette of sneagan's apps (lattice, talon, party manager): amber
+     (#f9a804) on deep navy (#101541, vignetting to #080b25), with lattice's
+     stroke weight and round caps so the icons sit together on a home
+     screen. This file is the single source; every file in icons/ is
+     generated from it by `cargo tauri icon`, and the in-app tile icon
+     (grubbery-overlay/nex/<app>/icon.svg) is this same drawing. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="72%">
+      <stop offset="0" stop-color="#171c52"/>
+      <stop offset="0.6" stop-color="#101541"/>
+      <stop offset="1" stop-color="#080b25"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g fill="none" stroke="#f9a804" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <!-- lead bird, high and centred: the one the auspex is watching -->
+    <path d="M140 168 Q 198 108 256 168 Q 314 108 372 168"/>
+    <!-- two followers, lower and offset, smaller wingspan -->
+    <path d="M96 276 Q 138 232 180 276 Q 222 232 264 276"/>
+    <path d="M248 276 Q 290 232 332 276 Q 374 232 416 276"/>
+    <!-- the horizon the omen is read against -->
+    <line x1="110" y1="386" x2="402" y2="386"/>
+  </g>
+  <!-- the sun the birds cross, lattice's centre dot at lattice's size -->
+  <circle cx="256" cy="386" r="34" fill="#f9a804"/>
+</svg>

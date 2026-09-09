@@ -90,7 +90,7 @@ export interface InboxEntry {
 
 // Everything below is a same-origin fetch under one prefix.
 //
-// The nexus binds /apps/urmail and answers a small JSON API beneath it,
+// The nexus binds /apps/auspex and answers a small JSON API beneath it,
 // and this app is served from that same route as two grubs — the shell
 // and this script. So the browser already holds the session cookie Eyre
 // set for the ship that served the page, every call is same-origin, and
@@ -103,7 +103,7 @@ export interface InboxEntry {
 // Every route here is owner-gated and answers JSON on every path,
 // errors included, which is why `jsonOf` below can read a reason off a
 // failure instead of showing a bare status code.
-const BASE = '/apps/urmail'
+const BASE = '/apps/auspex'
 
 class ApiError extends Error {
   status: number
@@ -165,7 +165,7 @@ async function jsonOf(res: Response): Promise<unknown> {
 // WAS THIS MAIL SERVED FROM DISK RATHER THAN BY THE SHIP?
 //
 // The service worker answers /api/inbox and /api/thread from its cache
-// when the network fails, and stamps `x-urmail-cached` on what it hands
+// when the network fails, and stamps `x-auspex-cached` on what it hands
 // back (see ui/sw.js). Without that, a mailbox served from a cache and
 // a mailbox served by the ship are the same pixels — which is a client
 // quietly showing yesterday's mail as though it were today's.
@@ -198,7 +198,7 @@ const get = async <T>(path: string, mail = false): Promise<T> => {
   const res = await fetch(`${BASE}${path}`, {
     headers: { accept: 'application/json' },
   })
-  if (mail) setFromCache(res.headers.get('x-urmail-cached') === '1')
+  if (mail) setFromCache(res.headers.get('x-auspex-cached') === '1')
   return await jsonOf(res) as T
 }
 
@@ -258,7 +258,7 @@ export const thread = async (id: string): Promise<Thread | null> => {
   }
 }
 
-// The caps, mirrored from grubbery-overlay/lib/urmail-chain.hoon. A
+// The caps, mirrored from grubbery-overlay/lib/auspex-chain.hoon. A
 // GUARD RAIL, never the boundary: POST /api/blob refuses a body over
 // max-blob with a 413 and the send refuses the count again. What these
 // buy is a refusal the user can act on — "this file is too big" at the
@@ -478,7 +478,7 @@ export const markRead = (ids: string[]) =>
 // thread marks several messages read at once; if those bumped the beacon
 // this subscription would refetch the thread, which would mark it read
 // again, forever.
-const BEACON = '/grubbery/api/keep/apps/urmail.urmail_app/beacon/rev'
+const BEACON = '/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev'
 
 // Subscribe to that stream. Returns a teardown.
 //

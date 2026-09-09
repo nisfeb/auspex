@@ -12,7 +12,7 @@ const SHIP = process.env.SHIP_URL || 'http://localhost:8081'  // ~wex
 // build output, the same way lattice commits its own ui-app/ — the
 // overlay IS the deploy source, so an artifact that is not in it does not
 // ship.
-const OUT = resolve(import.meta.dirname, '../grubbery-overlay/nex/urmail/ui-app')
+const OUT = resolve(import.meta.dirname, '../grubbery-overlay/nex/auspex/ui-app')
 
 // The four files +on-load lays down as grubs, and nothing else. The
 // shell and the script have always been two; the manifest and the
@@ -41,7 +41,7 @@ const SERVED = ['index.html', 'app.js', 'manifest.json', 'sw.js']
 // the version stamp, which is the only thing that can invalidate a shell
 // cache whose filenames never change.
 const inlineCss = (): Plugin => ({
-  name: 'urmail-inline-css',
+  name: 'auspex-inline-css',
   apply: 'build',
   closeBundle() {
     const html = resolve(OUT, 'index.html')
@@ -66,10 +66,10 @@ const inlineCss = (): Plugin => ({
       .update(readFileSync(resolve(OUT, 'manifest.json')))
       .digest('hex').slice(0, 12)
     const sw = readFileSync(resolve(import.meta.dirname, 'sw.js'), 'utf8')
-    if (!sw.includes('__URMAIL_BUILD__')) {
-      throw new Error('sw.js lost its __URMAIL_BUILD__ stamp: its cache could never be invalidated')
+    if (!sw.includes('__AUSPEX_BUILD__')) {
+      throw new Error('sw.js lost its __AUSPEX_BUILD__ stamp: its cache could never be invalidated')
     }
-    writeFileSync(resolve(OUT, 'sw.js'), sw.replaceAll('__URMAIL_BUILD__', build))
+    writeFileSync(resolve(OUT, 'sw.js'), sw.replaceAll('__AUSPEX_BUILD__', build))
 
     // +on-load lays down exactly these four files. Anything else in the
     // output directory is a grub the nexus will not serve, and the app
@@ -100,7 +100,7 @@ const inlineCss = (): Plugin => ({
 export default defineConfig({
   // The app is served from the nexus's own route, so every emitted URL
   // has to be absolute under it.
-  base: '/apps/urmail/',
+  base: '/apps/auspex/',
   plugins: [react(), tailwindcss(), inlineCss()],
   build: {
     outDir: OUT,
@@ -122,7 +122,7 @@ export default defineConfig({
     // API and grubbery's keep endpoint for the change beacon. Both need
     // the session cookie, so log into the ship in the same browser first.
     proxy: {
-      '/apps/urmail/api': { target: SHIP, changeOrigin: true },
+      '/apps/auspex/api': { target: SHIP, changeOrigin: true },
       '/grubbery': { target: SHIP, changeOrigin: true },
     },
   },

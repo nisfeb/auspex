@@ -1,14 +1,14 @@
-::  mar/urmail/meta: a thread's LOCAL state, at /mail/thread/<tid>/meta.
+::  mar/auspex/meta: a thread's LOCAL state, at /mail/thread/<tid>/meta.
 ::
 ::    read marks, archive state and labels. None of it is signed and none
 ::    of it travels: two ships may disagree about every field here and
 ::    still agree, byte for byte, about who signed what.
 ::
-::    Noun passthrough for the same reason as mar/urmail/msg - see that
+::    Noun passthrough for the same reason as mar/auspex/msg - see that
 ::    file's header. Losing a read mark to a bunt fallback is survivable;
 ::    the rule is uniform so that no persisted path is the exception.
 ::
-/<  uc  /lib/urmail-chain.hoon
+/<  uc  /lib/auspex-chain.hoon
 |_  n=*
 ++  grad  %noun
 ++  grow

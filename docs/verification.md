@@ -1,11 +1,14 @@
-# urmail — verification record
+# auspex — verification record
 
-Date: 2026-09-08. Subject: **the grubbery nexus**, which is the only urmail
+Date: 2026-09-08. Subject: **the grubbery nexus**, which is the only auspex
 there is. The Gall build this file used to describe was deleted in `a0d82ca`;
-nothing here refers to it.
+nothing here refers to it. The app was called **urmail** when every observation
+below was made; it was renamed auspex on 2026-09-09, and the quoted transcripts
+and the gitignored slice-report path keep the old spelling because that is what
+was typed and what is on disk.
 
 This records what was actually run and actually observed. For the design, read
-`docs/superpowers/specs/2026-09-07-urmail-design.md`; for the release gates,
+`docs/superpowers/specs/2026-09-07-auspex-design.md`; for the release gates,
 `docs/release-plan.md`.
 
 ## The standard of evidence, and how to read this file
@@ -57,7 +60,7 @@ touched. No pier was booted, killed or reset for any of this.
   with two different verdicts. Neither overwrote the other.
 - **Redelivery is a no-op.** Re-poking a chain already held wrote nothing and
   did not move the beacon.
-- **A foreign `%urmail-action` is refused**, while a chain from the same foreign
+- **A foreign `%auspex-action` is refused**, while a chain from the same foreign
   ship is accepted — the source check and the public poke grant doing exactly
   what they are supposed to.
 - **The writer survives a rejection** and applies the next poke.
@@ -84,7 +87,7 @@ touched. No pier was booted, killed or reset for any of this.
 
 ### The malformed-dart vector, and its reversal
 
-- **A malformed `%urmail-chain` used to destroy the next good message.** With
+- **A malformed `%auspex-chain` used to destroy the next good message.** With
   the wire marcs typed, grubbery's `+hydrate` failed the writer process before
   any nexus code ran and `+rise-wait` consumed the following poke. Reproduced,
   including `strange restart mark` once per malformed poke.
@@ -94,7 +97,7 @@ touched. No pier was booted, killed or reset for any of this.
   `/main.sig` — the message sent immediately after a malformed noun was applied
   and stored. Zero `strange restart mark`. The remote case is the actual attack
   and it is the one that was run.
-- A malformed `%urmail-action` behaves the same: refused, and a following
+- A malformed `%auspex-action` behaves the same: refused, and a following
   `%read` and `%send` both apply.
 
 ### Attachments
@@ -148,15 +151,15 @@ Driven from a real headless browser over CDP against the ships, in the UI slice:
 - **The beacon is live and silent on a read-mark** — the loop the design
   refuses to build was checked for, not assumed.
 - The served assets are byte-identical to the committed build, and
-  `/apps/urmail/` with a trailing slash serves the same shell.
-- Unauthenticated, `/apps/urmail` and `/apps/lattice` both answer 403 on both
+  `/apps/auspex/` with a trailing slash serves the same shell.
+- Unauthenticated, `/apps/auspex` and `/apps/lattice` both answer 403 on both
   ships, while an unbound app answers eyre's own 307 — so the 403s are real
   bindings and not a catch-all.
 
 ### Neighbours and health
 
 - **Lattice is unharmed** on both ships throughout: it answers authenticated on
-  its own routes, its SPA included, after every urmail deploy.
+  its own routes, its SPA included, after every auspex deploy.
 - CPU after the final round: `~wex` 7.9%, `~feb` 2.9% over multi-day uptimes —
   no crashed-fiber respawn loop, which is the failure mode an absolute-road
   mistake produces.
@@ -212,7 +215,7 @@ end.** This is the single result the fake dev ships could not produce, and it
 was the last untested link between a fake-ship `verified` and a network one.
 
 Still true and unchanged: the nexus's own `+peer-pass` `%puby` branch has not
-executed inside urmail on a real ship — that happens the first time a real ship
+executed inside auspex on a real ship — that happens the first time a real ship
 runs the nexus. The crypto beneath it is now known good.
 
   branch**. Both read off `pkg/arvo/sys/vane/jael.hoon`. The consequences are
@@ -233,7 +236,7 @@ runs the nexus. The crypto beneath it is now known good.
   share `+collect-slots` / `+collect-node` with the writer, which *was* exercised
   end to end, and the renderers never look at a map's key. The pre-branching
   versions of the same routes were driven live in the UI slice. **A reviewer
-  with a web code should load `/apps/urmail` and open a branched thread on both
+  with a web code should load `/apps/auspex` and open a branched thread on both
   ships before this is called done.**
 - **The unreadable-count row.** `+collect-unreadable` and the placeholder listing
   row were added in the second review round, and no transcript in this record
@@ -254,7 +257,7 @@ runs the nexus. The crypto beneath it is now known good.
 ## Unevidenced
 
 - **The fresh-ship bootstrap.** The spec states that
-  `create_folder {path:'/apps', name:'urmail.urmail_app', nexus:'/urmail/app'}`
+  `create_folder {path:'/apps', name:'auspex.auspex_app', nexus:'/auspex/app'}`
   over the grubbery MCP installs the nexus, and names two specific failure modes
   for the wrong arguments — an empty node for a bad `nexus`, `inert: no handler`
   for a bad `name`. **No slice report shows either.** Every install in this
@@ -299,8 +302,8 @@ scripts/sync-overlay.sh /home/sneagan/software/wex/grubbery
 |commit %grubbery
 |suspend %grubbery
 |revive %grubbery
--test /=grubbery=/tests/lib/urmail-chain ~
--test /=grubbery=/tests/lib/urmail-web ~
+-test /=grubbery=/tests/lib/auspex-chain ~
+-test /=grubbery=/tests/lib/auspex-web ~
 ```
 
 The bounce is not optional — a deploy recompiles the nexus but does not respawn

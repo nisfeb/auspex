@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Sync the urmail grubbery-overlay into a grubbery desk root.
+# Sync the auspex grubbery-overlay into a grubbery desk root.
 #
-# urmail runs as a grubbery NEXUS, not a gall agent, and grubbery's sync-gub
+# auspex runs as a grubbery NEXUS, not a gall agent, and grubbery's sync-gub
 # only loads gub/ from its OWN desk. So the canonical source lives in this repo
 # under grubbery-overlay/ (version-controlled, tested) and is COPIED into a
 # grubbery desk tree. Re-run after every grubbery pull: a grubbery core update
 # knows nothing about this overlay, and committing the desk without re-syncing
-# culls urmail out of clay.
+# culls auspex out of clay.
 #
 # Layout mapping (overlay -> grubbery desk root):
 #   lib/*.hoon         -> gub/lib/   (deployed: the nexus imports it here)
 #                         lib/       (so desk-level /tests can import it too)
-#   nex/urmail/*       -> gub/nex/urmail/
-#   mar/urmail/*.hoon  -> gub/mar/urmail/  (persisted-state marcs)
+#   nex/auspex/*       -> gub/nex/auspex/
+#   mar/auspex/*.hoon  -> gub/mar/auspex/  (persisted-state marcs)
 #   mar-gub/*.hoon     -> gub/mar/         (the WIRE marcs. A blot with a
 #                         path prefix is unaddressable from the agent-facing
 #                         %grub-cmd surface and from a dojo poke, both of
@@ -47,15 +47,15 @@ DEST="${1:?usage: sync-overlay.sh <grubbery-desk-root>}"
 # reported it, because the overwritten file compiles fine on its own.
 #
 # So the namespace, not just the collision, is the invariant: everything this
-# overlay puts in a shared tree is named urmail-*.
+# overlay puts in a shared tree is named auspex-*.
 # ---------------------------------------------------------------------------
 BAD=0
 for f in "$OVERLAY"/lib/*.hoon; do
   [ -e "$f" ] || continue
   b="$(basename "$f")"
   case "$b" in
-    urmail-*) ;;
-    *) echo "REFUSING: lib/$b has no urmail- prefix; gub/lib is shared" >&2; BAD=1 ;;
+    auspex-*) ;;
+    *) echo "REFUSING: lib/$b has no auspex- prefix; gub/lib is shared" >&2; BAD=1 ;;
   esac
 done
 # gub/mar's top level is shared exactly like gub/lib, and for the same
@@ -64,21 +64,21 @@ for f in "$OVERLAY"/mar-gub/*.hoon; do
   [ -e "$f" ] || continue
   b="$(basename "$f")"
   case "$b" in
-    urmail-*) ;;
-    *) echo "REFUSING: mar-gub/$b has no urmail- prefix; gub/mar is shared" >&2; BAD=1 ;;
+    auspex-*) ;;
+    *) echo "REFUSING: mar-gub/$b has no auspex- prefix; gub/mar is shared" >&2; BAD=1 ;;
   esac
 done
 [ "$BAD" -eq 0 ] || exit 69
 
 # ---------------------------------------------------------------------------
 # SHADOW CHECK. Belt to the prefix check's braces, and the only guard for the
-# trees where urmail cannot own the filename: mar-clay/ and mar-core/ carry
+# trees where auspex cannot own the filename: mar-clay/ and mar-core/ carry
 # kernel-named marks (handle-http-request, gall-leave) that lattice and
 # grubbery also ship. A file this overlay would land ON TOP OF a DIFFERENT
 # existing file is a collision, and a collision must be deliberate: refuse and
 # make a human look.
 #
-# Owned = basename starts with urmail-, or the path sits under a urmail/ dir.
+# Owned = basename starts with auspex-, or the path sits under an auspex/ dir.
 # ---------------------------------------------------------------------------
 shadow_scan() {  # <overlay subdir> <dest subdir>
   local src="$1" dst="$2" rel
@@ -86,7 +86,7 @@ shadow_scan() {  # <overlay subdir> <dest subdir>
   while IFS= read -r -d '' rel; do
     rel="${rel#"$src"/}"
     case "$rel" in
-      urmail-*|*/urmail-*|urmail/*|*/urmail/*) continue ;;
+      auspex-*|*/auspex-*|auspex/*|*/auspex/*) continue ;;
     esac
     if [ -e "$dst/$rel" ] && ! cmp -s "$src/$rel" "$dst/$rel"; then
       echo "REFUSING: overlay ${src#"$OVERLAY"/}/$rel would overwrite a different $dst/$rel" >&2
@@ -114,13 +114,13 @@ mkdir -p "$DEST/gub/lib" "$DEST/lib" "$DEST/tests/lib" "$DEST/mar"
 rsync -a "$OVERLAY/lib/" "$DEST/gub/lib/"
 rsync -a "$OVERLAY/lib/" "$DEST/lib/"
 # Nexus + marcs: the gub tree only.
-if [ -d "$OVERLAY/nex/urmail" ]; then
-  mkdir -p "$DEST/gub/nex/urmail"
-  rsync -a "$OVERLAY/nex/urmail/" "$DEST/gub/nex/urmail/"
+if [ -d "$OVERLAY/nex/auspex" ]; then
+  mkdir -p "$DEST/gub/nex/auspex"
+  rsync -a "$OVERLAY/nex/auspex/" "$DEST/gub/nex/auspex/"
 fi
-if [ -d "$OVERLAY/mar/urmail" ]; then
-  mkdir -p "$DEST/gub/mar/urmail"
-  rsync -a "$OVERLAY/mar/urmail/" "$DEST/gub/mar/urmail/"
+if [ -d "$OVERLAY/mar/auspex" ]; then
+  mkdir -p "$DEST/gub/mar/auspex"
+  rsync -a "$OVERLAY/mar/auspex/" "$DEST/gub/mar/auspex/"
 fi
 # Wire marcs: gub/mar's top level (see the layout note above).
 if [ -d "$OVERLAY/mar-gub" ]; then
@@ -141,18 +141,18 @@ fi
 rsync -a "$OVERLAY/tests/" "$DEST/tests/"
 
 # Print what actually landed. Zero counts mean the overlay did not deploy and
-# the next |commit will take urmail down; do not commit on a warning.
+# the next |commit will take auspex down; do not commit on a warning.
 count() { [ -d "$1" ] || { echo 0; return 0; }; find "$1" "${@:2}" | wc -l; }
-LIB=$(count "$DEST/gub/lib" -maxdepth 1 -name 'urmail-*.hoon')
-TST=$(count "$DEST/tests" -name 'urmail-*.hoon')
-NEX=$(count "$DEST/gub/nex/urmail" -type f)
-UIA=$(count "$DEST/gub/nex/urmail/ui-app" -type f)
-MAR=$(count "$DEST/gub/mar/urmail" -type f)
-WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'urmail-*.hoon')
-echo "synced overlay -> $DEST (urmail libs: $LIB, tests: $TST, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
+LIB=$(count "$DEST/gub/lib" -maxdepth 1 -name 'auspex-*.hoon')
+TST=$(count "$DEST/tests" -name 'auspex-*.hoon')
+NEX=$(count "$DEST/gub/nex/auspex" -type f)
+UIA=$(count "$DEST/gub/nex/auspex/ui-app" -type f)
+MAR=$(count "$DEST/gub/mar/auspex" -type f)
+WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'auspex-*.hoon')
+echo "synced overlay -> $DEST (auspex libs: $LIB, tests: $TST, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
 if [ "$UIA" -ne 4 ]; then
   echo "WARNING: ui-app should be exactly index.html, app.js, manifest.json and sw.js;" >&2
-  echo "  found $UIA. Run (cd ui && npm run build) and sync again, or /apps/urmail" >&2
+  echo "  found $UIA. Run (cd ui && npm run build) and sync again, or /apps/auspex" >&2
   echo "  will 404 on whichever of the four is missing." >&2
 fi
 if [ "$LIB" -eq 0 ]; then
@@ -171,8 +171,8 @@ next, in the ~<ship> dojo - one command at a time, verify each echo:
   |commit %grubbery
   |suspend %grubbery
   |revive %grubbery
-  -test /=grubbery=/tests/lib/urmail-chain ~
-  -test /=grubbery=/tests/lib/urmail-web ~
+  -test /=grubbery=/tests/lib/auspex-chain ~
+  -test /=grubbery=/tests/lib/auspex-web ~
 NEXT
 
 # ---------------------------------------------------------------------------
@@ -187,14 +187,14 @@ NEXT
 # not write it - an overlay that edits its host's files silently is exactly
 # how the obelisk-ast clobber happened. It checks and tells you instead.
 # ---------------------------------------------------------------------------
-if ! grep -q "urmail.urmail_app" "$DEST/lib/root.hoon" 2>/dev/null; then
+if ! grep -q "auspex.auspex_app" "$DEST/lib/root.hoon" 2>/dev/null; then
   cat <<'ROOT'
 
-WARNING: lib/root.hoon on this desk does not install the urmail nexus.
+WARNING: lib/root.hoon on this desk does not install the auspex nexus.
 Add this row to the child-nexus block of +on-load in that file, next to
 the lattice row, and re-run |commit %grubbery:
 
-  [%fall %| /apps/'urmail.urmail_app' [`[`[/urmail %app] ~ %.n ~] ~]]
+  [%fall %| /apps/'auspex.auspex_app' [`[`[/auspex %app] ~ %.n ~] ~]]
 
 Until it is there the marcs and the nexus source are on the desk but no
 tree carries them, and nothing runs.

@@ -1,34 +1,34 @@
-// urmail's service worker. Hand-written, no workbox, no build plugin:
+// auspex's service worker. Hand-written, no workbox, no build plugin:
 // the whole of what it has to do is a shell precache and one network-
 // first data cache, and a generated worker would have been a dependency
 // plus a config file to express thirty lines of policy — plus a
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `34151de61713` is stamped by vite.config.ts at copy time. It is
+// `d2d65ab33ea8` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = '34151de61713'
-const SHELL = `urmail-shell-${VERSION}`
+const VERSION = 'd2d65ab33ea8'
+const SHELL = `auspex-shell-${VERSION}`
 // NOT versioned, unlike the shell. Mail is not part of the build: a
 // deploy that changes one line of CSS has nothing to say about the
 // listing, and a version-keyed data cache would throw away every cached
 // conversation on every deploy — so the first offline open after an
 // update would show an empty mailbox.
-const DATA = 'urmail-data'
+const DATA = 'auspex-data'
 
-const BASE = '/apps/urmail'
+const BASE = '/apps/auspex'
 
-// The shell, by the URLs the nexus actually serves. `/apps/urmail/` and
-// `/apps/urmail` are the same document to the nexus (it strips the
+// The shell, by the URLs the nexus actually serves. `/apps/auspex/` and
+// `/apps/auspex` are the same document to the nexus (it strips the
 // trailing empty knot), and both are reachable from a bookmark, so the
 // fetch handler normalises rather than precaching two copies.
 const SHELL_URLS = [`${BASE}/`, `${BASE}/app.js`, `${BASE}/manifest.json`]
 
 // No icon URL in that list, because there is no icon URL: the manifest
-// carries its icon as a data: URI. urmail has no unauthenticated route
+// carries its icon as a data: URI. auspex has no unauthenticated route
 // and never gains one, so an icon fetched over HTTP would be a fetch
 // browsers make without credentials against a route that answers 403 —
 // and the only other copy of the same grub is under /grubbery/, which
@@ -51,10 +51,10 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    // Shell caches only. `urmail-data` is deliberately outside this
+    // Shell caches only. `auspex-data` is deliberately outside this
     // sweep: it is not keyed by build and must survive one.
     const stale = (await caches.keys())
-      .filter((k) => k.startsWith('urmail-shell-') && k !== SHELL)
+      .filter((k) => k.startsWith('auspex-shell-') && k !== SHELL)
     for (const k of stale) await caches.delete(k)
     await self.clients.claim()
     // One line to the page, which turns it into a "reload" prompt. The
@@ -67,7 +67,7 @@ self.addEventListener('activate', (e) => {
     // to ignore the prompt.
     if (stale.length === 0) return
     for (const c of await self.clients.matchAll({ type: 'window' })) {
-      c.postMessage({ urmail: 'updated' })
+      c.postMessage({ auspex: 'updated' })
     }
   })())
 })
@@ -110,7 +110,7 @@ self.addEventListener('fetch', (e) => {
   if (isShell(p)) {
     e.respondWith((async () => {
       // Normalise the bookmark form onto the precached one, or a user
-      // arriving at /apps/urmail (no slash) offline gets a miss for a
+      // arriving at /apps/auspex (no slash) offline gets a miss for a
       // document that is sitting in the cache.
       const key = p === BASE ? `${BASE}/` : p
       const hit = await caches.match(key)
@@ -156,7 +156,7 @@ self.addEventListener('fetch', (e) => {
         // dropping it makes a stale mailbox indistinguishable from a
         // live one on the surface, not just in devtools.
         const h = new Headers(hit.headers)
-        h.set('x-urmail-cached', '1')
+        h.set('x-auspex-cached', '1')
         return new Response(await hit.blob(), {
           status: hit.status, statusText: hit.statusText, headers: h,
         })

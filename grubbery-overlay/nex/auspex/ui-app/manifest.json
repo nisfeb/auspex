@@ -1,16 +1,16 @@
 {
-  "name": "urmail",
-  "short_name": "urmail",
+  "name": "Auspex",
+  "short_name": "Auspex",
   "description": "Signed mail, verified end to end.",
-  "start_url": "/apps/urmail/",
-  "scope": "/apps/urmail/",
+  "start_url": "/apps/auspex/",
+  "scope": "/apps/auspex/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#ffffff",
   "theme_color": "#1a73e8",
   "icons": [
     {
-      "src": "/apps/urmail/icon.svg",
+      "src": "/apps/auspex/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"

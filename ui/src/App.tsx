@@ -28,7 +28,7 @@ interface InstallPrompt extends Event {
   prompt: () => Promise<unknown>
 }
 
-const THEME_KEY = 'urmail:theme'
+const THEME_KEY = 'auspex:theme'
 
 export default function App() {
   const [pane, setPane] = useState<Pane>('inbox')
@@ -153,7 +153,7 @@ export default function App() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
     const heard = (e: MessageEvent) => {
-      if ((e.data as { urmail?: string } | null)?.urmail === 'updated') setUpdated(true)
+      if ((e.data as { auspex?: string } | null)?.auspex === 'updated') setUpdated(true)
     }
     navigator.serviceWorker.addEventListener('message', heard)
     return () => { navigator.serviceWorker.removeEventListener('message', heard) }
@@ -320,7 +320,7 @@ export default function App() {
       )}
       {updated && (
         <div className="flex shrink-0 items-center gap-2 bg-accent-soft px-3 py-1 text-accent-soft-ink">
-          A newer urmail is installed on this device.
+          A newer auspex is installed on this device.
           <button
             type="button"
             onClick={() => { window.location.reload() }}

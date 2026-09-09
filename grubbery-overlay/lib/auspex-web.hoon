@@ -1,4 +1,4 @@
-::  urmail-web: the JSON request decoders for the HTTP surface.
+::  auspex-web: the JSON request decoders for the HTTP surface.
 ::
 ::    Everything a browser POSTs at this nexus arrives here first. That is
 ::    a hostile surface even on a single-user app - the routes sit behind
@@ -18,7 +18,7 @@
 ::    IMPORT-FREE, and therefore testable: this is the rule the v3 spec
 ::    sets out ("anything worth testing goes in an import-free lib, and
 ::    the nexus glue may import freely"). It is also why the decoded
-::    shapes below are stdlib tuples rather than $action:urmail-chain - an
+::    shapes below are stdlib tuples rather than $action:auspex-chain - an
 ::    overlay lib that imported the chain lib could only be built from the
 ::    nexus and could never be reached by -test. The nexus assembles the
 ::    action from these fields, which costs one line per route and keeps
@@ -98,7 +98,7 @@
 ::
 ::  ── the mail-client requests ────────────────────────────────────────
 ::
-::  Stdlib tuples, not $action:urmail-chain: this lib is IMPORT-FREE so
+::  Stdlib tuples, not $action:auspex-chain: this lib is IMPORT-FREE so
 ::  -test can reach it, and an overlay lib that imported the chain lib
 ::  could only be built from the nexus. The nexus assembles the action
 ::  from these fields, which costs one line per route and keeps the
@@ -315,7 +315,7 @@
 ::  ── the transport: raw bytes on a route of their own ────────────────
 ::
 ::    An attachment does NOT ride in this JSON. The bytes go up on their
-::    own request - POST /apps/urmail/api/blob, body = the file, content
+::    own request - POST /apps/auspex/api/blob, body = the file, content
 ::    type application/octet-stream - which stores them and answers
 ::    their content address; the send that follows names those addresses
 ::    and carries no bytes at all. So nothing in this lib decodes a file
@@ -340,7 +340,7 @@
 ::    stored blob is a 400, and a hash naming one is measured on the
 ::    ship.
 ::
-::    Structurally $attach-ref:urmail-chain, spelled out here because
+::    Structurally $attach-ref:auspex-chain, spelled out here because
 ::    this lib is IMPORT-FREE and may not reach that one. The nexus
 ::    nests one into the other; they cannot drift without the build
 ::    saying so.

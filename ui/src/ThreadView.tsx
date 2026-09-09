@@ -674,7 +674,7 @@ export default function ThreadView({
           anyone who should not get that history.
         </p>
       </div>
-      {/* max-body in grubbery-overlay/lib/urmail-chain.hoon. See
+      {/* max-body in grubbery-overlay/lib/auspex-chain.hoon. See
           Compose.tsx: a guard rail in UTF-16 units, not the authority. */}
       <textarea
         value={reply}

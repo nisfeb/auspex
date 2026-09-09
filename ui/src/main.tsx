@@ -33,7 +33,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
   componentDidCatch(error: unknown, info: unknown) {
     // The console is the only place with the stack. Keep it, then say
     // something on screen too — that split is the whole point.
-    console.error('urmail: render failed', error, info)
+    console.error('auspex: render failed', error, info)
   }
 
   render() {
@@ -94,12 +94,12 @@ whoami().catch((e) => { console.error(e) }).then(mount)
 // on a non-secure origin, where the API is simply absent) gets exactly
 // the app it got before this existed.
 //
-// Scoped by its own location: sw.js is served from /apps/urmail/, so its
+// Scoped by its own location: sw.js is served from /apps/auspex/, so its
 // default scope is already the app's route and no Service-Worker-Allowed
 // header is needed.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/apps/urmail/sw.js')
-      .catch((e: unknown) => { console.error('urmail: service worker', e) })
+    navigator.serviceWorker.register('/apps/auspex/sw.js')
+      .catch((e: unknown) => { console.error('auspex: service worker', e) })
   })
 }

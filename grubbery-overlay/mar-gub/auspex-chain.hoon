@@ -1,12 +1,12 @@
-::  mar/urmail-chain: the wire marc. A whole signed chain, as poked at the
+::  mar/auspex-chain: the wire marc. A whole signed chain, as poked at the
 ::  writer by any ship on the network.
 ::
-::    Top level in gub/mar, not gub/mar/urmail/, because a blot with a path
+::    Top level in gub/mar, not gub/mar/auspex/, because a blot with a path
 ::    prefix is unreachable from the two surfaces a peer actually uses: the
 ::    %grub-cmd agent surface flattens a blot to its bare name (`mark=@tas`
 ::    in sur/grub), and a dojo poke names a bare mark too. The delivery blot
-::    has to be [/ %urmail-chain] or a foreign ship cannot address it at
-::    all. The urmail- prefix is what keeps a top-level file in a shared
+::    has to be [/ %auspex-chain] or a foreign ship cannot address it at
+::    all. The auspex- prefix is what keeps a top-level file in a shared
 ::    tree from shadowing grubbery's own.
 ::
 ::    A NOUN PASSTHROUGH, and the reversal of an earlier decision that
