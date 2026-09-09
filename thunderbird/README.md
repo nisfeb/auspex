@@ -173,6 +173,26 @@ which the background fetches at startup; an ordinary build has no such file
 and none of that code is even imported. **Never install a selftest build you
 did not build yourself: it carries an access code.**
 
+### A caveat about sideloaded builds
+
+A selftest build is installed by dropping the zip at
+`<profile>/extensions/auspex@nisfeb.org.xpi`, which grants its host
+permissions at install rather than through `permissions.request`. **On
+Thunderbird 147 that grant is recorded but not effective for `fetch`.**
+`browser.permissions.getAll()` lists the origin, and a fetch to it still
+comes back with `response.type === "cors"` and throws on any response
+without an `access-control-allow-origin` header — the ship sends none,
+because it is answering a same-origin client. A control endpoint on the
+*same permitted origin* that does send the header succeeds, which is what
+isolates the cause to CORS rather than to the network or to the ship.
+
+So a sideloaded selftest build reaches the ship (the login answers 200 and
+sets `urbauth-~ship`) and `fetch` rejects anyway. The ordinary install path
+does not go through that door: **Install Add-on From File** plus the
+options page's `permissions.request({origins})` under a real click is a
+different grant, and is the path to use. If you see "unreachable" against a
+ship you can `curl`, this is the first thing to check.
+
 ## Manual test, if you would rather click
 
 1. Connect on the options page; **Local Folders → Auspex → Inbox** fills.

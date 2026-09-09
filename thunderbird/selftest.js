@@ -19,13 +19,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export async function runSelftest(cfg, api) {
   const log = async (step, ok, detail) => {
+    const line = JSON.stringify({ step, ok, detail, at: Date.now() })
+    //  TWO CHANNELS, because either one can be the one that survives. `dump`
+    //  reaches the terminal that started Thunderbird (with
+    //  browser.dom.window.dump.enabled set); the sink reaches a file. The
+    //  body is text/plain deliberately: a JSON content-type makes this a
+    //  preflighted CORS request, and a preflight is one more thing that can
+    //  fail between the evidence and the person meant to read it.
+    try { dump(`AUSPEX-SELFTEST ${line}\n`) } catch { /* no dump here */ }
     try {
       await fetch(cfg.sink, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ step, ok, detail, at: Date.now() }),
+        method: 'POST', headers: { 'content-type': 'text/plain' }, body: line,
       })
-    } catch { /* the sink is evidence, never a dependency */ }
+    } catch (e) {
+      try { dump(`AUSPEX-SELFTEST sink-failed ${e && e.message}\n`) } catch { /* */ }
+    }
   }
 
   const step = async (name, fn) => {
@@ -38,6 +46,52 @@ export async function runSelftest(cfg, api) {
       return null
     }
   }
+
+  //  A FETCH PROBE, first, because "NetworkError" from an extension is one
+  //  word for a dozen causes and the only way to tell them apart is to vary
+  //  one thing at a time.
+  await step('probe', async () => {
+    const out = {}
+    const tries = [
+      ['sink-cors', `${new URL(cfg.sink).origin}/report`, {}],
+      ['sink-nocors', `${new URL(cfg.sink).origin}/nocors`, {}],
+      ['get-plain', `${cfg.origin}/~/login`, {}],
+      ['get-creds', `${cfg.origin}/~/login`, { credentials: 'include' }],
+      ['get-api', `${cfg.origin}/apps/auspex/api/whoami`, { credentials: 'include' }],
+      ['post-plain', `${cfg.origin}/~/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: `password=${encodeURIComponent(cfg.code)}`,
+      }],
+      ['post-creds', `${cfg.origin}/~/login`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: `password=${encodeURIComponent(cfg.code)}`,
+      }],
+    ]
+    try {
+      out.hasShipOrigin = await browser.permissions.contains({ origins: [`${cfg.origin}/*`] })
+      out.hasSinkOrigin = await browser.permissions.contains({ origins: [`${new URL(cfg.sink).origin}/*`] })
+      out.all = JSON.stringify(await browser.permissions.getAll())
+    } catch (e) { out.perms = `THREW ${e && e.message}` }
+    for (const [name, url, init] of tries) {
+      try {
+        const r = await fetch(url, init)
+        out[name] = `${r.status} ${r.type}`
+      } catch (e) { out[name] = `THREW ${e && e.message}` }
+    }
+    //  Is the origin merely RECORDED as granted, or actually registered
+    //  with the extension policy the network layer consults? Re-requesting
+    //  an already-granted permission resolves without a prompt, and if the
+    //  fetch works afterwards the two were out of step.
+    try {
+      out.reRequest = await browser.permissions.request({ origins: [`${cfg.origin}/*`] })
+      const r = await fetch(`${cfg.origin}/apps/auspex/api/whoami`, { credentials: 'include' })
+      out.afterRequest = `${r.status} ${r.type}`
+    } catch (e) { out.afterRequest = `THREW ${e && e.message}` }
+    return JSON.stringify(out)
+  })
 
   //  ── connect and mirror ────────────────────────────────────────────
 
