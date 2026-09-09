@@ -175,6 +175,15 @@
           ::  +publish-proto at writer rise; see that arm for why it
           ::  grows only when the spur is unbound.
           [%over %& [/ %proto] [[/auspex %proto] our-proto:uc]]
+          ::  /proto-pub: WHAT WE LAST GREW INTO THE FARM, which is not
+          ::  the same question as what we now publish. The farm binding
+          ::  cannot be read back from inside this ship - a keen
+          ::  addressed to ourselves does not answer - and growing on a
+          ::  read that failed burns a case for no information, so the
+          ::  record is kept here instead. %fall with the BUNT, so the
+          ::  first boot after this row existed republishes once and
+          ::  every boot after that is free.
+          [%fall %& [/ %'proto-pub'] [[/auspex %proto] *proto:uc]]
           ::  the writer. %fall, so an existing live process is kept.
           [%fall %& [/ %'main.sig'] [[/ %sig] ~]]
           ::  /mail: %fall %| copies the WHOLE existing subtree, which is
@@ -294,8 +303,7 @@
         =/  root=path  path.here
         ;<  ~  bind:m  (grant-public root)
         ;<  ~  bind:m  (republish-all root)
-        ;<  our=@p  bind:m  bowl-our
-        ;<  ~  bind:m  (publish-proto our)
+        ;<  ~  bind:m  publish-proto
         ;<  ~  bind:m  (migrate-flat root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
@@ -2080,38 +2088,56 @@
 ::    caps, and the receiver enforces those regardless.
 ::
 ++  publish-proto
-  |=  our=ship
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ;<  here=rail:tarball  bind:m  get-here-abs:io
+  =/  root=path  (snip path.here)
   ;<  bound=?  bind:m  (farm-has proto-spur:uc)
-  ?.  bound
-    ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
-    (trace:io ~[leaf+"auspex: published /proto into the farm"])
-  ::  bound already. READ BACK WHAT A PEER WOULD GET, through the exact
-  ::  arm a peer uses, and grow only if it is not what we now publish.
-  ::  A keen to ourselves, at rise, once - not on any send path.
-  ;<  have=(unit proto:uc)  bind:m  (keen-proto our 1)
-  ?~  have
-    ::  bound and unreadable. DO NOT GROW: a grow raises the case a peer
-    ::  has to probe for, cases only ever go up, and burning one on a
-    ::  read we could not perform is how the ceiling gets reached by
-    ::  accident. Say so instead.
-    %-  trace:io
-    ~[leaf+"auspex: /proto is bound and did not read back; not republishing"]
-  ?:  =(u.have our-proto:uc)  (pure:m ~)
-  ::  IT CHANGED. Cull first and grow second, and the order is the whole
-  ::  correctness argument: +keen-proto probes upward from case 1 and
-  ::  takes the FIRST hit, so growing without culling would leave the
-  ::  old noun answering at case 1 forever and the new one unreachable
-  ::  behind it. The cull parks a high-water mark, case 1 then misses,
-  ::  and the probe finds the new binding at 2.
+  ;<  last=proto:uc  bind:m  (read-proto-pub root)
+  ?:  &(bound =(last our-proto:uc))
+    (trace:io ~[leaf+"auspex: /proto unchanged; not republishing"])
+  ::  IT CHANGED, or the binding is gone. Cull first and grow second
+  ::  when it is bound, and the order is the whole correctness argument:
+  ::  +keen-proto probes upward from case 1 and takes the FIRST hit, so
+  ::  growing without culling would leave the old noun answering at case
+  ::  1 forever and the new one unreachable behind it.
   ::
   ::  ONE GROW PER PROTOCOL CHANGE, never per deploy - which is what
-  ::  keeps this inside +max-case-probe. The read-back above is what
-  ::  makes a redeploy of unchanged content free.
-  ;<  ~  bind:m  (cull-farm:io proto-spur:uc)
+  ::  keeps this inside +max-case-probe. /proto-pub is the record that
+  ::  makes a redeploy of unchanged content free, and it is a LOCAL
+  ::  record rather than a read of the farm because the farm cannot be
+  ::  read from here: a keen addressed to our own ship does not answer,
+  ::  and treating that silence as "unbound" would grow on every bounce
+  ::  and reach the ceiling in three.
+  ::
+  ::  +farm-has is still consulted, so a binding lost to a nuked agent
+  ::  or a rebuilt yoke is re-grown even when our record says we already
+  ::  published it - the same insurance +republish-all is for blobs.
+  ;<  ~  bind:m
+    ?.  bound  (pure:m ~)
+    (cull-farm:io proto-spur:uc)
   ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
-  (trace:io ~[leaf+"auspex: /proto changed; republished"])
+  ;<  ~  bind:m
+    (put-file [%& %& root %'proto-pub'] [/auspex %proto] our-proto:uc)
+  %-  trace:io
+  :~  leaf+"auspex: /proto {?:(bound "changed" "published")}; grown into the farm"
+  ==
+::
+::  +read-proto-pub: what we last grew. The bunt when the grub is absent
+::  or unreadable, and the bunt is never a real $proto, so either way the
+::  answer is "republish" - the safe direction, since a spurious
+::  republish costs one case and a missed one costs every peer a stale
+::  answer until the next protocol change.
+::
+++  read-proto-pub
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,proto:uc)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %& root %'proto-pub'] ~)
+  ?.  ?=([%file *] vw)  (pure:m *proto:uc)
+  ?:  (is-boom:tarball sang.vw)  (pure:m *proto:uc)
+  =/  res  (mule |.(;;(proto:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%| -.res) *proto:uc p.res))
 ::
 ::  ── the blob fetch ──────────────────────────────────────────────────
 ::
