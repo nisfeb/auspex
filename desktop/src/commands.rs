@@ -236,8 +236,20 @@ pub fn open_external(url: &str) -> Result<(), String> {
     if !openable(url) {
         return Err(format!("refused to open {url:?}"));
     }
-    let bin = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    // Windows: NOT `cmd /C start` — `&`, `|`, `^` and `%` are legal in a URL
+    // query string and are cmd metacharacters, so a crafted link would run
+    // a command. rundll32's FileProtocolHandler takes the URL as a plain
+    // argv entry and hands it to the default handler with no shell in the
+    // path, which is the same property `open` and `xdg-open` have.
+    let (bin, pre): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("open", &[])
+    } else if cfg!(target_os = "windows") {
+        ("rundll32", &["url.dll,FileProtocolHandler"])
+    } else {
+        ("xdg-open", &[])
+    };
     let child = std::process::Command::new(bin)
+        .args(pre)
         .arg(url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

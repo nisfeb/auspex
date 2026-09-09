@@ -12,11 +12,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      draft:
-        description: 'create the release as a draft'
-        type: boolean
-        default: true
 
 permissions:
   contents: write        # needed to create the release and upload assets
@@ -79,7 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('untagged-{0}', github.sha) }}
-          PRE: ${{ contains(github.ref_name, '-') }}
+          PRE: ${{ github.ref_type == 'tag' && contains(github.ref_name, '-') }}
         run: |
           set -euo pipefail
           body=$(cat <<'BODY'

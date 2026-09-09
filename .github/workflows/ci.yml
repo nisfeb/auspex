@@ -35,6 +35,12 @@ jobs:
       # where this script comes from.
       - name: tauri commands are registered everywhere
         run: node scripts/desktop-commands.mjs
+      - uses: dtolnay/rust-toolchain@stable
+      # the tauri tree is several minutes of compile; without a cache every
+      # PR pays it in full (the release matrix already caches the same way)
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop -> target
       - name: cargo test
         working-directory: desktop
         run: cargo test

@@ -232,11 +232,39 @@ pub fn ship_from_cookie(cookie: &str) -> Option<String> {
 }
 
 /// Write the session where every outbound request reads it from.
+///
+/// The cookie IS the ship login. 0600 on the file and 0700 on its directory,
+/// set at creation rather than after the write, so there is no window where
+/// another local user can read it. A plain `fs::write` under a default umask
+/// lands 0644, which is how the first build shipped it.
 pub fn store_cookie(path: &std::path::Path, cookie: &str) -> Result<(), String> {
+    use std::io::Write as _;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let mut b = std::fs::DirBuilder::new();
+        b.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt as _;
+            b.mode(0o700);
+        }
+        b.create(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, cookie).map_err(|e| e.to_string())
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        o.mode(0o600);
+    }
+    let mut f = o.open(path).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        //  an existing 0644 file keeps its mode through OpenOptions; fix it
+        use std::os::unix::fs::PermissionsExt as _;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+    }
+    f.write_all(cookie.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// The session cookie at `path`, if there is one. A file that is missing,
@@ -330,6 +358,14 @@ fn read_request(reader: &mut impl BufRead) -> std::io::Result<Option<Incoming>> 
         (Some(m), Some(t)) => (m.to_string(), t.to_string()),
         _ => return Ok(None),
     };
+    // Origin-form only. The upstream URL is `ship + target`, so a target
+    // that does not start with '/' (an absolute URI, or `@evil.com/x`,
+    // which url-parses as a userinfo and a DIFFERENT host) would carry the
+    // session cookie somewhere other than the configured ship. No browser
+    // emits such a target to a same-origin server; a raw local client can.
+    if !target.starts_with('/') {
+        return Ok(None);
+    }
     // headers: keep what the page sent except hop-by-hop, host and cookies.
     // Accept-Encoding passes THROUGH. ureq (no gzip feature) hands us the
     // compressed body verbatim and Content-Encoding rides back with it, so
@@ -459,6 +495,37 @@ mod tests {
 
     use crate::testutil::Stub;
     use proptest::prelude::*;
+
+    #[test]
+    fn only_an_origin_form_target_is_relayed() {
+        // `ship + target` is the upstream URL. A target that does not start
+        // with '/' would carry the session cookie to a different host:
+        // `@evil.com/x` url-parses as userinfo + host evil.com.
+        for bad in ["GET @evil.com/x HTTP/1.1\r\n\r\n", "GET http://evil.com/ HTTP/1.1\r\n\r\n"] {
+            let mut r = std::io::Cursor::new(bad.as_bytes());
+            assert!(read_request(&mut r).unwrap().is_none(), "{bad:?} must be refused");
+        }
+        let mut r = std::io::Cursor::new(b"GET /apps/auspex/ HTTP/1.1\r\n\r\n".as_ref());
+        assert!(read_request(&mut r).unwrap().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cookie_file_is_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("auspex-cookie-{}", std::process::id()));
+        let path = dir.join("cookie");
+        // twice: the second write hits the existing-file path, which keeps
+        // whatever mode the file already has unless it is set explicitly
+        for _ in 0..2 {
+            store_cookie(&path, "urbauth-~wex=0v1").unwrap();
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "cookie file mode {mode:o}");
+        }
+        let dmode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dmode, 0o700, "cookie dir mode {dmode:o}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     /// Point the cookie file at a per-process temp path holding `cookie`, or
     /// at nothing when None. The bridge and the probe both read

@@ -163,14 +163,41 @@ pub fn diff(seen: &mut HashSet<String>, rows: &[Row]) -> Vec<Note> {
 /// `FORGED` goes FIRST, before the sender it contradicts. A notification is
 /// read left to right in half a second and often not read to the end, so a
 /// warning after the name it warns about is a warning that arrives too late.
+///
+/// Every field here is SIGNED BUT HOSTILE: the sender chose it. Several
+/// notification daemons (GNOME Shell, KDE, anything libnotify-shaped) parse
+/// the body as Pango markup, so a subject of `<a href="…">` would render as a
+/// clickable link in the user's notification and a bare `&` would make the
+/// daemon drop the body. Escaped, and capped: nothing bounds a subject on the
+/// wire, and a 4KB notification is a screen-sized one.
 fn note_for(r: &Row) -> Note {
     let subject = if r.subject.is_empty() { "(no subject)" } else { &r.subject };
     let title = if r.forged {
-        format!("FORGED · {} · {}", r.from, subject)
+        format!("FORGED · {} · {}", r.from, safe(subject, 120))
     } else {
-        format!("{} · {}", r.from, subject)
+        format!("{} · {}", safe(&r.from, 60), safe(subject, 120))
     };
-    Note { title, body: r.snippet.clone() }
+    Note { title, body: safe(&r.snippet, 200) }
+}
+
+/// Markup-escaped and cut at `max` characters (not bytes — a cut through a
+/// multibyte sequence is not a string), with an ellipsis when cut.
+fn safe(s: &str, max: usize) -> String {
+    let mut out = String::with_capacity(s.len().min(max) + 8);
+    for (i, c) in s.chars().enumerate() {
+        if i == max {
+            out.push('…');
+            break;
+        }
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Up once the notifier thread exists, so the two places that start it —
@@ -216,8 +243,12 @@ fn raise(app: &AppHandle, n: &Note) {
 fn on_change(app: &AppHandle, base: &str, seen: &mut HashSet<String>) {
     match fetch_inbox(base) {
         Ok(rows) => {
+            let before = seen.len();
             let notes = diff(seen, &rows);
-            dlog(&format!("notify: change — {} row(s), {} new", rows.len(), notes.len()));
+            //  rows.len() and the notes are both capped views; the honest
+            //  "new" is how many unread ids the snapshot did not hold
+            let fresh = rows.iter().filter(|r| r.unread).count().saturating_sub(before.min(rows.len()));
+            dlog(&format!("notify: change — {} row(s), {} note(s), ~{} new", rows.len(), notes.len(), fresh));
             for n in &notes {
                 raise(app, n);
             }
@@ -417,6 +448,28 @@ mod tests {
         let notes = diff(&mut seen, &rows[..CAP]);
         assert_eq!(notes.len(), CAP);
         assert!(notes.iter().all(|n| !n.title.starts_with('…')));
+    }
+
+    #[test]
+    fn a_hostile_subject_cannot_mark_up_the_notification() {
+        // libnotify daemons parse the body (and some the title) as Pango
+        // markup: a sender-chosen `<a href>` would be a clickable link in an
+        // OS notification, and a bare `&` drops the body entirely.
+        let r = Row {
+            from: "~zod".into(),
+            subject: "<a href=\"http://evil\">click</a> & more".into(),
+            snippet: "<b>bold</b>".into(),
+            forged: false,
+            ..Default::default()
+        };
+        let n = note_for(&r);
+        assert!(!n.title.contains('<') && !n.title.contains('>'), "{}", n.title);
+        assert!(n.title.contains("&lt;a href") && n.title.contains("&amp; more"), "{}", n.title);
+        assert_eq!(n.body, "&lt;b&gt;bold&lt;/b&gt;");
+        // and a subject with no bound on the wire is cut, by characters
+        let long = Row { subject: "é".repeat(500), ..r };
+        let t = note_for(&long).title;
+        assert!(t.ends_with('…') && t.chars().count() < 140, "{}", t.chars().count());
     }
 
     #[test]
