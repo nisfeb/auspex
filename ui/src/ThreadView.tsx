@@ -586,20 +586,19 @@ export default function ThreadView({
         >
           {t.archived ? 'Unarchive' : 'Archive'}
         </button>
-        {t.messages.some((m) => m.read && m.verdict !== 'forged') && (
-          // Only when there is something to un-read. Before the read mark
-          // opening this thread lands, every message is still unread and
-          // the button would offer to do what is already so.
-          <button
-            type="button"
-            onClick={onUnread}
-            title="Mark every message here unread and go back to the list. Messages whose
-              signature failed are left alone: a forgery never counts toward unread."
-            className="btn shrink-0"
-          >
-            Mark unread
-          </button>
-        )}
+        {/* Always offered: a thread that is open is a thread the ship has
+            marked read as it served it, so there is always something to
+            un-read. (The listing's stale bold row was what made this look
+            wrong; it un-bolds on load now.) */}
+        <button
+          type="button"
+          onClick={onUnread}
+          title="Mark every message here unread and go back to the list. Messages whose
+            signature failed are left alone: a forgery never counts toward unread."
+          className="btn shrink-0"
+        >
+          Mark unread
+        </button>
         <button
           type="button"
           onClick={onDelete}
