@@ -557,6 +557,96 @@ remote-scry farm at `/urmail/blob/<hash>`.
 - Blobs are a cache. Losing one loses a file, never a message and never a
   signature.
 
+## Bytes across the HTTP surface
+
+The nexus half of attachments was complete a slice before any of it was
+reachable: a message could carry a signed `[name size mime hash]`, the bytes
+could sit at `/mail/blob/<hash>`, and no route moved a single byte between the
+browser and the ship.
+
+**Upload rides base64 inside the JSON `/api/send` already takes.** The
+alternative was multipart and it is out twice over. The desk's `lib/multipart`
+is not in `gub/lib`, so a nexus cannot import it; and its `$part` carries
+`body=@t`, a bare atom with **no declared length**, which silently drops a
+file's trailing zero bytes — and the content hash is then taken over the
+truncation, so the loss is invisible twice. Writing a second multipart decoder
+in the import-free lib was the previous attempt at this slice and it is what
+broke the build.
+
+The ceiling was measured before the choice, not after: eyre hands a request
+fiber the whole body and `+de:json:html` is jetted, so a **32MB JSON body
+round-trips in ~1.3s** on `~wex`. `max-blob` is 256K, about 350K encoded, and
+`max-attach` files at that size is 5.5MB — two orders inside the ceiling. The
+JSON body is also already the shape every other write route takes, so this adds
+one decoder and no marc.
+
+**The base64 decoder is urmail's own** (`+de-b64`), not
+`+de:base64:mimes:html`, which is `(rush a parse)` — a parser-combinator sweep
+that turns the payload into a tape and matches it character by character. That
+is precisely the shape grubbery's `lib/multipart` was rewritten away from after
+it OOMed on large uploads. `+de-b64` does the same arithmetic over jetted atom
+ops: one `+rip` in, one `+rep`, one `+swp` out. The reduction is zuse's, line
+for line, because it is the easy part to get subtly wrong — base64 is
+big-endian within each 24-bit group and an urbit atom is little-endian. `len`
+comes from the **digit count and never from `+met`**, and the result is trimmed
+to `len`, which is what makes a file that begins or ends in a zero byte
+survive and hash the same on both ships.
+
+**Download is `GET /api/blob/<hash>`**, owner-gated, and it answers **409 `not
+fetched`** rather than 404 for a blob this ship does not hold — see the route
+table. It serves only bytes that re-derive to the hash in the path.
+
+### `name` and `mime` at the header boundary
+
+Both are **signed and hostile**. A signature proves the author chose the value,
+never that it is safe, and the chain carrying it is delivered by whoever felt
+like it. `+text-ok` refuses control bytes on the way *in*, but a blob on disk
+may have been signed and stored by a build that did not, and a recipient cannot
+repair a signed field without destroying the evidence. So the download header
+gets its own guard and it does not care where the value came from.
+
+- **`mime` never reaches a header raw.** A fixed **allow-list** (`+ok-mimes`),
+  else `application/octet-stream`. An allow-list because the failure being
+  prevented is not a bad type but a **CR or LF in the value**, which splits the
+  response and lets a pre-signed string write headers of its own; no blocklist
+  can close that, and a list of exact cords closes it without parsing anything.
+  `text/html` and `image/svg+xml` are deliberately absent.
+- **`Content-Disposition: attachment`, always**, plus `nosniff`. A hostile HTML
+  or SVG rendered inline is XSS in the owner's session with their cookie
+  attached. Two independent reasons not to render one is the right number.
+- **`name` is sanitized** (`+safe-name`): separators, quotes, backslashes,
+  semicolons, every control byte and every byte above ASCII are *dropped*
+  rather than escaped, capped at 128 bytes, and a name that survives as nothing
+  — or as nothing but dots — becomes the hash. The stated cost: a filename in a
+  non-Latin script downloads as its content address. RFC 6266's `filename*=` is
+  the fix and it is not here.
+
+`name` and `mime` reach the route in the **query string**, out of the signed
+`$attachment` the client just rendered, because a blob grub is bytes and an
+arrival time and nothing else — recovering the metadata server-side would mean
+walking every thread on the ship per download. That makes them client-supplied,
+which changes nothing: they were hostile already, and the two guards above
+refuse them identically whichever way they arrived.
+
+### A blob arrival does not move the beacon
+
+`+take-blob` answers `%.n` on success. `+apply`'s answer is what moves
+`/beacon/rev`, and a blob arriving is not message content: no message appeared,
+none changed, and no listing row reads differently for it. A bump would cost
+every open tab a full inbox listing — `O(total stored messages)` — plus a
+thread refetch, for bytes only the tab that asked is waiting on.
+
+It is also the read-mark amplification argument with a sharper edge.
+`%fetch-blob` is a local action, but the **answer arrives from a peer**, so a
+bump here would let whoever serves the bytes decide when this ship refetches
+its whole mailbox. The waiting tab polls `GET /api/blob` instead, which is one
+peek per retry against a route it was going to call anyway.
+
+**Attachments do not survive a draft.** A draft grub has no files field and
+`%save-draft` carries none, so a composer with a file attached takes the direct
+`/api/send` path and never save-then-`%send-draft`. Routing an attached send
+through the draft path would drop every attachment silently and report success.
+
 ## The fetch is a keen, not a poke protocol
 
 Per the mesa work done on lattice, the keen is the kernel scry farm and is the
@@ -784,9 +874,16 @@ where there is nothing to mutate, keep the flag alone.
 | GET | `/apps/urmail/api/whoami` | our own `@p` |
 | GET | `/apps/urmail/api/inbox` | the listing |
 | GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
-| POST | `/apps/urmail/api/send` | compose, reply and forward |
+| GET | `/apps/urmail/api/blob/<hash>` | one attachment's bytes |
+| POST | `/apps/urmail/api/send` | compose, reply and forward, with files |
 | POST | `/apps/urmail/api/read` | mark a set of messages read |
+| POST | `/apps/urmail/api/fetch-blob` | pull an attachment's bytes from a peer |
 | POST | `/apps/urmail/api/delete-thread` | remove a thread from this ship |
+
+The mail-client writes are the same shape and are listed in
+`+handle-request`: `unread`, `label`, `archive`, `draft`, `draft-delete`,
+`draft-send`, `rule`, `rule-delete`, plus `GET /api/drafts` and `GET
+/api/rules`.
 
 A trailing slash is a trailing empty knot and is stripped, because a bookmark is
 exactly where one comes from.
@@ -837,13 +934,19 @@ will ever see. Ids naming nothing are skipped rather than refused: a set is a
 client reporting what it just rendered, and a thread deleted in another tab
 between render and poke would otherwise fail the whole batch.
 
-**The attachment surface is the one part of this table still being written.**
-The writer has implemented `%fetch-blob`, `%restrict-blob`, `%publish-blob` and
-files on `%send` since the attachments slice, and until this round no route
-reached any of them — a message carrying a file rendered with no sign of it.
-That work is in flight as this is written, so treat the table above as the
-surface at this commit and read `+handle-request` for the current one. The gap
-was always in the surface, never in the nexus.
+**`/api/blob/<hash>` is the only route that answers anything but JSON**, and
+the only one whose body is not something this nexus wrote. It is owner-gated
+like every other data read, it re-derives the hash from the bytes before
+answering, and it answers **409 `not fetched`** — never 404 — for a blob this
+ship does not hold. Bytes are never pushed, so *unfetched* is the ordinary
+state of an inbound attachment; 404 would say the file does not exist when what
+it means is "ask for it". The client turns the 409 into a Fetch control that
+pokes `%fetch-blob` and then retries this route.
+
+`%restrict-blob` and `%publish-blob` still have no route. They are writer
+actions with no UI behind them, and per-attachment visibility is a slice of its
+own — see *Restriction is withdrawal*, whose grant half is incomplete for a
+platform reason.
 
 ---
 
