@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workspace-remote",
+  "description": "The workspace webview shows the ship-served auspex client (any user-configured URL, so the pattern is any host), so everything here is reachable by whatever the ship serves and each grant is justified on that basis. TWO commands, and no more: the desktop app's job beyond showing the client is raising notifications, and the notifier runs in Rust off the beacon — the page needs nothing to make that work, so it is granted nothing for it. open_external_url sends target=_blank links to the system browser, refusing anything outside http, https and mailto, enforced in Rust rather than in the page: a hostile page cannot hand the desktop's URL dispatcher a file:// or a custom scheme, and cannot smuggle a newline that would turn one argv element into two. set_theme takes one boolean and sets the window's light/dark theme, so the GTK menubar and WebKitGTK's own scrollbars follow the page's colour scheme; the worst a hostile page can do is pick the wrong one. Deliberately NOT granted: connect (it takes a +code), get_config, connection_status and go_home — all manager-page business, and a ship-served page that could call connect could point this app at another ship.",
+  "windows": [
+    "workspace"
+  ],
+  "remote": {
+    "urls": [
+      "http://*",
+      "http://*:*",
+      "https://*",
+      "https://*:*"
+    ]
+  },
+  "permissions": [
+    "allow-open-external-url",
+    "allow-set-theme"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-shell",
+  "description": "The shell's own pages (the manager window) get every app command. No remote context here — ship-served content is covered by workspace-remote only.",
+  "windows": ["workspace"],
+  "permissions": [
+    "allow-connect",
+    "allow-connection-status",
+    "allow-get-config",
+    "allow-go-home",
+    "allow-open-external-url",
+    "allow-set-theme"
+  ]
+}

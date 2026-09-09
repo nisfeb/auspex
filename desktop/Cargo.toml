@@ -1,0 +1,26 @@
+[package]
+name = "auspex-desktop"
+version = "0.1.0"
+edition = "2021"
+#  Never goes to crates.io: the desktop app ships as bundles and nothing here
+#  is a library anyone else consumes. Saying so keeps `cargo publish` from
+#  being a slip.
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+#  the whole reason this app exists: OS notifications for new mail
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+#  the localhost bridge relays webview traffic to the ship, and the notifier
+#  reads the beacon through the same agent. rustls, no json/cookie features:
+#  the cookie is ours to attach and the json is serde's to parse.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[dev-dependencies]
+# property tests only. Never in a release build.
+proptest = "1.7"
