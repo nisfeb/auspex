@@ -96,7 +96,7 @@ are in the spec, under `# Specified but unbuilt`.
 Attachments are done on the ship. Attachments are **not** done on the web
 surface — see Gate 3.
 
-### Gate 3 — a UI on the nexus — DONE, with one gap
+### Gate 3 — a UI on the nexus — DONE
 
 Two routes were open, and lattice runs both:
 
@@ -116,11 +116,22 @@ This gate covers the five things a client cannot work without — listing, threa
 send, mark-read, delete — and those are live and driven from a browser against
 both ships.
 
-**The gap: the API cannot express attachments.** `POST /api/send` sends
-`files=~` unconditionally and there is no route for fetch, restrict or publish.
-The nexus half has been working since the attachments slice; the surface over it
-does not exist. Being fixed in parallel with this document, and this gate is not
-finished until it is.
+**The attachment gap is closed.** `POST /api/send` carries files as base64
+inside the JSON it already took (a 256K file decodes in ~1s on the nexus;
+the sixteen-file worst case is ~19s end to end, stated in the spec), and
+`GET /api/blob/<hash>` serves bytes owner-gated, `409 not fetched` until the
+existing `/fetch/<id>` path brings them over, with the mime allow-listed, the
+name sanitised and `Content-Disposition: attachment` always. Verified
+cross-ship: a file signed on `~wex` downloaded from `~feb` with the same
+sha256, and the arrival did not bump the beacon.
+
+**The client second pass is in:** Gmail density, dark mode following the
+system with a persisted override, check-mark verdicts with `forged` as loud
+as before, plain buttons, one-pane phone layout, and a PWA (manifest and
+service worker served as owner-gated grubs; the shell opens offline on cached
+mail with an honest banner, and a send that never left says so). Known
+ceilings, not gaps: the install prompt is Chromium-only because the manifest
+is credentialed, and iOS has no PNG apple-touch-icon.
 
 ### Gate 4 — the format refusal is demonstrated on the shipping build
 

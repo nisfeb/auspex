@@ -2657,9 +2657,10 @@
   ?.  ?=([%file *] pv)  (send-err eyre-id 404 'not found')
   =/  res=(each mime tang)  (mule |.(!<(mime (need-vase:tarball sang.pv))))
   ?:  ?=(%| -.res)  (send-err eyre-id 500 'bad asset')
-  ::  no-cache, not a max-age. The two grubs are replaced wholesale by a
-  ::  reload, and a cached shell pointing at a script that no longer
-  ::  matches it is a blank page with nothing in the console.
+  ::  no-cache, not a max-age. The asset grubs (shell, script, manifest,
+  ::  service worker, icon) are replaced wholesale by a reload, and a
+  ::  cached shell pointing at a script that no longer matches it is a
+  ::  blank page with nothing in the console.
   %+  send-simple:srv  eyre-id
   :-  [200 ~[['content-type' ct] ['cache-control' 'no-cache']]]
   `q.p.res
