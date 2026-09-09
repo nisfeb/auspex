@@ -248,6 +248,15 @@ pub fn store_cookie(path: &std::path::Path, cookie: &str) -> Result<(), String> 
             b.mode(0o700);
         }
         b.create(dir).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            //  DirBuilder's mode applies only to a directory it creates. A
+            //  directory a pre-fix build made is 0755 and stays so unless
+            //  it is set every time, so it is set every time.
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| e.to_string())?;
+        }
     }
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create(true).truncate(true);
@@ -515,6 +524,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("auspex-cookie-{}", std::process::id()));
         let path = dir.join("cookie");
+        // the directory pre-exists at 0755, as one made by a pre-fix build does
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         // twice: the second write hits the existing-file path, which keeps
         // whatever mode the file already has unless it is set explicitly
         for _ in 0..2 {
