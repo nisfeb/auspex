@@ -521,6 +521,35 @@
     "max_name": 256,
     "max_attach": 16
   },
+  "proto": {
+    "ttl": "~d1",
+    "page_mark": "auspex-proto",
+    "keen_path": "/g/x/1/grubbery//1/auspex/proto",
+    "jam_ux": "0x100.3040.0818.0103.0383.9383.d821.b86a.0180.fd0a.060c.1800.0070.1b73.4b0b.4319.6bc3.2b83.9bab.0bf0.05b1.7c32.b839.bab0.be01",
+    "jam": "0w4.0c408.60430.UejwZ.wxK6E.1wfQa.1wMo0.01M6T.db2Qc.pqYcH.wVKH2.~05In.MOK3C.WIbU1",
+    "note": "the /proto noun a version-1 nexus publishes",
+    "marks": [
+      "auspex-chain"
+    ],
+    "spur": "/auspex/proto",
+    "caps": {
+      "max_to": 100,
+      "max_blob": 262144,
+      "max_signers": 128,
+      "max_chain": 1000,
+      "max_body": 100000,
+      "max_subj": 1000,
+      "max_depth": 64,
+      "max_mime": 128,
+      "max_name": 256,
+      "max_attach": 16
+    },
+    "silent_peer_is_version": 1,
+    "keen_case": 1,
+    "versions": [
+      1
+    ]
+  },
   "mark": "auspex-chain",
   "blobs": [
     {

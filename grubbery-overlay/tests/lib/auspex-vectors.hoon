@@ -438,4 +438,37 @@
     (expect !>(!=((digest:auspex u) (shaf %ames (sham u)))))
     (expect !>(!=((digest:auspex u) (shaf %urmail (sham u)))))
   ==
+
+::  ── discovery ───────────────────────────────────────────────────────
+::
+::  the vectors' `proto` fixture: the exact noun a version-1 nexus
+::  publishes at /proto, where it is bound, and where a peer reads it.
+::
+::  This is the one assertion in the suite that pins a noun BY ITS JAM.
+::  Every other case pins a hash of a noun; here the noun itself is the
+::  wire format - a peer clams what it keens - so the bytes are the
+::  contract, and a field added to $proto or a cap reordered inside
+::  $proto-caps changes them without changing any id or digest anywhere.
+::
+++  test-vectors-proto
+  =/  q  our-proto:auspex
+  ;:  weld
+    %+  expect-eq
+      !>  ^-  @ux
+          0x100.3040.0818.0103.0383.9383.d821.b86a.0180.fd0a.060c.1800.0070.1b73.4b0b.4319.6bc3.2b83.9bab.0bf0.05b1.7c32.b839.bab0.be01
+      !>  `@ux`(jam q)
+    (expect-eq !>(~[1]) !>(versions.q))
+    (expect-eq !>(~[%auspex-chain]) !>(marks.q))
+    (expect-eq !>(`path`/auspex/proto) !>(proto-spur:auspex))
+    (expect-eq !>(%auspex-proto) !>(proto-page-mark:auspex))
+    ::  the keen path at case 1, cons-built because of the empty knot.
+    %+  expect-eq
+      !>  `path`~[%g %x '1' %grubbery '' '1' %auspex %proto]
+      !>  (proto-keen-path:auspex %grubbery 1)
+    ::  and the compatibility rule the fixture states: a peer that
+    ::  publishes nothing is version 1, which is what makes this
+    ::  mechanism additive rather than a flag day.
+    (expect-eq !>(`(unit @tas)`[~ %auspex-chain]) !>((peer-mark:auspex ~)))
+    (expect-eq !>(`@dr`~d1) !>(proto-ttl:auspex))
+  ==
 --

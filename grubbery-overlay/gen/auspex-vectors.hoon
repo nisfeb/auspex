@@ -85,6 +85,22 @@
       (scot %tas +.i.vs)
     ::  ── json ──────────────────────────────────────────────────────
     ::
+    ++  caps-json
+      |=  k=proto-caps:ac
+      ^-  json
+      %-  pairs:enjs:format
+      :~  'max_blob'^(numb:enjs:format max-blob.k)
+          'max_attach'^(numb:enjs:format max-attach.k)
+          'max_chain'^(numb:enjs:format max-chain.k)
+          'max_body'^(numb:enjs:format max-body.k)
+          'max_subj'^(numb:enjs:format max-subj.k)
+          'max_to'^(numb:enjs:format max-to.k)
+          'max_depth'^(numb:enjs:format max-depth.k)
+          'max_signers'^(numb:enjs:format max-signers.k)
+          'max_mime'^(numb:enjs:format max-mime.k)
+          'max_name'^(numb:enjs:format max-name.k)
+      ==
+    ::
     ++  attach-json
       |=  a=attachment:ac
       ^-  json
@@ -359,6 +375,28 @@
           'max_mime'^(numb:enjs:format max-mime:ac)
           'max_blobs'^(numb:enjs:format max-blobs:ac)
           'max_blob_bytes'^(numb:enjs:format max-blob-bytes:ac)
+      ==
+    ::
+    ::  the discovery fixture: what a version-1 nexus publishes at
+    ::  /proto, and where a peer reads it. `jam` is the noun itself, so
+    ::  a second implementation byte-compares that before it compares
+    ::  anything derived from it. `keen_path` carries the EMPTY SEGMENT
+    ::  as `//`, which is exactly the segment a path literal cannot
+    ::  spell and the one nobody notices is missing.
+      :-  'proto'
+      %-  pairs:enjs:format
+      :~  'note'^s+'the /proto noun a version-1 nexus publishes'
+          'spur'^s+(spat proto-spur:ac)
+          'page_mark'^s+(scot %tas proto-page-mark:ac)
+          'keen_path'^s+(spat (proto-keen-path:ac %grubbery 1))
+          'keen_case'^(numb:enjs:format 1)
+          'jam'^s+(scot %uw (jam our-proto:ac))
+          'jam_ux'^s+(scot %ux (jam our-proto:ac))
+          'versions'^a+(turn our-versions:ac |=(v=@ud `json`(numb:enjs:format v)))
+          'marks'^a+(turn our-marks:ac |=(t=@tas `json`[%s t]))
+          'silent_peer_is_version'^(numb:enjs:format 1)
+          'ttl'^s+(scot %dr proto-ttl:ac)
+          'caps'^(caps-json our-caps:ac)
       ==
     ::
       :-  'blobs'
