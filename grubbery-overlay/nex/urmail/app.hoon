@@ -201,6 +201,14 @@
           ::  and a lost rule is a filter that silently stops filtering.
           [%fall %| /mail/draft empty-dir:loader]
           [%fall %| /mail/rule empty-dir:loader]
+          ::  /mail/list: the mailing lists, one grub per list, KEYED BY
+          ::  NAME - the name is the path segment and is not a field of
+          ::  the grub, so nothing that reads a list can carry its name
+          ::  into a message. Covered for exactly the reason the two
+          ::  above are: an uncovered persistent path is dropped by
+          ::  spin, and a lost list is an audience the user assembled by
+          ::  hand and would have to assemble again.
+          [%fall %| /mail/list empty-dir:loader]
           ::  /fetch: one grub per in-flight blob fetch, each grub the
           ::  state of its own fiber. Covered like every other
           ::  persistent path - spin drops what it does not cover - and
@@ -305,8 +313,16 @@
 ++  vis-rail    |=(root=path ^-(road:tarball [%& %& (mail-dir root) %blobvis]))
 ++  draft-dir   |=(root=path ^-(path (weld root /mail/draft)))
 ++  rule-dir    |=(root=path ^-(path (weld root /mail/rule)))
+++  list-dir    |=(root=path ^-(path (weld root /mail/list)))
 ++  draft-rail  |=([root=path i=@uv] ^-(road:tarball [%& %& (draft-dir root) (scot %uv i)]))
 ++  rule-rail   |=([root=path i=@uv] ^-(road:tarball [%& %& (rule-dir root) (scot %uv i)]))
+::  +list-rail: the grub for one list. The NAME IS THE SEGMENT, cast
+::  straight to a knot rather than scotted: +list-name-ok:uw has already
+::  refused everything a knot cannot hold - anything but a-z, 0-9 and
+::  '-', an empty name, and anything over 64 bytes - and it is checked
+::  at the route AND again at the writer, so this cast never sees a
+::  name that was not admitted by both.
+++  list-rail   |=([root=path n=@t] ^-(road:tarball [%& %& (list-dir root) `@ta`n]))
 ++  meta-rail   |=([root=path t=thread-id:uc] ^-(road:tarball [%& %& (tdir root t) %meta]))
 ::  +slot: the grub name of one SIGNED COPY.
 ::
@@ -499,6 +515,36 @@
   ?:  (is-boom:tarball sang.c)  ~
   =/  res  (mule |.(;;(rule:uc (sang-noun:tarball sang.c))))
   ?:(?=(%| -.res) ~ `p.res)
+::
+::  +read-lists: every mailing list, as [name members] pairs.
+::
+::    The ONE reader here that has to keep the map's KEY, because a
+::    list's name is its path segment and is deliberately not a field of
+::    the grub. So this taps the contents map rather than walking its
+::    values the way +collect-drafts and +collect-rules do.
+::
+::    Same ladder discipline as those two: a grub that does not clam is
+::    DROPPED rather than crashed on. This runs on the writer and on
+::    request fibers, and neither may fail on one bad grub.
+::
+++  read-lists
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,(list [name=@t members=(set @p)]))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (list-dir root)] ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  (pure:m (collect-lists ball.vw))
+::
+++  collect-lists
+  |=  b=ball:tarball
+  ^-  (list [name=@t members=(set @p)])
+  ?~  fil.b  ~
+  %+  murn  ~(tap by contents.u.fil.b)
+  |=  [nom=@ta =sang:tarball gain=? bang=(unit tang)]
+  ^-  (unit [@t (set @p)])
+  ?:  (is-boom:tarball sang)  ~
+  =/  res  (mule |.(;;(mail-list:uc (sang-noun:tarball sang))))
+  ?:(?=(%| -.res) ~ `[`@t`nom members.p.res])
 ::
 ++  read-idx
   |=  root=path
@@ -983,6 +1029,13 @@
     %send-draft     (do-send-draft root id.a)
     %save-rule      (do-save-rule root rule.a)
     %delete-rule    (do-delete-rule root id.a)
+  ::  mailing lists, local state like the rest of this block and %.n for
+  ::  the same reason: a list is an address book entry on this ship, no
+  ::  peer can observe it, and the tab that saved it refetches its own
+  ::  listing. Bumping here would cost every open tab a full inbox
+  ::  listing plus a thread refetch for a change nobody else can see.
+    %save-list      (do-save-list root name.a members.a)
+    %delete-list    (do-delete-list root name.a)
   ==
 ::
 ::  +do-send: compose, reply and forward are all this.
@@ -1475,6 +1528,58 @@
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (rule-rail root i))
   ;<  ~  bind:m  (note root 'delete-rule' & (scot %uv i))
+  (pure:m |)
+::
+::  ── mailing lists ───────────────────────────────────────────────────
+::
+::  +do-save-list: create or OVERWRITE one list. That is the whole verb.
+::
+::    Create, add a member, drop one, rename by re-saving under a new
+::    name and copy the membership off a message are all this, because a
+::    list is a name and a set of ships and there is nothing else in it.
+::    No tracking, no merge, no "sync from" - the client sends the set it
+::    wants and this stores exactly that.
+::
+::    THE NAME IS RE-CHECKED HERE, not only at the route. It becomes a
+::    path segment, this arm is reachable from a dojo poke as well as
+::    from the HTTP surface, and a name that is not a knot would be a
+::    write to a road nobody meant. Belt to the route's braces.
+::
+::    OUR OWN SHIP IS REFUSED AS A MEMBER, again at both ends. A list
+::    naming you sends you your own mail on every send that expands it,
+::    and refusing the shape once is one rule instead of one rule at
+::    every place that expands a list.
+::
+++  do-save-list
+  |=  [root=path name=@t members=(set @p)]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ?.  (list-name-ok:uw name)  (reject root 'bad list name')
+  ;<  our=@p  bind:m  bowl-our
+  ?:  (~(has in members) our)  (reject root 'a list may not hold your own ship')
+  ::  a list larger than a send may carry is a list that cannot be used.
+  ?.  (lte ~(wyt in members) max-to:uc)  (reject root 'too many members')
+  ;<  ~  bind:m  (ensure-dir (list-dir root))
+  ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
+  ::  the store bound counts only a list we do not already hold, so
+  ::  overwriting an existing list is never refused for capacity - which
+  ::  is the whole copy-from-a-message flow at the cap.
+  ?.  ?|  (lien ls |=(o=[name=@t members=(set @p)] =(name.o name)))
+          (lth (lent ls) max-lists:uc)
+      ==
+    (reject root 'too many lists')
+  ;<  ~  bind:m
+    (put-file (list-rail root name) [/urmail %list] `mail-list:uc`[%0 members])
+  ;<  ~  bind:m  (note root 'save-list' & name)
+  (pure:m |)
+::
+++  do-delete-list
+  |=  [root=path name=@t]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ?.  (list-name-ok:uw name)  (reject root 'bad list name')
+  ;<  ~  bind:m  (cull-if-there (list-rail root name))
+  ;<  ~  bind:m  (note root 'delete-list' & name)
   (pure:m |)
 ::
 ::  +file-arrival: what happens to a thread's LOCAL state when mail
@@ -2728,6 +2833,7 @@
       [%'GET' [%api %inbox ~]]          (serve-inbox src eyre-id args.parsed)
       [%'GET' [%api %drafts ~]]         (serve-drafts src eyre-id)
       [%'GET' [%api %rules ~]]          (serve-rules src eyre-id)
+      [%'GET' [%api %lists ~]]          (serve-lists src eyre-id)
       [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
     ::  POST /api/blob: THE UPLOAD, and the only route whose REQUEST
     ::  body is not JSON. The body is the file, byte for byte, and it
@@ -2749,6 +2855,12 @@
       [%'POST' [%api %rule ~]]          (do-web-rule src eyre-id (req-body req))
       [%'POST' [%api %'rule-delete' ~]]
     (do-web-id src eyre-id (req-body req) %delete-rule)
+    ::  ONE VERB FOR A LIST. Create, overwrite, add a member, drop one,
+    ::  rename by re-saving and copy the membership off a message are
+    ::  all this POST, because a list is a name and a set of ships.
+      [%'POST' [%api %list ~]]          (do-web-list src eyre-id (req-body req))
+      [%'POST' [%api %'list-delete' ~]]
+    (do-web-list-delete src eyre-id (req-body req))
       [%'POST' [%api %'delete-thread' ~]]
     (do-web-delete src eyre-id (req-body req))
   ==
@@ -2992,6 +3104,38 @@
       ['subject' ?~(subject.r ~ [%s u.subject.r])]
       ['add' [%a (turn ~(tap in add.r) |=(l=@tas `json`[%s l]))]]
       ['archive' [%b archive.r]]
+  ==
+::
+::  +serve-lists: every mailing list, SORTED BY NAME.
+::
+::    Sorted here rather than in the client because the order is a
+::    property of the answer, not of one renderer: the compose
+::    autocomplete and the manage panel both read this route and neither
+::    should have to agree separately about what order lists come in.
+::
+::    `members` is ships, rendered. A list name is a key on this ship and
+::    goes no further - see mar/urmail/list.
+::
+++  serve-lists
+  |=  [src=@p eyre-id=@ta]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  ;<  root=path  bind:m  nexus-root
+  ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
+  =/  sorted=(list [name=@t members=(set @p)])
+    %+  sort  ls
+    |=  [a=[name=@t members=(set @p)] b=[name=@t members=(set @p)]]
+    (aor name.a name.b)
+  %+  send-json  eyre-id
+  :-  %a
+  %+  turn  sorted
+  |=  l=[name=@t members=(set @p)]
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['name' [%s name.l]]
+      ['members' [%a (turn ~(tap in members.l) |=(w=@p `json`[%s (scot %p w)]))]]
   ==
 ::
 ::  +serve-thread: one thread, every stored copy with its own verdict.
@@ -3731,6 +3875,57 @@
   ?.  (rule-ok:uc rl)
     (send-err eyre-id 400 'a rule needs a sender or a subject to match')
   ;<  ~  bind:m  (poke-writer [%save-rule rl])
+  (send-ok eyre-id)
+::
+::  +do-web-list: create or overwrite one mailing list.
+::
+::    THE MALFORMED BODY IS REFUSED HERE, WITH A 400, and never reaches
+::    the writer. `name` becomes a path segment, so a name that is not a
+::    knot is a write to a road nobody meant; `our` is refused as a
+::    member so a list cannot send you your own mail. Both are checked
+::    again at the writer, which is reachable from a dojo poke that never
+::    passes through this arm - a boundary check is not a substitute for
+::    one at the point of use, and this route is not the only door.
+::
+::    The reason a bad name is a 400 rather than a silent normalisation:
+::    a user typed the name, and a list that quietly became something
+::    else is a list they will look for under the name they chose.
+::
+++  do-web-list
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  ;<  our=@p  bind:m  bowl-our
+  =/  r=(unit list-req:uw)  (de-list:uw u.jon our)
+  ::  ONE REFUSAL, THREE CAUSES, and the message names all three rather
+  ::  than making the user guess which one they hit: the decoder is a
+  ::  unit and cannot say why, and splitting it into three decoders to
+  ::  get three messages would be three places for the name rule to
+  ::  live.
+  ?~  r
+    %^  send-err  eyre-id  400
+    %^  cat  3  'a list needs a name of 1-64 lowercase letters, digits or - '
+    'and members that are ships other than your own'
+  ?.  (lte ~(wyt in members.u.r) max-to:uc)
+    (send-err eyre-id 400 'a list may not hold more members than a message may name')
+  ;<  ~  bind:m  (poke-writer [%save-list name.u.r members.u.r])
+  (send-ok eyre-id)
+::
+++  do-web-list-delete
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  n=(unit @t)  (de-list-name:uw u.jon)
+  ?~  n  (send-err eyre-id 400 'bad list name')
+  ;<  ~  bind:m  (poke-writer [%delete-list u.n])
   (send-ok eyre-id)
 ::
 ::  +do-web-id: the two routes that carry only an id and nothing to check.

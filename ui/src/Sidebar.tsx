@@ -37,18 +37,20 @@ const FIXED: { view: View; name: string; hint: string }[] = [
 ]
 
 export default function Sidebar({
-  view, label, labels, drafts, rules, counts, onView, onCompose, onFilters,
-  theme, onTheme, installable, onInstall,
+  view, label, labels, drafts, rules, lists, counts, onView, onCompose, onFilters,
+  onLists, theme, onTheme, installable, onInstall,
 }: {
-  view: View | 'drafts' | 'rules'
+  view: View | 'drafts' | 'rules' | 'lists'
   label: string
   labels: string[]
   drafts: number
   rules: number
+  lists: number
   counts: Record<string, number>
-  onView: (v: View | 'drafts' | 'rules', label?: string) => void
+  onView: (v: View | 'drafts' | 'rules' | 'lists', label?: string) => void
   onCompose: () => void
   onFilters: () => void
+  onLists: () => void
   theme: 'light' | 'dark'
   onTheme: () => void
   // Only true once the browser has actually offered the prompt. There is
@@ -121,6 +123,19 @@ export default function Sidebar({
           className="btn touch w-full justify-start"
         >
           Filters{rules > 0 ? ` (${rules})` : ''}
+        </button>
+        {/* BESIDE FILTERS, and for the same reason it sits down here
+            rather than in the folder list: a list is not a place mail
+            is, it is a thing you keep. */}
+        <button
+          type="button"
+          onClick={onLists}
+          title="Names for sets of ships, kept on this ship. A list name never
+            travels: picking one in the composer puts its members in the To field
+            as ordinary recipients, and everyone on it sees everyone else."
+          className="btn touch w-full justify-start"
+        >
+          Lists{lists > 0 ? ` (${lists})` : ''}
         </button>
         <button
           type="button"

@@ -195,6 +195,98 @@
   ::  never spelled rather than spelled and then caught.
   `r(subject ?~(subject.r ~ ?:(=('' u.subject.r) ~ subject.r)))
 ::
+::  ── mailing lists ───────────────────────────────────────────────────
+::
+::  $list-req: the decoded POST /api/list body. Create, overwrite, add a
+::  member, drop one and copy-from-a-message are all this one shape,
+::  because a list is a name and a set of ships and there is nothing
+::  else in it to do.
+::
+::  The NAME IS THE KEY and becomes a path segment under /mail/list, so
+::  it is checked here rather than trusted: see +list-name-ok.
+::
++$  list-req  [name=@t members=(set @p)]
+::
+::  +list-name-ok: a list name that may be a path segment.
+::
+::    LOWERCASE LETTERS, DIGITS AND HYPHEN, one to sixty-four bytes.
+::    Nothing else, and the reason is that this cord is used as a knot:
+::    a name holding a '/' would name a different directory, one holding
+::    a '.' or a space would round-trip through +scot and +slaw
+::    differently from how it was written, and an empty one would name
+::    the parent. The refusal is at the route with a 400, so a name a
+::    user typed is refused where they can still see what they typed.
+::
+::    A CHARACTER ALLOW-LIST, not a blocklist of the dangerous bytes:
+::    the set of things a path segment can be made to mean is not one
+::    anybody enumerates correctly, and the cost of the strict rule is
+::    that a list cannot be called `Groundwire`. That is a cost worth
+::    paying for a name the user chooses once.
+::
+++  list-name-ok
+  |=  n=@t
+  ^-  ?
+  =/  t=tape  (trip n)
+  ?&  ?=(^ t)
+      (lte (met 3 n) 64)
+    ::  `tape`t, WIDENED. ?=(^ t) narrows t to a lest inside the rest of
+    ::  this ?&, and +levy is a wet gate that fails to mull against one
+    ::  - the same shape recorded against +safe-name above.
+      %+  levy  `tape`t
+      |=  c=@tD
+      ^-  ?
+      ?|  &((gte c 'a') (lte c 'z'))
+          &((gte c '0') (lte c '9'))
+          =(c '-')
+      ==
+  ==
+::
+::  +de-list: the save-list body, or ~ if it is not one.
+::
+::    `our` is passed IN rather than read, the way +de-refs takes its
+::    bound: this lib is import-free and has no bowl. It is here so the
+::    owner's own ship is refused as a member AT THE BOUNDARY - a list
+::    that names you sends you your own mail, and every surface that
+::    expands a list would then have to remember to drop you. Refusing
+::    the shape once is one rule instead of one rule per call site.
+::
+::    An EMPTY member set decodes fine: a list you are still filling is
+::    a real state.
+::
+++  de-list
+  |=  [jon=json our=@p]
+  ^-  (unit list-req)
+  =/  res
+    %-  mule
+    |.
+    ^-  list-req
+    %.  jon
+    %-  ot:dejs:format
+    :~  name+so:dejs:format
+        members+(as:dejs:format (se:dejs:format %p))
+    ==
+  ?:  ?=(%| -.res)  ~
+  =/  r  p.res
+  ?.  (list-name-ok name.r)  ~
+  ?:  (~(has in members.r) our)  ~
+  `r
+::
+::  +de-list-name: {"name": "..."} -> the name. The delete body, and the
+::  same name rule as a save: a delete naming a path segment we would
+::  never have written is a request about nothing.
+::
+++  de-list-name
+  |=  jon=json
+  ^-  (unit @t)
+  =/  res
+    %-  mule
+    |.
+    ^-  @t
+    ((ot:dejs:format ~[[%name so:dejs:format]]) jon)
+  ?:  ?=(%| -.res)  ~
+  ?.  (list-name-ok p.res)  ~
+  `p.res
+::
 ::  +de-id: {"id": "0v..."} -> the id. Shared by delete-draft,
 ::  send-draft and delete-rule, which differ only in what they act on.
 ::

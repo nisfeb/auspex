@@ -1443,6 +1443,126 @@ an adapter written against whatever API exists then.
 ---
 
 
+# Mailing lists
+
+```hoon
++$  mail-list
+  $:  %0
+      members=(set ship)
+  ==
+```
+
+One grub per list at `/mail/list/<name>`. **The name is the path segment and
+is not a field of the grub**, and that is the whole design in one sentence:
+there is nowhere for a list name to be picked up from by anything that
+serialises a list, so no name can leak into a message even by accident.
+
+A list is **local, unsigned state**, exactly like a draft (`/mail/draft/<id>`)
+and a filter (`/mail/rule/<id>`). Nothing here is signed, nothing here travels,
+two ships may hold lists of the same name with entirely different members and
+neither is wrong. A list write **does not move the change beacon** — no other
+reader can observe it, so bumping would cost every open tab a full listing plus
+a thread refetch for a change it cannot see. The tab that made the write
+refetches its own sidebar, as the filter panel already does.
+
+Members are **ships and only ships**. A list may not contain another list:
+nesting would make what gets sent depend on a resolution order the recipient
+cannot see, and the point of this feature is that the audience on screen is the
+audience that is sent. The owner's own ship is refused as a member, at the
+route and again at the writer — a list holding you sends you your own mail
+every time it is expanded, and refusing the shape once is one rule instead of
+one rule at every site that expands a list. An **empty member set is allowed**:
+a list you are still filling is a real state, and refusing it would mean the
+only way to make a list is to know every member first.
+
+## The name is a path segment, so it is checked like one
+
+`name` is a `@t` of one to sixty-four bytes, holding lowercase letters, digits
+and `-` and nothing else. An allow-list rather than a blocklist of the
+dangerous bytes: the set of things a path segment can be made to mean is not
+one anybody enumerates correctly. A `/` would name a different directory, a
+`.` would round-trip through `+scot`/`+slaw` differently from how it was
+written, and an empty name would name the parent. A name that does not fit is a
+**400 at the route** and never reaches the writer, and it is refused rather
+than normalised: a list quietly renamed is a list the user will look for under
+the name they typed.
+
+`+list-name-ok` lives in `lib/urmail-web`, which is import-free and therefore
+testable, and is called from **both** boundaries — the HTTP route and
+`+do-save-list` on the writer. The writer is reachable from a dojo poke that
+never passes through the route, so a check at the boundary is not a substitute
+for one at the point of use.
+
+## Routes
+
+| route | body | effect |
+| --- | --- | --- |
+| `GET /api/lists` | — | every list, sorted by name |
+| `POST /api/list` | `{name, members}` | create **or overwrite** |
+| `POST /api/list-delete` | `{name}` | remove one |
+
+Owner-gated with the `src` check like every other data route.
+
+**One verb covers everything a list can do.** Create, add a member, drop one,
+rename by re-saving under a new name, and copy the membership off a message are
+all `POST /api/list`, because a list is a name and a set of ships and there is
+nothing else in it. No tracking, no merge, no "sync from": the ship stores
+exactly the set that was sent.
+
+## Why copy-from-a-message is correct, and not a reconstruction
+
+A message carries `to`, a set of ships. It does **not** carry the name of
+whatever list the sender expanded before signing — a list name never travels,
+in either direction — so there is nothing in the message to recover and nothing
+to get wrong. "Save as list" on a message seeds a form with `from ∪ to` minus
+the owner: the ships the message actually reached, which is the only thing the
+data honestly supports. Typing the name of an existing list overwrites it, and
+the form says so, naming the member count it is about to replace.
+
+That is the whole of the recurring flow the feature exists for — *the
+groundwire list changes every month; copy it off this month's message and
+overwrite it for next month*. It works because there is no relationship between
+the list and the message to maintain, only ships to re-save.
+
+## Plain group mail. BCC lists are explicitly not built
+
+Every recipient of a message sent to a list appears in `to`, and every
+recipient sees all of them. There is no blind list and there will not be one:
+`unsigned` is frozen, `to` is inside the signature, and the BCC record this
+nexus keeps is a *local* note about a delivery (see "Decided: BCC needs no
+signed field") rather than a second audience a list could address. A list that
+quietly did not name its members would be a different feature wearing the same
+word.
+
+## The composer, and the stale-draft caveat
+
+The To field autocompletes list names beside ships. Picking one **inserts its
+members as chips immediately** and clears the input; nothing downstream knows
+lists exist. The send, the autosaved draft, the recipient validation and the
+blast-radius line all see ships, and **what will be sent is exactly what is on
+screen**. Members already present are not duplicated, and the owner's ship is
+dropped on insert as well as refused at save.
+
+**A list edited later does not change a draft written earlier.** A draft stores
+ships, because a draft *is* the message-to-be and a stored list name would be a
+recipient set that changed under the user between writing and sending. The cost
+is stated rather than hidden: a draft written in January and sent in March goes
+to January's membership. That is the same trade as the chips being the truth —
+the audience is the one that was on screen — and the fix, if it is ever wanted,
+is for the composer to say when a draft's recipients differ from a list it was
+built from, not for the draft to hold a name.
+
+## Caps
+
+`max-lists` is 64, bounded like `max-rules` and for a weaker reason: a list
+costs nothing on delivery, but every list is a grub under `/mail/list` and the
+whole directory is read on every save and every listing. A list's membership is
+capped at `max-to` (100) — a list larger than a message may name is a list that
+cannot be used.
+
+---
+
+
 # History
 
 urmail was first built as a **Gall agent** on its own `%urmail` desk: a

@@ -223,6 +223,15 @@
     ::  filters.
       [%save-rule =rule]
       [%delete-rule id=@uv]
+    ::  mailing lists. `name` is the KEY, not a field of the grub: it is
+    ::  the path segment under /mail/list, so it is carried on the
+    ::  action rather than inside $mail-list. %save-list is a plain
+    ::  OVERWRITE and that is the whole verb - create, add a member,
+    ::  drop one, rename by re-saving under a new name, and copy the
+    ::  membership off a message are all this one action, because a list
+    ::  is a set of ships and nothing else.
+      [%save-list name=@t members=(set ship)]
+      [%delete-list name=@t]
   ==
 ::
 ::  $file: one file as handed to %send, before it is hashed and stored.
@@ -466,6 +475,38 @@
       subject=(unit @t)
       add=(set @tas)
       archive=?
+  ==
+::
+::  $mail-list: one mailing list's members, at /mail/list/<name>.
+::
+::    A LIST NAME NEVER TRAVELS. The name is the PATH SEGMENT and is
+::    deliberately not a field here: nothing may carry it into a signed
+::    message, and a name stored beside the members would be one more
+::    place a serialiser could pick it up from. What a recipient sees in
+::    `to` is ships, always, exactly as if they had been typed one at a
+::    time - which is what makes "copy the list off this month's message
+::    and overwrite it for next month" correct rather than a
+::    reconstruction: there is nothing to reconstruct, because the list
+::    was never part of the message.
+::
+::    Local and unsigned, like a draft and a rule. Two ships may hold
+::    lists of the same name with different members and neither is
+::    wrong; no delivery, no verdict and no signature depends on any of
+::    it. A list write does not move the change beacon for the same
+::    reason a rule write does not: no other reader can observe it.
+::
+::    Members are ships and never other lists. Nesting would make a send
+::    depend on a resolution order the recipient cannot see, and the
+::    whole design here is that the audience on screen is the audience
+::    that is sent.
+::
+::    An empty member set is allowed: a list you are still filling is a
+::    real state, and refusing it would mean the only way to make one is
+::    to know every member first.
+::
++$  mail-list
+  $:  %0
+      members=(set ship)
   ==
 ::
 ::  the capacity limits. Arms rather than constants in the nexus so the
@@ -1352,6 +1393,13 @@
 ::    That is a small cost per rule and an unbounded one with no bound.
 ::
 ++  max-rules   64
+::  +max-lists: mailing lists this ship will hold.
+::
+::    Bounded like the rules are, and for a weaker reason: a list costs
+::    nothing on delivery, but every list is one grub under /mail/list
+::    and the whole directory is read on every save and every listing.
+::
+++  max-lists   64
 ::  +max-drafts: drafts this ship will hold.
 ++  max-drafts  1.000
 ::  +max-page: the largest listing page a request may ask for.

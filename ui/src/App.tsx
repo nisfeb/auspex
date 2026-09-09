@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft as apiDeleteDraft, deleteRule, drafts as apiDrafts, onCachedMail,
-  pageOf, rules as apiRules, saveRule, subscribeChanges,
-  type Draft, type InboxEntry, type Rule, type View,
+  deleteDraft as apiDeleteDraft, deleteList, deleteRule, drafts as apiDrafts,
+  lists as apiLists, onCachedMail, pageOf, rules as apiRules, saveList, saveRule,
+  subscribeChanges,
+  type Draft, type InboxEntry, type MailList, type Rule, type View,
 } from './api'
 import ThreadList from './ThreadList'
 import ThreadView from './ThreadView'
@@ -10,13 +11,14 @@ import Compose, { type ForwardIntent } from './Compose'
 import Sidebar from './Sidebar'
 import Drafts from './Drafts'
 import Filters from './Filters'
+import Lists from './Lists'
 
 // One page of rows per request. The nexus counts the whole view and
 // returns a page of it, so this number is a rendering choice and not a
 // bound on anything: `total` is honest about the rest.
 const PER_PAGE = 25
 
-type Pane = View | 'drafts' | 'rules'
+type Pane = View | 'drafts' | 'rules' | 'lists'
 
 // The install prompt, which is the one browser API here with no types in
 // lib.dom: `beforeinstallprompt` is Chromium-only and unspecified. Only
@@ -46,6 +48,10 @@ export default function App() {
   const [resume, setResume] = useState<Draft | null>(null)
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [rules, setRules] = useState<Rule[]>([])
+  // The mailing lists this ship holds. Sidebar state, like the rules and
+  // the draft count: the composer offers them whatever pane is open, so
+  // they are fetched with the sidebar and not with a view.
+  const [lists, setLists] = useState<MailList[]>([])
   // Every label any thread carries, which is the label list the sidebar
   // shows. Derived from the ALL view rather than stored: a label exists
   // exactly as long as some thread carries it, so a separate registry
@@ -170,7 +176,7 @@ export default function App() {
   // recipient list is built (from nothing).
   const [forwarding, setForwarding] = useState<ForwardIntent | null>(null)
 
-  const isThreadPane = pane !== 'drafts' && pane !== 'rules'
+  const isThreadPane = pane !== 'drafts' && pane !== 'rules' && pane !== 'lists'
   // A SEARCH LEAVES THE PANE. The nexus ANDs the query with the view
   // predicate, which is right as a primitive and wrong as the only
   // behaviour a user can get: searching from the Inbox would then be
@@ -215,6 +221,7 @@ export default function App() {
       .catch((e) => { console.error(e) })
     apiDrafts().then(setDrafts).catch((e) => { console.error(e) })
     apiRules().then(setRules).catch((e) => { console.error(e) })
+    apiLists().then(setLists).catch((e) => { console.error(e) })
   }, [])
 
   const onChange = useCallback(() => {
@@ -281,9 +288,10 @@ export default function App() {
   const current = Math.floor(offset / PER_PAGE) + 1
 
   const paneName = pane === 'rules' ? 'Filters'
-    : pane === 'drafts' ? 'Drafts'
-      : pane === 'label' ? label
-        : pane.charAt(0).toUpperCase() + pane.slice(1)
+    : pane === 'lists' ? 'Lists'
+      : pane === 'drafts' ? 'Drafts'
+        : pane === 'label' ? label
+          : pane.charAt(0).toUpperCase() + pane.slice(1)
 
   return (
     // `overflow-hidden` on the shell and `min-w-0` on every flexible
@@ -372,12 +380,14 @@ export default function App() {
             labels={labels}
             drafts={drafts.length}
             rules={rules.length}
+            lists={lists.length}
             counts={{}}
             onView={goto}
             onCompose={() => {
               setResume(null); setForwarding(null); setComposing(true); setNavOpen(false)
             }}
             onFilters={() => goto('rules')}
+            onLists={() => goto('lists')}
             theme={theme}
             onTheme={() => {
               // A REAL CHOICE, and the only thing that makes one stick.
@@ -406,6 +416,18 @@ export default function App() {
             rules={rules}
             onSave={async (r) => { await saveRule(r); refreshSidebar() }}
             onDelete={(id) => { deleteRule(id).then(refreshSidebar).catch(console.error) }}
+            onClose={() => goto('inbox')}
+          />
+        ) : pane === 'lists' ? (
+          // A list write does not move the change beacon — no other
+          // reader can observe it — so this tab refetches its own
+          // sidebar after each one, exactly as the filter panel does.
+          <Lists
+            lists={lists}
+            onSave={async (l) => { await saveList(l); refreshSidebar() }}
+            onDelete={(name) => {
+              deleteList(name).then(refreshSidebar).catch(console.error)
+            }}
             onClose={() => goto('inbox')}
           />
         ) : (
@@ -498,6 +520,8 @@ export default function App() {
                     onForward={(f) => { setComposing(false); setResume(null); setForwarding(f) }}
                     onFiled={() => { refresh(); refreshSidebar() }}
                     updatedAt={threadUpdate}
+                    lists={lists}
+                    onSaveList={async (l) => { await saveList(l); refreshSidebar() }}
                   />
                 )
                 : <p className="p-3 text-ink-faint">Select a conversation</p>}
@@ -516,6 +540,7 @@ export default function App() {
           key={forwarding ? `forward:${forwarding.prev}` : resume ? `draft:${resume.id}` : 'compose'}
           forward={forwarding}
           resume={resume}
+          lists={lists}
           onDraftsChanged={refreshSidebar}
           onClose={() => { setComposing(false); setForwarding(null); setResume(null) }}
           onSent={() => {

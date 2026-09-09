@@ -132,6 +132,98 @@
     (expect-eq !>(`(list @t)`~['work']) !>(?~(got ~ add.u.got)))
   ==
 ::
+::  ── mailing lists ───────────────────────────────────────────────────
+::
+::  A list is a NAME and a SET OF SHIPS. The name becomes a path segment
+::  under /mail/list, so the decoder is the place the name rule is
+::  enforced: everything below is a request a browser or a broken client
+::  can actually send.
+::
+::  the ordinary case: a name and two members.
+++  test-de-list-good-name
+  =/  got  (de-list:web (jo '{"name":"groundwire","members":["~feb","~nec"]}') ~wex)
+  ;:  weld
+    (expect-eq !>(`(unit @t)`[~ 'groundwire']) !>(?~(got ~ `name.u.got)))
+    %+  expect-eq
+      !>  `(unit (set @p))`[~ (sy ~[~feb ~nec])]
+      !>  ?~(got ~ `members.u.got)
+  ==
+::
+::  digits and hyphens are in the alphabet, so this is a name.
+++  test-de-list-name-with-digits-and-hyphens
+  %+  expect-eq  !>(`(unit @t)`[~ 'ops-team-2'])
+  =/  got  (de-list:web (jo '{"name":"ops-team-2","members":[]}') ~wex)
+  !>  ?~(got ~ `name.u.got)
+::
+::  AN EMPTY MEMBER SET IS A LIST. One you are still filling is a real
+::  state, and refusing it would mean the only way to make a list is to
+::  know every member first.
+++  test-de-list-empty-members
+  =/  got  (de-list:web (jo '{"name":"empty","members":[]}') ~wex)
+  ;:  weld
+    (expect !>(?=(^ got)))
+    (expect-eq !>(`(unit (set @p))`[~ ~]) !>(?~(got ~ `members.u.got)))
+  ==
+::
+::  A CAPITAL IS NOT IN THE ALPHABET. The name is a path segment, and
+::  the allow-list is the whole rule: nothing here tries to lowercase it,
+::  because a list quietly renamed is a list the user cannot find under
+::  the name they typed.
+++  test-de-list-rejects-a-capital
+  %+  expect-eq  !>(`(unit list-req:web)`~)
+  !>  (de-list:web (jo '{"name":"Groundwire","members":["~feb"]}') ~wex)
+::
+::  a slash would name a different directory.
+++  test-de-list-rejects-a-slash
+  %+  expect-eq  !>(`(unit list-req:web)`~)
+  !>  (de-list:web (jo '{"name":"a/b","members":["~feb"]}') ~wex)
+::
+::  sixty-four bytes is the cap, so sixty-five is not a name.
+++  test-de-list-rejects-a-long-name
+  ;:  weld
+    (expect !>(?=(^ (de-list:web (jo (cat 3 '{"name":"' (cat 3 (crip (reap 64 'a')) '","members":[]}'))) ~wex))))
+    %+  expect-eq  !>(`(unit list-req:web)`~)
+    !>  %+  de-list:web
+          (jo (cat 3 '{"name":"' (cat 3 (crip (reap 65 'a')) '","members":[]}')))
+        ~wex
+  ==
+::
+::  an empty name would name the parent directory.
+++  test-de-list-rejects-an-empty-name
+  %+  expect-eq  !>(`(unit list-req:web)`~)
+  !>  (de-list:web (jo '{"name":"","members":["~feb"]}') ~wex)
+::
+::  a member that is not a @p. This is the field a user types by hand.
+++  test-de-list-rejects-a-bad-ship
+  %+  expect-eq  !>(`(unit list-req:web)`~)
+  !>  (de-list:web (jo '{"name":"ops","members":["not a ship"]}') ~wex)
+::
+::  THE OWNER'S OWN SHIP IS NOT A MEMBER. A list holding you sends you
+::  your own mail every time it is expanded, and refusing the shape here
+::  is one rule instead of one rule at every place that expands a list.
+++  test-de-list-rejects-self-as-a-member
+  ;:  weld
+    %+  expect-eq  !>(`(unit list-req:web)`~)
+    !>  (de-list:web (jo '{"name":"ops","members":["~wex","~feb"]}') ~wex)
+  ::  and the same body is fine on a ship that is not in it.
+    (expect !>(?=(^ (de-list:web (jo '{"name":"ops","members":["~wex","~feb"]}') ~nec))))
+  ==
+::
+::  a missing key is ~, not a crash.
+++  test-de-list-missing-members
+  %+  expect-eq  !>(`(unit list-req:web)`~)
+  !>  (de-list:web (jo '{"name":"ops"}') ~wex)
+::
+::  the delete body carries a name and nothing else, and the same name
+::  rule applies: a delete naming a segment we would never have written
+::  is a request about nothing.
+++  test-de-list-name-delete
+  ;:  weld
+    (expect-eq !>(`(unit @t)`[~ 'groundwire']) !>((de-list-name:web (jo '{"name":"groundwire"}'))))
+    (expect-eq !>(`(unit @t)`~) !>((de-list-name:web (jo '{"name":"A/b"}'))))
+    (expect-eq !>(`(unit @t)`~) !>((de-list-name:web (jo '{"id":"0v1a"}'))))
+  ==
+::
 ::  ── the attachments a send names ─────────────────────────────────────
 ::
 ::  NO BYTES REACH THIS LIB ANY MORE. The file went up on its own

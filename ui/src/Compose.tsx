@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   deleteDraft, garbled, isShip, newId, saveDraft, send, sendDraft, unreachable, uploadAll,
-  type Draft,
+  type Draft, type MailList,
 } from './api'
 import { FilePicker } from './Attachments'
+import ShipChips, { commitShip } from './ShipChips'
 
 // What a Forward control hands the composer: the message the new message
 // will point `prev` at, the subject to base the forwarded one on, and how
@@ -34,7 +35,7 @@ export interface ForwardIntent {
 const DEBOUNCE = 1500
 
 export default function Compose({
-  onClose, onSent, onDraftsChanged, forward, resume,
+  onClose, onSent, onDraftsChanged, forward, resume, lists,
 }: {
   onClose: () => void
   onSent: () => void
@@ -45,8 +46,17 @@ export default function Compose({
   // Reopening an existing draft: the panel adopts its id, so saving
   // overwrites that draft rather than laying a second one.
   resume?: Draft | null
+  // The mailing lists this ship holds, offered in the To field beside
+  // ships. NOTHING BELOW THIS FIELD KNOWS LISTS EXIST: picking one puts
+  // its members in as ship chips and the list is over, so the send, the
+  // draft that is saved and the recipient check all see ships.
+  lists: MailList[]
 }) {
-  const [to, setTo] = useState(resume ? resume.to.join(', ') : '')
+  // THE TO FIELD IS CHIPS, and a chip is always a well-formed ship — see
+  // ShipChips. `pending` is the half-typed name, held here rather than
+  // inside the control so Send can fold it in.
+  const [to, setTo] = useState<string[]>(resume ? resume.to : [])
+  const [pending, setPending] = useState('')
   const [subject, setSubject] = useState(
     resume ? resume.subj : forward ? `fwd: ${forward.subject}` : '',
   )
@@ -90,21 +100,16 @@ export default function Compose({
   // and nothing typed is nothing lost.
   const touched = useRef(false)
 
-  const ships = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean)
-  // RECIPIENT VALIDATION, IN THE CLIENT, BEFORE THE POKE. The nexus keeps
-  // its own — this is a convenience and never the boundary — but a typo
-  // caught at the keystroke is a typo the user can fix, and the same typo
-  // surfacing later as a refusal is not.
-  const bad = ships(to).filter((s) => !isShip(s))
 
   const store = async () => {
     if (!touched.current) return
     const { to: t, subject: s, body: b } = latest.current
     // Only well-formed ships go into a draft: the nexus parses `to` as a
-    // set of @p and would refuse the whole save otherwise, which would
-    // silently stop autosaving the moment a half-typed name was in the
-    // field.
-    const named = ships(t).filter(isShip)
+    // set of @p and would refuse the whole save otherwise. Chips are
+    // already ships by construction — the half-typed name in `pending`
+    // is never one of them, which is exactly why autosave does not stop
+    // the moment someone starts typing a name.
+    const named = t.filter(isShip)
     // GUARD ON WHAT WILL BE STORED, not on what is on screen. `to`
     // holding nothing but a half-typed name stores as an empty list, so
     // the raw-string test called a blank composer non-empty and
@@ -144,16 +149,29 @@ export default function Compose({
   }
 
   const onSend = async () => {
-    setSending(true)
     setError(null)
+    // A NAME TYPED AND NOT COMMITTED IS STILL A RECIPIENT THE USER MEANT.
+    // Fold it in before anything else, and refuse the send if it is not
+    // a ship rather than silently dropping it.
+    const { ships: list, error: chipError } = commitShip(to, pending)
+    if (chipError) {
+      setError(chipError)
+      return
+    }
+    setTo(list)
+    setPending('')
+    // RECIPIENT VALIDATION, BEFORE THE POKE, KEPT. Every chip came
+    // through `commitShip` and so is a ship already — this is the belt to
+    // that brace, and the thing that would catch a chip arriving from
+    // anywhere else (a resumed draft, a list's members). The nexus keeps
+    // its own check and stays the boundary.
+    const wrong = list.filter((s) => !isShip(s))
+    if (wrong.length > 0) {
+      setError(`Not a ship name: ${wrong.join(', ')}`)
+      return
+    }
+    setSending(true)
     try {
-      const list = ships(to)
-      const wrong = list.filter((s) => !isShip(s))
-      if (wrong.length > 0) {
-        setError(`Not a ship name: ${wrong.join(', ')}`)
-        setSending(false)
-        return
-      }
       // A FILE ON THE COMPOSER TAKES THE DIRECT PATH. %send-draft signs
       // what is on disk, and what is on disk has no files: routing an
       // attached send through it would drop every attachment silently
@@ -291,18 +309,24 @@ export default function Compose({
             should get that history.
           </p>
         )}
-        <input
-          value={to} onChange={(e) => { touched.current = true; setTo(e.target.value) }}
-          placeholder="~sampel-palnet, ~palnet-sampel"
-          aria-label={forward ? 'Forward to' : 'To'}
-          className={`field ${bad.length ? 'field-bad' : ''}`}
+        {/* THE AUDIENCE, AS CHIPS, AND IT IS EXACTLY WHAT WILL BE SENT.
+            Typing the start of a mailing list's name offers it beside
+            the ships; picking one drops its members in as ordinary chips
+            and the list is over. Nothing below this field — the send,
+            the draft that is autosaved, the validation — knows a list
+            was involved, and a list edited tomorrow does not change a
+            draft written today. */}
+        <ShipChips
+          ships={to}
+          pending={pending}
+          onShips={(next) => { touched.current = true; setTo(next) }}
+          onPending={(next) => { touched.current = true; setPending(next) }}
+          onError={setError}
+          lists={lists}
+          label={forward ? 'Forward to' : 'To'}
+          placeholder="~sampel-palnet or a list name"
+          disabled={sending}
         />
-        {bad.length > 0 && (
-          <p className="mt-1 text-[11px] text-danger">
-            {bad.length === 1 ? 'Not a ship name: ' : 'Not ship names: '}
-            {bad.join(', ')}
-          </p>
-        )}
         <input
           value={subject} onChange={(e) => { touched.current = true; setSubject(e.target.value) }}
           maxLength={1000}
@@ -343,7 +367,7 @@ export default function Compose({
         <div className="mt-2 flex items-center gap-2">
           <button
             onClick={onSend}
-            disabled={!to.trim() || bad.length > 0 || sending}
+            disabled={(to.length === 0 && !pending.trim()) || sending}
             className="btn btn-primary"
           >
             {upload ?? (sending ? 'Sending…' : forward ? 'Forward' : 'Send')}

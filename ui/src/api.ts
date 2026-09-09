@@ -573,6 +573,18 @@ export interface Rule {
   archive: boolean
 }
 
+// One mailing list: a name and the ships in it.
+//
+// LOCAL AND UNSIGNED, exactly like a Rule and a Draft. A list name never
+// travels — the nexus stores it as the path segment and there is no
+// field for it in the grub — so nothing downstream of the composer knows
+// lists exist: a send, a draft, the recipient validation and the
+// blast-radius line all see ships.
+export interface MailList {
+  name: string
+  members: string[]
+}
+
 // A @p, checked in the browser before the poke.
 //
 // The nexus keeps its own validation - this is a convenience, never the
@@ -660,3 +672,19 @@ export const rules = () => get<Rule[]>('/api/rules')
 export const saveRule = (r: Rule) => post('/api/rule', r)
 
 export const deleteRule = (id: string) => post('/api/rule-delete', { id })
+
+export const lists = () => get<MailList[]>('/api/lists')
+
+// ONE VERB. Create, overwrite, add a member, drop one, rename by saving
+// under a new name, and copy the membership off a message are all this
+// call, because a list is a name and a set of ships and there is nothing
+// else in it to do. No tracking and no merge: the ship stores exactly
+// the set sent.
+//
+// A list write does not move the change beacon — no other reader can
+// observe it — so the caller refetches its own listing, as the filter
+// panel does.
+export const saveList = (l: MailList) =>
+  post('/api/list', { name: l.name, members: l.members })
+
+export const deleteList = (name: string) => post('/api/list-delete', { name })

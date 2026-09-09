@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   deleteThread, garbled, isShip, markRead, markUnread, ourShip, send, setArchived,
-  setLabel, thread, unreachable, uploadAll, type Message, type Thread,
+  setLabel, thread, unreachable, uploadAll,
+  type MailList, type Message, type Thread,
 } from './api'
 import { FilePicker } from './Attachments'
 import MessageCard from './MessageCard'
@@ -37,7 +38,7 @@ function defaultRecipients(th: Thread): string[] {
 }
 
 export default function ThreadView({
-  id, onSent, onDeleted, onForward, onFiled, updatedAt,
+  id, onSent, onDeleted, onForward, onFiled, updatedAt, lists, onSaveList,
 }: {
   id: string
   onSent: () => void
@@ -58,6 +59,12 @@ export default function ThreadView({
   // mutation — but only the open thread refetches, and read-marks never
   // bump the beacon, so opening a thread cannot start a refetch loop.
   updatedAt?: number | null
+  // Passed straight through to each MessageCard, which carries the
+  // Save-as-list control: the audience of ONE message is what a list is
+  // copied from, so the control belongs on the card and not on the
+  // thread.
+  lists: MailList[]
+  onSaveList: (l: MailList) => Promise<void>
 }) {
   const [t, setT] = useState<Thread | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -614,7 +621,7 @@ export default function ThreadView({
               share an id, and a forged twin of the message on screen is
               exactly the thing a reader must be able to see. */}
           {copiesOf(t.messages, target.id).map((m, i) => (
-            <MessageCard key={i} m={m} />
+            <MessageCard key={i} m={m} lists={lists} onSaveList={onSaveList} />
           ))}
         </>
       ) : t.messages.map((m, i) => (
@@ -622,7 +629,7 @@ export default function ThreadView({
         // genuine, others forged) — index into the fixed, backend-ordered
         // list, not `m.id`, or React's key collision folds distinct
         // verified/forged copies into one node.
-        <MessageCard key={i} m={m} />
+        <MessageCard key={i} m={m} lists={lists} onSaveList={onSaveList} />
       ))}
       <div className="mb-1 rounded-sm border border-line p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
