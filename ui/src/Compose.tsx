@@ -84,15 +84,23 @@ export default function Compose({
   const store = async () => {
     if (!touched.current) return
     const { to: t, subject: s, body: b } = latest.current
-    if (!t.trim() && !s.trim() && !b.trim()) return
+    // Only well-formed ships go into a draft: the nexus parses `to` as a
+    // set of @p and would refuse the whole save otherwise, which would
+    // silently stop autosaving the moment a half-typed name was in the
+    // field.
+    const named = ships(t).filter(isShip)
+    // GUARD ON WHAT WILL BE STORED, not on what is on screen. `to`
+    // holding nothing but a half-typed name stores as an empty list, so
+    // the raw-string test called a blank composer non-empty and
+    // autosaved a draft with no recipient, no subject and no body — a
+    // draft holding nothing, created by starting to type a name and
+    // stopping. Autosave exists to keep work that would otherwise be
+    // lost, and there is no work in that.
+    if (named.length === 0 && !s.trim() && !b.trim()) return
     try {
       await saveDraft({
         id: draftId.current,
-        // Only well-formed ships go into a draft: the nexus parses `to`
-        // as a set of @p and would refuse the whole save otherwise,
-        // which would silently stop autosaving the moment a half-typed
-        // name was in the field.
-        to: ships(t).filter(isShip),
+        to: named,
         subj: s,
         body: b,
         prev: forward ? forward.prev : resume ? resume.prev : null,
