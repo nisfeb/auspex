@@ -38,9 +38,12 @@ function defaultRecipients(th: Thread): string[] {
 }
 
 export default function ThreadView({
-  id, onSent, onDeleted, onForward, onFiled, updatedAt, lists, onSaveList,
+  id, onSent, onDeleted, onForward, onFiled, onRead, updatedAt, lists, onSaveList,
 }: {
   id: string
+  // Called once the read mark opening this thread has landed on the
+  // ship, so the listing can un-bold the row without a refetch.
+  onRead: (threadId: string) => void
   onSent: (notice?: string | null) => void
   onDeleted: () => void
   // Opens the composer as a forward: `prev` set to this thread's newest
@@ -165,7 +168,20 @@ export default function ThreadView({
       // One request for the whole batch, not one per message: the
       // writer serialises every mutation and each poke costs it a full
       // mailbox scan.
-      markRead(th.messages.filter((m) => !m.read).map((m) => m.id)).catch(console.error)
+      const unread = th.messages.filter((m) => !m.read).map((m) => m.id)
+      if (unread.length > 0) {
+        markRead(unread).then(() => {
+          if (cancelled) return
+          // A read mark does not move the change beacon (deliberately:
+          // opening a thread must not refetch the thread), so nothing
+          // tells the list or this view that the row is no longer bold.
+          // The tab that made the mark is the one that knows.
+          setT((cur) => cur && cur.id === th.id
+            ? { ...cur, messages: cur.messages.map((m) => ({ ...m, read: true })) }
+            : cur)
+          onRead(th.id)
+        }).catch(console.error)
+      }
     }).catch((e) => {
       if (cancelled) return
       console.error(e)
@@ -564,15 +580,20 @@ export default function ThreadView({
         >
           {t.archived ? 'Unarchive' : 'Archive'}
         </button>
-        <button
-          type="button"
-          onClick={onUnread}
-          title="Mark every message here unread and go back to the list. Messages whose
-            signature failed are left alone: a forgery never counts toward unread."
-          className="btn shrink-0"
-        >
-          Mark unread
-        </button>
+        {t.messages.some((m) => m.read && m.verdict !== 'forged') && (
+          // Only when there is something to un-read. Before the read mark
+          // opening this thread lands, every message is still unread and
+          // the button would offer to do what is already so.
+          <button
+            type="button"
+            onClick={onUnread}
+            title="Mark every message here unread and go back to the list. Messages whose
+              signature failed are left alone: a forgery never counts toward unread."
+            className="btn shrink-0"
+          >
+            Mark unread
+          </button>
+        )}
         <button
           type="button"
           onClick={onDelete}

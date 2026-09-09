@@ -550,6 +550,7 @@ export default function App() {
                     onDeleted={() => { setSelected(null); refresh() }}
                     onForward={(f) => { setComposing(false); setResume(null); setForwarding(f) }}
                     onFiled={() => { refresh(); refreshSidebar() }}
+                    onRead={(tid) => setEntries((es) => es.map((e) => e.id === tid ? { ...e, unread: false } : e))}
                     updatedAt={threadUpdate}
                     lists={lists}
                     onSaveList={async (l) => { await saveList(l); refreshSidebar() }}
