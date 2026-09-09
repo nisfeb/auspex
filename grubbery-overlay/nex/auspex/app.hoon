@@ -287,7 +287,8 @@
         =/  root=path  path.here
         ;<  ~  bind:m  (grant-public root)
         ;<  ~  bind:m  (republish-all root)
-        ;<  ~  bind:m  publish-proto
+        ;<  our=@p  bind:m  bowl-our
+        ;<  ~  bind:m  (publish-proto our)
         ;<  ~  bind:m  (migrate-flat root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
@@ -689,6 +690,24 @@
   ?.  (peer-fresh:uc u.rec now)  ~
   proto.u.rec
 ::
+::  +read-probe: the discovery in flight for one ship, and the mail
+::  queued behind it. ~ when there is none.
+::
+::    Read defensively for the same reason every other ladder here is:
+::    a grub that does not clam answers ~, and ~ here means "start a
+::    fresh probe", which loses the queue but never wedges the fiber.
+::    +run-probe reads the same grub and recovers the same way.
+::
+++  read-probe
+  |=  [root=path who=ship]
+  =/  m  (fiber:fiber:nexus ,(unit probe-req:uc))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (probe-rail root who) ~)
+  ?.  ?=([%file *] vw)  (pure:m ~)
+  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
+  =/  res  (mule |.(;;(probe-req:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%| -.res) ~ `p.res))
+::
 ::  +list-blobs: every blob this ship holds, with its age and weight.
 ::
 ::    The store's whole bookkeeping. Both bounds - max-blobs by count and
@@ -1041,7 +1060,7 @@
     (deliver root p.res)
   ?.  ?|  =([/ %auspex-action] p.sage)
           =([/auspex %blob-in] p.sage)
-          =([/auspex %peer] p.sage)
+          =([/auspex %probereq] p.sage)
       ==
     ::  an unknown blot. Ignore it rather than crash - see the header.
     (pure:m |)
@@ -1068,10 +1087,10 @@
   ::  discovery cache could tell us it speaks a version it does not, or
   ::  caps larger than it enforces, and either one turns a send into a
   ::  message that vanishes.
-  ?:  =([/auspex %peer] p.sage)
-    =/  res  (mule |.(~|(%auspex-bad-peer ;;(peer-rec:uc q.q.sage))))
-    ?:  ?=(%| -.res)  (reject root 'malformed peer record')
-    (take-peer root p.res)
+  ?:  =([/auspex %probereq] p.sage)
+    =/  res  (mule |.(~|(%auspex-bad-probe ;;(probe-req:uc q.q.sage))))
+    ?:  ?=(%| -.res)  (reject root 'malformed probe result')
+    (take-probe-done root p.res)
   =/  res  (mule |.(~|(%auspex-bad-action ;;(action:uc q.q.sage))))
   ?:  ?=(%| -.res)  (reject root 'malformed action')
   (act root p.res)
@@ -2043,12 +2062,38 @@
 ::    caps, and the receiver enforces those regardless.
 ::
 ++  publish-proto
+  |=  our=ship
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  bound=?  bind:m  (farm-has proto-spur:uc)
-  ?:  bound  (pure:m ~)
+  ?.  bound
+    ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
+    (trace:io ~[leaf+"auspex: published /proto into the farm"])
+  ::  bound already. READ BACK WHAT A PEER WOULD GET, through the exact
+  ::  arm a peer uses, and grow only if it is not what we now publish.
+  ::  A keen to ourselves, at rise, once - not on any send path.
+  ;<  have=(unit proto:uc)  bind:m  (keen-proto our 1)
+  ?~  have
+    ::  bound and unreadable. DO NOT GROW: a grow raises the case a peer
+    ::  has to probe for, cases only ever go up, and burning one on a
+    ::  read we could not perform is how the ceiling gets reached by
+    ::  accident. Say so instead.
+    %-  trace:io
+    ~[leaf+"auspex: /proto is bound and did not read back; not republishing"]
+  ?:  =(u.have our-proto:uc)  (pure:m ~)
+  ::  IT CHANGED. Cull first and grow second, and the order is the whole
+  ::  correctness argument: +keen-proto probes upward from case 1 and
+  ::  takes the FIRST hit, so growing without culling would leave the
+  ::  old noun answering at case 1 forever and the new one unreachable
+  ::  behind it. The cull parks a high-water mark, case 1 then misses,
+  ::  and the probe finds the new binding at 2.
+  ::
+  ::  ONE GROW PER PROTOCOL CHANGE, never per deploy - which is what
+  ::  keeps this inside +max-case-probe. The read-back above is what
+  ::  makes a redeploy of unchanged content free.
+  ;<  ~  bind:m  (cull-farm:io proto-spur:uc)
   ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
-  (trace:io ~[leaf+"auspex: published /proto into the farm"])
+  (trace:io ~[leaf+"auspex: /proto changed; republished"])
 ::
 ::  ── the blob fetch ──────────────────────────────────────────────────
 ::
@@ -2160,30 +2205,129 @@
   ?.  (proto-ok:uc p.got)  (pure:m ~)
   (pure:m `p.got)
 ::
-::  +spawn-probe: ask a peer what it speaks, OFF THIS FIBER.
+::  +enqueue-chain: hold this send until we know what the peer speaks.
 ::
-::    Writing the grub is the whole spawn: grubbery runs +on-file for the
-::    rail, which starts the probe. The writer therefore pays one write
-::    and never a round trip, which is the entire reason this is a fiber
-::    and not a keen inside +send-one.
+::    THE SEND DOES NOT GO OUT AS VERSION 1 HERE, and that is the fix
+::    this arm exists for. Poking v1 while the probe was still in flight
+::    meant the "no common protocol version" refusal could never fire on
+::    FIRST CONTACT - the one send most likely to reach a ship running
+::    something else - because by the time the answer arrived the chain
+::    was already on the wire.
 ::
-::    The grub IS a $peer-rec with proto=~ - the question in the shape of
-::    the answer - so one marc and one `;;` ladder cover the probe's
-::    state, the writer's wire poke and the stored record.
+::    Writing the grub is the whole spawn: grubbery runs +on-file for
+::    the rail. An UPDATE does not spawn a second fiber (see
+::    +do-fetch-blob on the same property), so appending to a live
+::    probe's queue is safe and is what makes two quick sends to one
+::    unknown ship both arrive.
 ::
-++  spawn-probe
-  |=  [root=path who=ship now=@da]
+++  enqueue-chain
+  |=  [root=path c=chain:uc who=ship now=@da]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  ~  bind:m  (ensure-dir (probe-dir root))
-  %^  put-file  (probe-rail root who)  [/auspex %peer]
-  `peer-rec:uc`[%0 who ~ now]
+  ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
+  =/  nex=probe-req:uc
+    ?~  rq  [%0 who now ~[c] ~ 0]
+    u.rq(pending (queue-chain:uc pending.u.rq c))
+  ;<  ~  bind:m  (put-file (probe-rail root who) [/auspex %probereq] nex)
+  %-  trace:io
+  :~  leaf+"auspex: holding a send to {<who>} for discovery"
+  ==
 ::
-::  +run-probe: the ephemeral discovery fiber. Runs OFF the writer.
+::  +deliver-chain: THE DECISION, and it is the same one wherever it is
+::  made.
 ::
-::    Its road to the writer is ABSOLUTE, derived from +get-here-abs, for
-::    the reason +run-fetch's is: a depth-relative road called from the
-::    wrong depth climbs past the nexus root and crashes the fiber.
+::    Called by the writer for a peer we already have an answer for, and
+::    by the probe fiber for a peer we have just asked. One arm, so the
+::    two paths cannot drift on which mark is poked or which refusal is
+::    said - which they would, because they are the same four outcomes
+::    in two different fibers.
+::
+::      answer, common version   poke the mark for the HIGHEST common one
+::      answer, none in common   REFUSE. Never poke: a mark the peer does
+::                               not carry PARKS, and a park is what all
+::                               of this exists to stop looking like a
+::                               timeout.
+::      answer, over their caps  REFUSE, naming THEIR number.
+::      no answer at all         one version-1 attempt, because silence
+::                               is version 1 - and only the PROBE's own
+::                               empty result reaches here, never a cache
+::                               that merely had no entry.
+::
+::    `notes` is off on the fiber. Only the writer mutates the tree, so
+::    the fiber says its outcome to the console and the writer records
+::    the summary when the fiber reports back.
+::
+++  deliver-chain
+  |=  [root=path c=chain:uc who=ship known=(unit proto:uc) notes=?]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  mk=(unit @tas)  (peer-mark:uc known)
+  ?~  mk
+    ::  unreachable with known=~: silence is version 1, so +peer-mark
+    ::  answers ~ only for a peer that ANSWERED and shares nothing with
+    ::  us. Written rather than needed, because +need here would be a
+    ::  crash on whichever fiber got here.
+    ?~  known  (pure:m ~)
+    (say-send root who (no-version-error:uc who u.known) notes)
+  =/  cerr=(unit @t)  (peer-cap-error:uc who c known)
+  ?^  cerr  (say-send root who u.cerr notes)
+  ::  no answer: the compatibility rule, said out loud before the poke
+  ::  rather than after it fails.
+  ;<  ~  bind:m
+    ?^  known  (pure:m ~)
+    (say-send root who (unanswered-note:uc who) notes)
+  =/  rd=road:tarball  (remote-road [%& %& root %'main.sig'] who)
+  ;<  res=(unit (unit tang))  bind:m
+    ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ u.mk] c]))
+  ?~  res
+    ::  A DEADLINE BOUNDS HOW LONG WE WAIT. It says nothing about what
+    ::  the far end did, and between two live ships a chain has arrived,
+    ::  verified and stored while this deadline had already fired - so
+    ::  the sentence must not claim the send failed. The record is
+    ::  dropped either way, so the next send re-asks.
+    ;<  ~  bind:m  (cull-if-there (peer-rail root who))
+    (say-send root who (late-ack-note:uc who (div send-timeout ~s1)) notes)
+  ?~  u.res  (pure:m ~)
+  ;<  ~  bind:m  (cull-if-there (peer-rail root who))
+  (say-send root who (nacked-note:uc who) notes)
+::
+::  +say-send: one sentence, to the console always and to /tr/last only
+::  from the writer. ONLY THE WRITER MUTATES THE TREE, so the fiber
+::  says its outcome where a human can see it and the writer records
+::  the summary when the fiber reports back.
+::
+++  say-send
+  |=  [root=path who=ship why=@t notes=?]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: {(trip why)}"])
+  ?.  notes  (pure:m ~)
+  ;<  *  bind:m  (note root 'send' | why)
+  (pure:m ~)
+::
+::  +run-probe: the ephemeral discovery fiber. Runs OFF the writer, and
+::  it is the fiber that SENDS the mail it was holding.
+::
+::    Order, and every step of it is load-bearing:
+::
+::      1  `who` off the RAIL NAME, not the grub. A grub that does not
+::         clam - an old shape left by a previous build - would
+::         otherwise crash this fiber, and a crashed fiber respawns,
+::         which is an infinite crash loop at 100% CPU. Reading the name
+::         means the recovery poke below can always be sent.
+::      2  keen, cases 1..3, bounded and yawned.
+::      3  RE-READ the state. Anything the writer appended while the
+::         keen was in flight is picked up here, which is what makes two
+::         quick sends to one unknown ship both arrive.
+::      4  drain, in order, through the same +deliver-chain the writer
+::         uses.
+::      5  report [answer drained] to the writer, which stores the
+::         record, culls exactly what was sent, and re-sends anything
+::         that arrived behind the count.
+::
+::    Its road to the writer is ABSOLUTE, derived from +get-here-abs,
+::    for the reason +run-fetch's is.
 ::
 ++  run-probe
   |=  id=@ta
@@ -2191,50 +2335,69 @@
   ^-  form:m
   ;<  here=rail:tarball  bind:m  get-here-abs:io
   =/  root=path  (snip path.here)
-  ;<  rq=peer-rec:uc  bind:m  (get-state-as:io ,peer-rec:uc)
-  ;<  got=(unit proto:uc)  bind:m  (keen-proto who.rq 1)
+  =/  wu=(unit @p)  (slaw %p id)
+  ?~  wu
+    (trace:io ~[leaf+"auspex: probe at {<id>} is not a ship name"])
+  =/  who=ship  u.wu
+  ;<  got=(unit proto:uc)  bind:m  (keen-proto who 1)
+  ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
+  =/  q=(list chain:uc)  ?~(rq ~ pending.u.rq)
   ;<  now=@da  bind:m  get-time:io
+  ;<  ~  bind:m  (drain-probe root who got q |)
   %+  poke:io  [%& %& root %'main.sig']
-  [[/auspex %peer] `peer-rec:uc`[%0 who.rq got now]]
+  [[/auspex %probereq] `probe-req:uc`[%0 who now ~ got (lent q)]]
 ::
-::  +take-peer: the writer's half of a probe. Local only.
+::  +drain-probe: send the held chains, oldest first.
 ::
-::    A MISS IS RECORDED, not discarded, and that is the point of the
-::    record carrying a (unit proto) rather than being absent. `proto=~`
-::    is a REMEMBERED SILENCE: the peer was asked and did not answer, so
-::    it is treated as version 1 for +proto-ttl instead of costing a
-::    fresh ten-second probe on every send. Without it, every send to a
-::    ship running the build before this one would re-ask.
+::    Recursion by ARM NAME: a $ with arguments inside a ;< continuation
+::    cannot find the trap.
 ::
-::    The probe grub is culled FIRST and unconditionally, so a miss
-::    leaves nothing behind to respawn on the next reload - exactly what
-::    +take-blob does with a fetch request.
+++  drain-probe
+  |=  [root=path who=ship known=(unit proto:uc) q=(list chain:uc) notes=?]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  q  (pure:m ~)
+  ;<  ~  bind:m  (deliver-chain root i.q who known notes)
+  (drain-probe root who known t.q notes)
+::
+::  +take-probe-done: the writer's half of a probe. Local only.
+::
+::    A MISS IS RECORDED, not discarded: `proto=~` in the stored record
+::    is a REMEMBERED SILENCE, so a ship running a build without
+::    discovery costs one probe rather than one per send.
+::
+::    Then the hand-off. The fiber says how many of the queue it sent;
+::    everything past that count arrived while it was draining and has
+::    never been near a wire, so it is re-sent HERE - where the record it
+::    needs is now fresh, so it takes the ordinary path. Culling the
+::    whole grub instead would have destroyed exactly those messages,
+::    and nothing would have reported it.
 ::
 ::    ANSWERS %.n, AND THE BEACON IS THE REASON. A peer record is local
-::    state no reader renders: no message appeared, none changed, and no
-::    listing row reads differently for it. Worse, the ANSWER COMES FROM
-::    A PEER, so a bump here would let whoever publishes a /proto decide
-::    when this ship refetches its whole mailbox, at O(total stored
-::    messages) per open tab. Same argument as +take-blob's, same
-::    conclusion.
+::    state no reader renders, and the ANSWER COMES FROM A PEER - a bump
+::    here would let whoever publishes a /proto decide when this ship
+::    refetches its whole mailbox. Same argument as +take-blob's.
 ::
-++  take-peer
-  |=  [root=path r=peer-rec:uc]
+++  take-probe-done
+  |=  [root=path r=probe-req:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (cull-if-there (probe-rail root who.r))
   ;<  ~  bind:m  (ensure-dir (peer-dir root))
-  ;<  ~  bind:m  (put-file (peer-rail root who.r) [/auspex %peer] r)
-  ::  traced as well as noted. /tr/last survives a reload and is the
-  ::  record; the console line is what makes a cross-ship deploy
-  ::  verifiable at the moment it happens, and it is the same pairing
-  ::  +send-one's refusals already use.
-  =/  why=@t
-    ?~  proto.r
+  ;<  ~  bind:m
+    %^  put-file  (peer-rail root who.r)  [/auspex %peer]
+    `peer-rec:uc`[%0 who.r answer.r asked.r]
+  =/  spoke=@t
+    ?~  answer.r
       (rap 3 ~[(scot %p who.r) ' published no /proto'])
-    (rap 3 ~[(scot %p who.r) ' speaks ' (num-list:uc versions.u.proto.r)])
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip why)}"])
-  ;<  ~  bind:m  (note root 'discovery' & why)
+    (rap 3 ~[(scot %p who.r) ' speaks ' (num-list:uc versions.u.answer.r)])
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip spoke)}"])
+  ;<  ~  bind:m  (note root 'discovery' & spoke)
+  ;<  held=(unit probe-req:uc)  bind:m  (read-probe root who.r)
+  =/  rest=(list chain:uc)
+    ?~  held  ~
+    rest:(drain-queue:uc pending.u.held drained.r)
+  ;<  ~  bind:m  (cull-if-there (probe-rail root who.r))
+  ;<  ~  bind:m  (drain-probe root who.r answer.r rest &)
   (pure:m |)
 ::
 ::  +do-fetch-blob: fetch one attachment's bytes on demand.
@@ -2740,39 +2903,23 @@
 ::
 ::  +send-one: ASK WHAT THE PEER SPEAKS, THEN POKE IT.
 ::
-::    Bounded by a deadline, and soft. This runs INSIDE the writer, which
-::    is the ship's single serialisation point for mail; an unreachable
-::    recipient must not wedge it forever, and a nack from a peer running
-::    a different auspex must not crash it.
+::    NOTHING HERE KEENS, AND ON FIRST CONTACT NOTHING HERE POKES. The
+::    answer is read out of the cache - a peek of our own tree - and a
+::    peer we have no fresh answer for gets the chain HELD, not sent:
+::    see +enqueue-chain for why sending version 1 while the probe was
+::    still in flight made the "no common version" refusal unreachable
+::    on exactly the send it was written for.
 ::
-::    NOTHING HERE KEENS. The discovery answer is read out of the cache -
-::    a peek of our own tree - and a missing or expired record spawns an
-::    ephemeral /probe fiber to fill it. A keen on the writer would queue
-::    every send, every inbound chain and every read-mark behind a
-::    network round trip, and a timed-out keen leaves a late response and
-::    a stray %veto behind, which on a long-lived fiber pile into its
-::    skip queue to be re-offered on every later take. That is
-::    +do-fetch-blob's argument and it is unchanged by what is being
-::    fetched.
+::    A keen on the writer would queue every send, every inbound chain
+::    and every read-mark behind a network round trip, and a timed-out
+::    keen leaves a late response and a stray %veto to pile into a
+::    long-lived fiber's skip queue. That is +do-fetch-blob's argument
+::    and it is unchanged by what is being fetched.
 ::
-::    So the FIRST send to an unknown peer is the version-1 attempt this
-::    arm always made, plus a probe that costs the writer one write. From
-::    the second send on, the record decides:
-::
-::      fresh, common version   poke the mark for the HIGHEST common
-::                              version - +peer-mark
-::      fresh, none in common   REFUSE. The poke is never sent, because a
-::                              mark the peer does not carry parks, and a
-::                              park is what we are here to stop looking
-::                              like a timeout.
-::      fresh, over their caps  REFUSE, naming THEIR number - the send is
-::                              legal here and would be dropped there.
-::      absent or expired       version 1, as before, and ask.
-::
-::    A nack or a timeout DROPS the record. Either is evidence the
-::    cached answer is wrong or the peer moved, and re-asking costs one
-::    probe against a day of sending to a ship on the strength of a
-::    stale answer.
+::    So: a peer we know, we poke from here, now. A peer we do not, the
+::    ephemeral probe fiber pokes - or refuses - the moment it knows.
+::    Both go through +deliver-chain, which is the only place the
+::    decision is written down.
 ::
 ++  send-one
   |=  [root=path c=chain:uc who=ship]
@@ -2781,46 +2928,8 @@
   ;<  now=@da  bind:m  bowl-now
   ;<  rec=(unit peer-rec:uc)  bind:m  (read-peer root who)
   =/  known=(unit proto:uc)  (known-proto rec now)
-  ;<  ~  bind:m
-    ?^  known  (pure:m ~)
-    (spawn-probe root who now)
-  =/  mk=(unit @tas)  (peer-mark:uc known)
-  ?~  mk
-    ::  unreachable with known=~: a silent peer is version 1, so
-    ::  +peer-mark answers ~ only for a peer that ANSWERED and shares
-    ::  nothing with us. The branch is written rather than needed,
-    ::  because +need here would be a crash on the writer.
-    ?~  known  (pure:m ~)
-    =/  why=@t  (no-version-error:uc who u.known)
-    ;<  ~  bind:m  (trace:io ~[leaf+"auspex: {(trip why)}"])
-    ;<  *  bind:m  (note root 'send' | why)
-    (pure:m ~)
-  =/  cerr=(unit @t)  (peer-cap-error:uc who c known)
-  ?^  cerr
-    ;<  ~  bind:m  (trace:io ~[leaf+"auspex: {(trip u.cerr)}"])
-    ;<  *  bind:m  (note root 'send' | u.cerr)
-    (pure:m ~)
-  =/  rd=road:tarball  (remote-road [%& %& root %'main.sig'] who)
-  ;<  res=(unit (unit tang))  bind:m
-    ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ u.mk] c]))
-  ?~  res
-    ::  no ack. If discovery never answered either, this is the shape of
-    ::  a ship not running Auspex at all, and the message says so - two
-    ::  facts in one sentence, because "timed out" alone reads as a
-    ::  network hiccup.
-    =/  why=@t
-      ?~  known  (no-answer-error:uc who)
-      (rap 3 ~[(scot %p who) ' did not ack the send'])
-    ;<  ~  bind:m  (cull-if-there (peer-rail root who))
-    ;<  ~  bind:m  (trace:io ~[leaf+"auspex: {(trip why)}"])
-    ;<  *  bind:m  (note root 'send' | why)
-    (pure:m ~)
-  ?~  u.res  (pure:m ~)
-  ;<  ~  bind:m  (cull-if-there (peer-rail root who))
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: send to {<who>} nacked"])
-  ;<  *  bind:m
-    (note root 'send' | (rap 3 ~[(scot %p who) ' nacked the send']))
-  (pure:m ~)
+  ?~  known  (enqueue-chain root c who now)
+  (deliver-chain root c who known &)
 ::
 ++  send-timeout  ^-(@dr ~s20)
 ::
