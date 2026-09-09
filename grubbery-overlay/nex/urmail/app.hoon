@@ -1843,7 +1843,22 @@
   ::  restriction is unpublishing and not revocation - see $blob-vis.
   ;<  ~  bind:m  (publish-blob hash.b u.res.b |)
   ;<  ~  bind:m  (note root 'fetch-blob' & (scot %uv hash.b))
-  (pure:m &)
+  ::  %.n, AND THE BEACON IS THE REASON. +apply's answer is what moves
+  ::  /beacon/rev, and a blob arrival is not message content: no
+  ::  message appeared, none changed, and no listing row reads any
+  ::  differently for it. Bumping would cost every open tab a full
+  ::  inbox listing - which is O(total stored messages) - plus a thread
+  ::  refetch, for bytes only the tab that asked for them is waiting
+  ::  on, and that tab is already retrying GET /api/blob. It is the
+  ::  same argument that keeps a read-mark off the beacon, and the same
+  ::  amplification: %fetch-blob is a local action, but the ANSWER
+  ::  arrives from a peer, so a bump here would let whoever serves the
+  ::  bytes decide when this ship refetches its whole mailbox.
+  ::
+  ::  The store did change, and nothing is lost by saying so quietly:
+  ::  /tr/last records the arrival above, and the blob is served the
+  ::  moment the next request asks for it.
+  (pure:m |)
 ::
 ::  ── per-attachment permission ───────────────────────────────────────
 ::
@@ -2524,6 +2539,13 @@
   ::  FIRST in the &, so the branch can reach into the path it matched.
   ?:  &(?=([%api %thread @ ~] suffix) =(%'GET' meth))
     (serve-thread src eyre-id i.t.t.suffix)
+  ::  GET /api/blob/<hash>: THE ONLY ROUTE THAT ANSWERS ANYTHING BUT
+  ::  JSON, and the only one whose response body is not something this
+  ::  nexus wrote. Same shape as /api/thread/<id> and here for the same
+  ::  reason: the hash is the last segment, so it cannot sit in the
+  ::  table below, which keys on the whole suffix.
+  ?:  &(?=([%api %blob @ ~] suffix) =(%'GET' meth))
+    (serve-blob src eyre-id i.t.t.suffix args.parsed)
   ::  the rest of the surface, keyed on the WHOLE suffix rather than on
   ::  its last segment: /read and /api/read are different requests and
   ::  only one of them is a route.
@@ -2542,6 +2564,7 @@
       [%'GET' [%api %rules ~]]          (serve-rules src eyre-id)
       [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
       [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
+      [%'POST' [%api %'fetch-blob' ~]]  (do-web-fetch src eyre-id (req-body req))
       [%'POST' [%api %unread ~]]        (do-web-unread src eyre-id (req-body req))
       [%'POST' [%api %label ~]]         (do-web-label src eyre-id (req-body req))
       [%'POST' [%api %archive ~]]       (do-web-archive src eyre-id (req-body req))
@@ -2814,6 +2837,68 @@
   ?:  &(=(~ ss) =(0 lost))  (send-err eyre-id 404 'no such thread')
   ;<  mt=meta:uc  bind:m  (read-meta root u.t)
   (send-json eyre-id (thread-json u.t ss mt lost))
+::
+::  +serve-blob: one attachment's bytes, to the owner's browser.
+::
+::    THE DOWNLOAD, and the one route on this surface whose body is not
+::    JSON this nexus wrote. Everything below is about that difference.
+::
+::    NOT FETCHED IS NOT NOT FOUND. A blob this ship does not hold is a
+::    409 saying `not fetched`, never a 404: bytes are never pushed, so
+::    a message we hold and an attachment we have not pulled is the
+::    ORDINARY state of an inbound attachment, and 404 would tell the
+::    client the file does not exist when what it means is "ask for it".
+::    The client turns the 409 into the Fetch control that pokes
+::    %fetch-blob and then retries this route.
+::
+::    ONLY BYTES THAT HASH TO THE REQUESTED PATH. +read-blob reads the
+::    grub filed under the hash, and this re-derives the hash from the
+::    bytes before answering. The store is written only by +take-blob
+::    and +store-blob, both of which check, so this is belt to those
+::    braces - but the whole design says the hash is the authority, and
+::    a serving path that trusted a filename would be the one place it
+::    was not.
+::
+::    `name` and `mime` ride in the QUERY, from the signed $attachment
+::    the client just rendered, because a blob grub is bytes and an
+::    arrival time and nothing else - the metadata lives in the message,
+::    and finding it here would mean walking every thread on the ship
+::    per download. That makes them client-supplied, which changes
+::    nothing: they were HOSTILE ALREADY. Every one arrived signed by
+::    whoever wrote the message, in a chain any ship may deliver, and
+::    +safe-mime and +safe-name refuse them the same way whether they
+::    came off the wire or out of the tree.
+::
+::    Content-Disposition: attachment, ALWAYS, on every response. A
+::    hostile HTML or SVG rendered inline is XSS in the owner's session
+::    with their cookie attached, and the allow-list above already
+::    refuses to name either type - two independent reasons, which is
+::    the right number. `nosniff` is the third, against a browser that
+::    would guess a type we deliberately did not give it.
+::
+++  serve-blob
+  |=  [src=@p eyre-id=@ta seg=@ta args=quay:eyre]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  h=(unit @uv)  (slaw %uv seg)
+  ?~  h  (send-err eyre-id 400 'bad hash')
+  ;<  root=path  bind:m  nexus-root
+  ;<  got=(unit octs)  bind:m  (read-blob root u.h)
+  ?~  got  (send-err eyre-id 409 'not fetched')
+  ?.  (blob-ok:uc u.got u.h)
+    (send-err eyre-id 500 'stored blob does not match its address')
+  =/  nm=@t  (safe-name:uw (fall (arg args 'name') '') (scot %uv u.h))
+  =/  mt=@t  (safe-mime:uw (fall (arg args 'mime') ''))
+  %+  send-simple:srv  eyre-id
+  :-  :-  200
+      :~  ['content-type' mt]
+          ['content-disposition' (rap 3 ~['attachment; filename="' nm '"'])]
+          ['x-content-type-options' 'nosniff']
+          ['cache-control' 'no-store']
+      ==
+  `u.got
 ::
 ::  +collect-unreadable: per thread, how many copies this build cannot
 ::  read - out of the same deep peek +collect-threads already walks.
@@ -3152,15 +3237,30 @@
     (send-err eyre-id 400 'subject too long')
   ?.  (fits-recipients:uc one max-to:uc)
     (send-err eyre-id 400 'too many recipients')
+  ::  ATTACHMENTS. Decoded off the SAME json object rather than out of
+  ::  $send-req, so a client that sends no `files` key - which is every
+  ::  client before this one, and this one on a send with nothing
+  ::  attached - decodes exactly as it always did. A key that is present
+  ::  and wrong is a 400: that is a client that meant to attach
+  ::  something and did not, and answering ok would be the same lie the
+  ::  cap checks above exist to stop.
+  ::
+  ::  +de-files refuses the count and the encoded length BEFORE it
+  ::  decodes any base64; +files-ok re-checks the decoded bytes against
+  ::  max-blob, max-attach, max-name and max-mime, from the same lib arm
+  ::  +do-send uses, so the boundary and the point of use cannot drift.
+  =/  fs=(unit (list up-file:uw))
+    (de-files:uw u.jon max-blob:uc max-attach:uc)
+  ?~  fs  (send-err eyre-id 400 'bad attachment')
+  =/  files=(list file:uc)  u.fs
+  ?.  (files-ok:uc files)  (send-err eyre-id 400 'bad attachment')
   ::  body-mime='' is 'text/plain', which is what this composer produces
-  ::  and the only thing the client renders. files=~ and bcc=~: bytes
-  ::  enter the blob store through their own action, and neither an
-  ::  attachment control nor a BCC field exists in the web client yet.
-  ::  All three are absent from $send-req rather than defaulted there, so
-  ::  a client cannot set them by accident through a route that has no UI
-  ::  behind it.
+  ::  and the only thing the client renders. bcc=~: no BCC field exists
+  ::  in the web client yet, and it is absent from $send-req rather than
+  ::  defaulted there, so a client cannot set it by accident through a
+  ::  route that has no UI behind it.
   ;<  ~  bind:m
-    (poke-writer [%send to.u.req subj.u.req body.u.req '' prev.u.req ~ ~])
+    (poke-writer [%send to.u.req subj.u.req body.u.req '' prev.u.req files ~])
   (send-ok eyre-id)
 ::
 ++  do-web-read
@@ -3174,6 +3274,35 @@
   =/  i=(unit (set @uv))  (de-read:uw u.jon)
   ?~  i  (send-err eyre-id 400 'bad msg-ids')
   ;<  ~  bind:m  (poke-writer [%read u.i])
+  (send-ok eyre-id)
+::
+::  +do-web-fetch: pull an attachment's bytes from a peer.
+::
+::    A POKE AND NOTHING ELSE. The keen runs on its own ephemeral fiber
+::    under /fetch/<id> (see +do-fetch-blob and +run-fetch), so this
+::    route answers as soon as the writer has queued the request, not
+::    when the bytes land - a network round trip with a ten-second
+::    deadline per case probe has no business holding an HTTP
+::    connection, and it has less business on the writer.
+::
+::    Nothing tells the client when the bytes arrive: a blob arrival
+::    does NOT move the change beacon (see +take-blob), because it is
+::    not message content and one bump costs every open tab a full inbox
+::    listing plus a thread refetch. The client retries GET /api/blob
+::    instead, which is one peek per retry against a route it was going
+::    to call anyway.
+::
+++  do-web-fetch
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  r=(unit [hash=@uv from=@p])  (de-fetch:uw u.jon)
+  ?~  r  (send-err eyre-id 400 'bad fetch request')
+  ;<  ~  bind:m  (poke-writer [%fetch-blob hash.u.r from.u.r])
   (send-ok eyre-id)
 ::
 ::  ── the mail-client writes ──────────────────────────────────────────
