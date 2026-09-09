@@ -100,7 +100,11 @@ fn main() {
             spawn_test_harness(&handle);
             let cfg = config::load(&handle);
             if cfg.url.is_empty() {
-                // first run: the single window opens on the connect page
+                // first run: the single window opens on the connect page, and
+                // there is nothing for the notifier to watch yet. connect()
+                // starts it there instead — which is also why it must not be
+                // started here unconditionally: a notifier waiting for a
+                // config to appear is a thread polling a file forever.
                 commands::show_manager(&handle)?;
             } else {
                 // off-thread: bridge setup does network work that must not
@@ -109,12 +113,11 @@ fn main() {
                 std::thread::spawn(move || {
                     commands::open_workspace(&h, false).ok();
                 });
+                // A stored config means a stored session, so this launch is
+                // already connected as far as the ship is concerned: notify
+                // from here, without anyone touching the connect page.
+                notify::spawn(handle.clone());
             }
-            // The whole point of the app. Started here so a launch with a
-            // stored session notifies without anyone touching the connect
-            // page; connect() starts it too, for the first run, and the two
-            // calls between them can only ever start one thread.
-            notify::spawn(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -241,9 +241,13 @@ fn run(app: AppHandle) {
     let mut backoff = BACKOFF_MIN;
     loop {
         let base = config::load(&app).url;
-        // Nothing configured yet: this is the launch-before-connect case, and
-        // connect() calls spawn() again (a no-op) rather than being the only
-        // starter, so the thread just waits for a url to appear.
+        // Defensive only. This thread is started from exactly two places and
+        // both have a session in hand — launch with a stored config, and a
+        // successful connect — so an empty config here means one was removed
+        // underneath a running app. Waiting is the right answer and the long
+        // wait is deliberate: nothing is going to fix itself sooner, and a
+        // tight loop re-reading a file that is not there is worse than a
+        // notifier that is half a minute late to a config nobody restored.
         if base.is_empty() || proxy::session_cookie(&config::cookie_file()).is_none() {
             std::thread::sleep(BACKOFF_MAX);
             continue;
