@@ -3,8 +3,9 @@ import {
   deleteThread, garbled, isShip, markRead, markUnread, ourShip, send, setArchived,
   setLabel, thread, unreachable, uploadAll, type Message, type Thread,
 } from './api'
-import VerdictBadge from './VerdictBadge'
-import { AttachmentRow, FilePicker } from './Attachments'
+import { FilePicker } from './Attachments'
+import MessageCard from './MessageCard'
+import ThreadTree, { allForged, copiesOf, speaker } from './ThreadTree'
 import type { ForwardIntent } from './Compose'
 
 // The default reply audience.
@@ -78,6 +79,17 @@ export default function ThreadView({
   // under our name, and the bytes are already fetchable by anyone on
   // the chain from their own content hash.
   const [files, setFiles] = useState<File[]>([])
+  // LIST OR TREE. Component state, deliberately not stored: the shape of
+  // a conversation is a question a reader asks about one conversation,
+  // not a preference, and a persisted toggle would answer it for every
+  // thread they open afterwards. List is the default because it is the
+  // right shape for reading.
+  const [view, setView] = useState<'list' | 'tree'>('list')
+  // The node the tree has selected, by message id — null until the user
+  // picks one, when it stands for "whatever the list would have replied
+  // to". Cleared on a thread change and never on a beacon push: a
+  // selection is the user's, and an unrelated delivery must not move it.
+  const [picked, setPicked] = useState<string | null>(null)
 
   // Tracks the id the effect below most recently committed to, so
   // onReply's post-send refetch (see below) can tell whether the user has
@@ -129,6 +141,7 @@ export default function ThreadView({
     if (fresh) {
       setRecipients([])
       setPending('')
+      setPicked(null)
     }
     thread(id).then((th) => {
       if (cancelled) return
@@ -328,7 +341,45 @@ export default function ThreadView({
     }
     return seen.size
   }
-  const travels = pathLength(last)
+
+  // WHICH VIEW IS ACTUALLY ON SCREEN. The toggle is only offered on a
+  // thread with something to branch, so a one-message thread cannot be
+  // left in tree mode by a choice made on the thread before it.
+  const branching = t.messages.length > 1
+  const mode = branching ? view : 'list'
+
+  // THE MESSAGE A REPLY OR FORWARD POINTS AT.
+  //
+  // In the list view this is `last`, unchanged: there is no way to say
+  // "that one" on a flat list, so the rule above picks for the user.
+  //
+  // In the tree view the user has said it. Clicking a node is a claim
+  // about which branch the next message belongs on, and honouring it is
+  // the whole point of drawing the tree — `prev` decides which
+  // root-to-leaf path the nexus ships, so a reply aimed at a node ships
+  // that node's path and no sibling branch.
+  //
+  // The honest-copy rule survives the move. A node collapses every copy
+  // of one id, and picking a node whose copies are ALL forged would aim
+  // the new message's entire travelling chain at a message nobody wrote
+  // — so such a node is not a reply target, and the controls say so
+  // rather than quietly falling back to somewhere the user did not
+  // click. Within a node that has an honest copy, that copy speaks.
+  const pickedCopies = picked ? copiesOf(t.messages, picked) : []
+  const target = mode === 'tree' && pickedCopies.length ? speaker(pickedCopies) : last
+  // Only ever true in the tree view: `last` above already falls back to
+  // a forged message when the whole thread is forged, and that is the
+  // list view's long-standing behaviour, not something to change here.
+  const targetForged = mode === 'tree' && pickedCopies.length
+    ? allForged(pickedCopies)
+    : false
+  const noTarget = targetForged
+    ? 'Every stored copy of this message failed its signature, so nothing can'
+      + ' point at it: a reply naming it would carry a chain nobody signed.'
+      + ' Select another message.'
+    : null
+
+  const travels = pathLength(target)
 
   // A @p typed but not yet committed to a chip would otherwise vanish on
   // send. Fold it in rather than silently dropping a recipient the user
@@ -388,7 +439,7 @@ export default function ThreadView({
     }
     setUpload(null)
     try {
-      await send(to, `re: ${last.subject}`, reply, last.id, refs)
+      await send(to, `re: ${target.subject}`, reply, target.id, refs)
     } catch (e) {
       // NO FALSE "SENT" WHEN THE SHIP WAS NEVER REACHED. The worker
       // never touches a POST, so a reply whose request did not arrive
@@ -428,6 +479,33 @@ export default function ThreadView({
         <h1 className="min-w-0 basis-full truncate text-base font-medium md:basis-0 md:flex-1">
           {t.messages[0].subject}
         </h1>
+        {/* LIST OR TREE, offered only where there is a shape to see. A
+            thread of one message has no branch to draw, and a control
+            switching between two identical pictures is furniture. */}
+        {branching && (
+          <span className="flex shrink-0 items-center" role="group" aria-label="Conversation shape">
+            <button
+              type="button"
+              onClick={() => setView('list')}
+              aria-pressed={mode === 'list'}
+              title="Every stored copy of every message, oldest first."
+              className={`btn rounded-r-none border-line-strong ${mode === 'list' ? 'bg-sunken text-ink' : ''}`}
+            >
+              List
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('tree')}
+              aria-pressed={mode === 'tree'}
+              title="Who replied to what. A reply or forward ships the path from the root down to
+                the message it points at — this is that shape, and a node picked here is what
+                the next message points at."
+              className={`btn -ml-px rounded-l-none border-line-strong ${mode === 'tree' ? 'bg-sunken text-ink' : ''}`}
+            >
+              Tree
+            </button>
+          </span>
+        )}
         {/* Forward is a reply addressed elsewhere: same poke, `prev`
             pointing into this chain, `to` naming someone new. The chain
             it carries is the payload, and the recipient can verify every
@@ -435,12 +513,14 @@ export default function ThreadView({
             composer says so before the To field. */}
         <button
           type="button"
+          disabled={targetForged}
           onClick={() => onForward({
-            prev: last.id,
-            subject: last.subject,
+            prev: target.id,
+            subject: target.subject,
             count: travels,
           })}
-          title={`Hand this line of the conversation to someone new. The ${travels} signed ${travels === 1 ? 'message' : 'messages'} leading to this one travel; other branches do not. The recipient can verify each author independently.`}
+          title={noTarget
+            ?? `Hand this line of the conversation to someone new. The ${travels} signed ${travels === 1 ? 'message' : 'messages'} leading to this one travel; other branches do not. The recipient can verify each author independently.`}
           className="btn shrink-0"
         >
           Forward
@@ -519,65 +599,27 @@ export default function ThreadView({
           the current format would break the signature that makes it evidence.
         </p>
       )}
-      {t.messages.map((m, i) => (
+      {mode === 'tree' ? (
+        <>
+          <ThreadTree
+            messages={t.messages}
+            selected={target.id}
+            onSelect={setPicked}
+          />
+          {/* The selected node's copies, in the same card the list view
+              uses. Every copy, not one: a node collapses the copies that
+              share an id, and a forged twin of the message on screen is
+              exactly the thing a reader must be able to see. */}
+          {copiesOf(t.messages, target.id).map((m, i) => (
+            <MessageCard key={i} m={m} />
+          ))}
+        </>
+      ) : t.messages.map((m, i) => (
         // Up to 4 copies of a message share the same `id` by design (one
         // genuine, others forged) — index into the fixed, backend-ordered
         // list, not `m.id`, or React's key collision folds distinct
         // verified/forged copies into one node.
-        <article key={i} className="mb-3 border-b border-line pb-3">
-          <header className="mb-1 flex min-w-0 items-center gap-2">
-            <VerdictBadge verdict={m.verdict} from={m.from} />
-            <span className="min-w-0 truncate font-medium">{m.from}</span>
-            <span className="ml-auto shrink-0 text-[11px] text-ink-faint">
-              {new Date(m.sent).toLocaleString()}
-            </span>
-          </header>
-          {/* `break-words`, not just `whitespace-pre-wrap`: a body is
-              attacker-chosen text and one unbroken 400-character token
-              would otherwise decide how wide this pane is. */}
-          <p className="whitespace-pre-wrap break-words">{m.body}</p>
-          {/* body-mime is signed, so an intermediary cannot change which
-              message you read — but a signature proves the author CHOSE
-              the value, never that it is safe, and the chain carrying it
-              may have been delivered by any ship. So the instruction is
-              reported and not obeyed: every body renders as plain text,
-              and a message that asked for anything else says so rather
-              than looking like a rendering bug. */}
-          {m['body-mime'] && m['body-mime'] !== 'text/plain' && (
-            <p className="mt-1 text-[11px] text-ink-dim">
-              Sent as <code>{m['body-mime']}</code>; shown as plain text.
-            </p>
-          )}
-          {/* ATTACHMENTS. Metadata plus the one action the bytes can
-              honestly support: download what this ship holds, and fetch
-              what it does not. Nothing is pushed, so an attachment we
-              have not pulled is the ordinary state of an inbound file
-              and says so rather than reading as an error.
-
-              `mime` is rendered as text, on its own line, marked as the
-              sender's claim. It never picks an icon, never picks a
-              renderer, never reaches a header. It arrives pre-signed
-              inside a chain any ship may deliver, so the signature proves
-              the author chose it and nothing else — same argument as
-              body-mime above, which is why they read the same way.
-
-              The name is the other hostile field and is treated as text
-              for the same reason: React escapes it, `break-all` stops a
-              long one from pushing the layout around, and nothing here
-              ever treats it as a path. */}
-          {(m.attachments?.length ?? 0) > 0 && (
-            <ul className="mt-2 space-y-1">
-              {m.attachments!.map((a, j) => (
-                // `from` is a HINT about where to look for the bytes and
-                // nothing more: any ship holding them may serve them,
-                // the hash proves them, and naming the wrong ship costs
-                // a miss and never a bad file. The author is the best
-                // guess available from a message alone.
-                <AttachmentRow key={j} a={a} from={m.from} />
-              ))}
-            </ul>
-          )}
-        </article>
+        <MessageCard key={i} m={m} />
       ))}
       <div className="mb-1 rounded-sm border border-line p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
@@ -641,13 +683,20 @@ export default function ThreadView({
           disabled={
             (!reply.trim() && files.length === 0)
             || sending
+            || targetForged
             || (recipients.length === 0 && !pending.trim())
           }
+          title={noTarget ?? undefined}
           className="btn btn-primary"
         >
           {upload ?? (sending ? 'Sending…' : 'Send')}
         </button>
       </div>
+      {/* A NODE NOTHING CAN POINT AT. Said here as well as on the two
+          disabled controls, because a disabled button's title is not
+          something a reader finds without hovering the thing that is
+          refusing them. */}
+      {noTarget && <p className="mt-1 text-[11px] text-ink-dim">{noTarget}</p>}
       {sendError && <p className="mt-1 text-danger">{sendError}</p>}
     </div>
   )

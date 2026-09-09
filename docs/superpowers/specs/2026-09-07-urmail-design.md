@@ -938,6 +938,56 @@ no draft to recover it.
 
 ---
 
+# The thread tree
+
+The branching above is a fact about every thread and was, until now, invisible:
+the client stacked stored copies oldest-first and a reader could not tell a
+reply to the root from a reply to the tip. That mattered because `prev` decides
+what leaves the ship. **List | Tree** sits in the thread header, on any thread
+holding more than one copy, and List stays the default — a flat list is the
+right shape for reading, and the tree is the right shape for deciding what
+travels. The choice is component state and is not stored: it is a question
+about one conversation, not a preference.
+
+**One node per message id.** Copies collapse. Up to `max-copies` grubs share an
+id and differ only in signature — one genuine, the rest forged — and drawing
+each as its own node would show a two-message conversation as five, with the
+forgeries indistinguishable from replies. The node carries the loudest verdict
+of its copies, so a single forged copy makes the node read `FORGED` at full
+size; everything else about the node speaks for the newest copy that is not
+forged, because `sent` and `from` are signed fields the AUTHOR chooses and
+letting a forgery speak would let whoever poked the chain decide what a node
+says it is. The copies themselves are not hidden: selecting a node renders every
+one of them below the tree, in the same message card the list view uses.
+
+Generations run left to right, siblings stack, children sort by `sent`. The
+layout is hand-rolled and iterative — a leaf takes the next free row, a parent
+is centred on the span of its children — because recursion blows the stack at
+`max-chain` on a linear thread, which is a shape an attacker can send. A `prev`
+that walks back into its own node is cut at the link that closes the loop, for
+the same reason `+path-chain` walks with a seen-set.
+
+**The lit path is the payload.** Root to selected is exactly what `+path-chain`
+ships, so the highlighted edges and the "N signed messages travel" line under
+the composer are two renderings of one fact and cannot disagree. Reply and
+Forward in this view point `prev` at the SELECTED node rather than at the
+newest honest message, which is the whole point of drawing the picture: the
+user is naming the branch the next message belongs on. The honest-copy rule
+survives the move — a node whose every copy is forged is not a reply target,
+because a reply naming it would aim the new message's entire travelling chain
+at a message nobody wrote, so its Reply and Forward are disabled and say why.
+The list view is unchanged: with no way to say *that one*, it keeps choosing
+the newest non-forged copy for the user.
+
+**An orphan is drawn, not flattened.** A message whose `prev` names an id this
+ship does not hold — a chain that arrived without its head — becomes its own
+root with a dashed stub edge and the title *parent not held by this ship*.
+Reparenting it onto the real root would be a quiet lie about who replied to
+what, and dropping it would hide a message the ship holds. `+with-root` already
+covers the sending half of this case; this is the reading half.
+
+---
+
 # The web surface
 
 Every route is owner-gated. urmail has no unauthenticated surface at all — no

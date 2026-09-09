@@ -5,7 +5,12 @@ import VerdictBadge from './VerdictBadge'
 // is a day and a month, anything older is a year — the same ladder every
 // mail client uses, for the same reason: a full timestamp on every row
 // is a column of noise, and the exact one is on the message.
-const when = (ms: number): string => {
+//
+// EXPORTED because a tree node has the same amount of room a list row
+// does and must not invent a second ladder: two surfaces abbreviating
+// the same instant differently is a difference a reader has to stop and
+// resolve. The full timestamp stays on the message card.
+export const when = (ms: number): string => {
   const d = new Date(ms)
   const now = new Date()
   if (d.toDateString() === now.toDateString()) {
