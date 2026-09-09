@@ -1,33 +1,60 @@
-::  Conformance tests for /lib/auspex-chain against protocol/vectors/v1.json.
+::  Conformance tests for /lib/auspex-chain against the PUBLISHED
+::  artifact, protocol/vectors/v1.json.
 ::
-::    The vectors are the wire protocol's fixtures - see docs/protocol.md #8 -
-::    and this file is the assertion that THIS implementation still produces
-::    them. tests/lib/auspex-chain.hoon tests the arms against each other and
-::    would keep passing if every id in the format shifted at once; this file
-::    is the one that would not.
+::    THE FILE IS THE FIXTURE. This suite does not hold a copy of the
+::    expected ids, digests and signatures; it reads the artifact an
+::    implementer downloads and asserts the library reproduces what is
+::    IN IT. The difference is not stylistic. A test carrying
+::    hand-transcribed literals passes whether or not the file in the
+::    repo says the same thing - and it did not: the file was a dojo
+::    transcript reassembled by hand and had already lost two characters
+::    to a terminal that strips trailing whitespace. Nothing reported
+::    it, because nothing read it.
 ::
-::    The fixtures are rebuilt here with the same constructors the generator
-::    uses (gen/auspex-vectors.hoon), and every expected atom below is
-::    TRANSCRIBED FROM THE GENERATOR'S JSON OUTPUT - mechanically, from
-::    protocol/vectors/v1.json, not recomputed here. That is the whole point:
-::    an assertion that recomputed its own expectation would pass against any
-::    change to the format it is meant to pin.
+::    So the artifact is now written by the generator straight into clay,
+::    copied out of the mount byte for byte, and synced back into the
+::    desk by scripts/sync-overlay.sh - which is what lets this file
+::    reach it with a /* import.
 ::
-::    Every ship is FAKE, so every keypair derives from its @p and every atom
-::    below is reproducible on any ship with no network and no Azimuth
-::    snapshot. Keys arrive as an explicit map, exactly as in the main suite,
-::    which is also the only way to write a deterministic %unverified case:
-::    +fake-pass ignores `life`, so a fake ship's every life is one key, and
-::    "no key for [~zod 99]" has to be expressed by the map's CONTENTS.
-::
-::    `jam` is deliberately NOT asserted here. It is in the JSON for an
-::    implementer to byte-compare a noun against; in Hoon it would only
-::    restate what the id and digest already cover.
+::    The fixtures are rebuilt here with the same constructors the
+::    generator uses (gen/auspex-vectors.hoon). Every ship is FAKE, so
+::    every keypair derives from its @p and nothing here needs a network
+::    or an Azimuth snapshot; keys arrive as an explicit map, which is
+::    also the only way to write a deterministic %unverified case, since
+::    +fake-pass ignores `life`.
 ::
 /+  *test, auspex=auspex-chain, sur=auspex-chain
+/*  vectors  %json  /protocol/vectors/v1/json
 |%
-::  +mk: one signed message. `signer` is the ring used, `from` is what the
-::  message CLAIMS, and they differ in exactly one case below.
+++  doc  ^-(json vectors)
+::  ── reading the artifact ────────────────────────────────────────────
+::
+::  Deliberately ?> and not a soft decode. A malformed artifact is a
+::  broken build, not a case to handle: the whole point of reading the
+::  file is that a mismatch fails here rather than in the field.
+::
+++  jget
+  |=  [j=json k=@t]
+  ^-  json
+  ?>  ?=([%o *] j)
+  (~(got by p.j) k)
+::
+++  jarr  |=(j=json ^-((list json) ?>(?=([%a *] j) p.j)))
+++  jstr  |=(j=json ^-(@t (so:dejs:format j)))
+++  jnum  |=(j=json ^-(@ud (ni:dejs:format j)))
+++  jbool  |=(j=json ^-(? (bo:dejs:format j)))
+++  jux   |=(j=json ^-(@ux (slav %ux (jstr j))))
+++  juv   |=(j=json ^-(@uv (slav %uv (jstr j))))
+++  juw   |=(j=json ^-(@uw (slav %uw (jstr j))))
+::
+++  case-by
+  |=  nm=@t
+  ^-  json
+  =/  hit  (skim (jarr (jget doc 'cases')) |=(j=json =(nm (jstr (jget j 'name')))))
+  ?~  hit  ~|([%auspex-no-such-vector nm] !!)
+  i.hit
+::
+::  ── the fixtures, as gen/auspex-vectors.hoon builds them ────────────
 ::
 ++  mk
   |=  $:  signer=ship
@@ -45,17 +72,12 @@
   =/  u=unsigned:sur  [from lyf to subj body bm sent prev as]
   [u (sign-with:auspex (fake-ring:auspex signer) (digest:auspex u))]
 ::
-++  bare
-  |=  u=unsigned:sur
-  ^-  msg:sur
-  [u 0x0]
+++  bare  |=(u=unsigned:sur ^-(msg:sur [u 0x0]))
 ::
 ++  keys-of
   |=  known=(list [who=ship lyf=@ud])
   ^-  (map [ship @ud] (unit pass))
-  %-  malt
-  %+  turn  known
-  |=([w=ship l=@ud] [[w l] `(fake-pass:auspex w)])
+  (malt (turn known |=([w=ship l=@ud] [[w l] `(fake-pass:auspex w)])))
 ::
 ++  verdict-of
   |=  [m=msg:sur known=(list [ship @ud])]
@@ -63,7 +85,6 @@
   =/  vs  (verify-chain:auspex (keys-of known) ~[m])
   ?~  vs  %unverified
   +.i.vs
-::  the fixtures, byte for byte what gen/auspex-vectors.hoon builds.
 ::
 ++  m-root
   (mk ~zod ~zod 1 (sy ~[~nec]) 'root' 'the root message' '' ~2026.1.1 ~ ~)
@@ -81,6 +102,12 @@
   ==
 ++  m-orphan
   (mk ~zod ~zod 1 (sy ~[~nec]) 'orphan' 'my parent is not here' '' ~2026.1.5 `0v1 ~)
+++  m-three
+  %-  mk
+  :*  ~zod  ~zod  1  (sy ~[~zod ~nec ~bud])  'three'
+      'a set of three recipients, so the treap shape is pinned'
+      ''  ~2026.1.7  ~  ~
+  ==
 ++  o-one  `octs`[5 'hello']
 ++  o-two  `octs`[5 'world']
 ++  a-one  (describe:auspex ['one.txt' 'text/plain' o-one])
@@ -90,7 +117,6 @@
   :*  ~zod  ~zod  1  (sy ~[~nec])  'attached'
       'two files ride inside the signature'  ''  ~2026.1.6  ~  ~[a-one a-two]
   ==
-::  the cap fixtures.
 ::
 ++  deep
   |=  n=@ud
@@ -111,9 +137,7 @@
   |=  n=@ud
   ^-  chain:sur
   %+  turn  (gulf 1 n)
-  |=  k=@
-  ^-  msg:sur
-  (bare [`@p`k 1 (sy ~[~zod]) 'many' 'signers' '' ~2026.1.1 ~ ~])
+  |=(k=@ ^-(msg:sur (bare [`@p`k 1 (sy ~[~zod]) 'many' 'signers' '' ~2026.1.1 ~ ~])))
 ::
 ++  ships
   |=  n=@ud
@@ -125,350 +149,400 @@
   ^-  (list attachment:sur)
   (turn (gulf 1 n) |=(k=@ `attachment:sur`['f' 1 'text/plain' `@uv`k]))
 ::
-::  ── the message cases ───────────────────────────────────────────────
+::  ── the comparisons ─────────────────────────────────────────────────
 ::
-::  vector `root`: the id and the digest are a hash over the nine-field
-::  noun, so this arm is what would fail if a field were reordered,
-::  retyped or added - which is exactly the breaking change docs/protocol
-::  #1.2 says must arrive under a new mark instead.
+::  +msg-case: one signed message against its entry in the file. `jam`
+::  is compared FIRST in spirit though not in order: it is the whole
+::  `unsigned` noun, so a mismatch there localises the failure to field
+::  order or field type before any hashing or crypto is involved.
+::
+++  msg-case
+  |=  [nm=@t mg=msg:sur signer=ship known=(list [ship @ud])]
+  ^-  tang
+  =/  k  (case-by nm)
+  =/  m  (jget k 'message')
+  =/  u  unsigned:mg
+  ;:  weld
+    (expect-eq !>(nm) !>((jstr (jget k 'name'))))
+    (expect-eq !>('message') !>((jstr (jget k 'kind'))))
+    (expect-eq !>(`@uw`(jam u)) !>((juw (jget m 'jam'))))
+    (expect-eq !>(`@ux`(id:auspex u)) !>((jux (jget m 'msg_id'))))
+    (expect-eq !>((id:auspex u)) !>((juv (jget m 'msg_id_uv'))))
+    (expect-eq !>(`@ux`(digest:auspex u)) !>((jux (jget m 'digest'))))
+    (expect-eq !>(sig:mg) !>((jux (jget m 'sig'))))
+    (expect-eq !>(`@t`(scot %p signer)) !>((jstr (jget m 'signer'))))
+    %+  expect-eq
+      !>  `@t`(scot %tas (verdict-of mg known))
+      !>  (jstr (jget k 'verdict'))
+  ==
+::
+++  msgs-match
+  |=  [js=(list json) c=chain:sur]
+  ^-  tang
+  ?~  js  ?~(c ~ (expect !>(|)))
+  ?~  c   (expect !>(|))
+  %+  weld
+    ;:  weld
+      (expect-eq !>(`@uw`(jam unsigned.i.c)) !>((juw (jget i.js 'jam'))))
+      (expect-eq !>(`@ux`(id:auspex unsigned.i.c)) !>((jux (jget i.js 'msg_id'))))
+      (expect-eq !>(`@ux`(digest:auspex unsigned.i.c)) !>((jux (jget i.js 'digest'))))
+      (expect-eq !>(sig.i.c) !>((jux (jget i.js 'sig'))))
+    ==
+  (msgs-match t.js t.c)
+::
+++  chain-case
+  |=  [nm=@t c=chain:sur known=(list [ship @ud])]
+  ^-  tang
+  =/  k  (case-by nm)
+  ;:  weld
+    (expect-eq !>(nm) !>((jstr (jget k 'name'))))
+    (expect-eq !>('chain') !>((jstr (jget k 'kind'))))
+    (expect-eq !>(`@uw`(jam c)) !>((juw (jget k 'chain_jam'))))
+    (msgs-match (jarr (jget k 'messages')) c)
+    %+  expect-eq
+      !>  (turn c |=(m=msg:sur `@t`(scot %tas (verdict-of m known))))
+      !>  (turn (jarr (jget k 'verdicts')) jstr)
+  ==
+::
+++  cap-case
+  |=  [nm=@t arm=@t limit=@ud tried=@ud refused=? at-limit=?]
+  ^-  tang
+  =/  k  (case-by nm)
+  ;:  weld
+    (expect-eq !>('cap') !>((jstr (jget k 'kind'))))
+    (expect-eq !>(arm) !>((jstr (jget k 'arm'))))
+    (expect-eq !>(limit) !>((jnum (jget k 'limit'))))
+    (expect-eq !>(tried) !>((jnum (jget k 'tried'))))
+    (expect-eq !>(refused) !>((jbool (jget k 'refused'))))
+    (expect-eq !>(at-limit) !>((jbool (jget k 'at_limit_accepted'))))
+  ==
+::
+::  ── the document's own claims ───────────────────────────────────────
+::
+::  THE PROSE IS ASSERTED TOO, and these three fields are why. They are
+::  the ones a lossy transport corrupted - `(shaf%auspex` for
+::  `(shaf %auspex`, `theroot` for `the root` - and nothing noticed,
+::  because nothing read them. A character lost anywhere in the file now
+::  fails a test on the ship that produced it.
+::
+++  test-vectors-the-document-says-what-it-is
+  ;:  weld
+    (expect-eq !>(1) !>((jnum (jget doc 'version'))))
+    (expect-eq !>('auspex-chain') !>((jstr (jget doc 'mark'))))
+    (expect-eq !>('auspex') !>((jstr (jget doc 'digest_tag'))))
+    (expect-eq !>('(sham unsigned)') !>((jstr (jget doc 'msg_id_rule'))))
+    %+  expect-eq
+      !>  '(shaf %auspex (sham unsigned))'
+      !>  (jstr (jget doc 'digest_rule'))
+    ::  and the tag it names is the tag the lib salts with.
+    %+  expect-eq
+      !>  (shaf %auspex (sham unsigned:m-root))
+      !>  (digest:auspex unsigned:m-root)
+    (expect-eq !>(19) !>((lent (jarr (jget doc 'cases')))))
+  ==
+::
+::  what the file publishes as the caps IS what the lib enforces. A
+::  fixture naming different numbers is a spec that has drifted from its
+::  implementation, which is the failure this whole file exists to make
+::  loud.
+++  test-vectors-caps-block
+  =/  k  (jget doc 'caps')
+  ;:  weld
+    (expect-eq !>(max-chain:auspex) !>((jnum (jget k 'max_chain'))))
+    (expect-eq !>(max-body:auspex) !>((jnum (jget k 'max_body'))))
+    (expect-eq !>(max-subj:auspex) !>((jnum (jget k 'max_subj'))))
+    (expect-eq !>(max-to:auspex) !>((jnum (jget k 'max_to'))))
+    (expect-eq !>(max-copies:auspex) !>((jnum (jget k 'max_copies'))))
+    (expect-eq !>(max-threads:auspex) !>((jnum (jget k 'max_threads'))))
+    (expect-eq !>(max-depth:auspex) !>((jnum (jget k 'max_depth'))))
+    (expect-eq !>(max-signers:auspex) !>((jnum (jget k 'max_signers'))))
+    (expect-eq !>(max-blob:auspex) !>((jnum (jget k 'max_blob'))))
+    (expect-eq !>(max-attach:auspex) !>((jnum (jget k 'max_attach'))))
+    (expect-eq !>(max-name:auspex) !>((jnum (jget k 'max_name'))))
+    (expect-eq !>(max-mime:auspex) !>((jnum (jget k 'max_mime'))))
+    (expect-eq !>(max-blobs:auspex) !>((jnum (jget k 'max_blobs'))))
+    (expect-eq !>(max-blob-bytes:auspex) !>((jnum (jget k 'max_blob_bytes'))))
+  ==
+::
+::  THE SET NOUN. `to` is a (set ship) and +sham hashes the TREAP, so a
+::  multi-recipient msg-id is not reproducible from a list of ships: it
+::  depends on a shape nothing in the format describes unless the format
+::  describes the treap. The mugs are the priorities the heap is ordered
+::  by, and the jam is the noun itself.
+++  test-vectors-the-set-noun
+  =/  k  (jget doc 'set_noun')
+  =/  s3  (sy ~[~zod ~nec ~bud])
+  ;:  weld
+    (expect-eq !>(`@uw`(jam s3)) !>((juw (jget k 'jam'))))
+    (expect-eq !>(`@ux`(jam s3)) !>((jux (jget k 'jam_ux'))))
+    (expect-eq !>(`@uw`(jam *(set ship))) !>((juw (jget k 'empty_jam'))))
+    ::  the mugs, in the order the file lists the ships.
+    %+  expect-eq
+      !>  ~[`@ud`(mug ~zod) `@ud`(mug ~nec) `@ud`(mug ~bud)]
+      !>  (turn (jarr (jget k 'ships')) |=(j=json (jnum (jget j 'mug'))))
+    ::  and it is CANONICAL: the same set whatever order it was built in,
+    ::  which is what makes a msg-id agree between two ships that typed
+    ::  their recipients in different orders.
+    (expect !>(=(s3 (sy ~[~bud ~zod ~nec]))))
+    (expect !>(=(s3 (~(put in (~(put in (~(put in *(set ship)) ~bud)) ~zod)) ~nec))))
+  ==
+::
+::  ── the signed cases ────────────────────────────────────────────────
+::
 ++  test-vectors-root
-  ;:  weld
-    %+  expect-eq
-      !>  `@ux`0xdda.b17e.5c95.a842.8f1a.2620.3c2b.3f5a
-      !>  `@ux`(id:auspex unsigned:m-root)
-    %+  expect-eq
-      !>  `@ux`0x58d3.9974.c4e1.d511.57bf.1796.d14e.f1fd
-      !>  `@ux`(digest:auspex unsigned:m-root)
-    %+  expect-eq
-      !>  `@ux`0x8e4.c82c.130e.aa4e.7f3e.9b26.794d.2861.d7a1.ef36.b562.1c4e.7236.a214.b6ad.5d4c.53da.f3ab.e152.4a95.e1f3.9ebf.4e93.7aa5.38d8.c963.702f.fe60.a16e.518b.1f5f.3032
-      !>  sig:m-root
-    %+  expect-eq
-      !>  %verified
-      !>  (verdict-of m-root ~[[~zod 1]])
-  ==
+  (msg-case 'root' m-root ~zod ~[[~zod 1]])
 ::
-::  vector `reply`: prev names the root id, and the id changes because
-::  prev is one of the nine signed fields.
 ++  test-vectors-reply
-  ;:  weld
-    %+  expect-eq
-      !>  `@ux`0x3f22.e3b8.5599.ca5d.47ce.04f9.a181.195c
-      !>  `@ux`(id:auspex unsigned:m-reply)
-    %+  expect-eq
-      !>  `@ux`0xc1a2.b086.0db5.7cc4.6d48.c497.e351.1efb
-      !>  `@ux`(digest:auspex unsigned:m-reply)
-    %+  expect-eq
-      !>  `@ux`0xc3f.b5f4.dbb4.a08b.05f5.2550.20de.f84e.6f76.2776.7417.9b4a.f8df.51e4.e004.0377.c9aa.7159.9e96.506f.59c8.4d41.30d8.e7b5.fab1.24c4.f2ee.3ca4.5060.17a0.cca7.f690
-      !>  sig:m-reply
-    %+  expect-eq
-      !>  %verified
-      !>  (verdict-of m-reply ~[[~nec 1]])
-  ==
+  (msg-case 'reply' m-reply ~nec ~[[~nec 1]])
 ::
-::  vector `forged-copy`: the SAME `unsigned` and therefore the same id
-::  and the same digest, signed with the wrong ring. A key was available
-::  and the signature failed against it, which is the whole definition of
-::  %forged - and the reason a missing key must never produce one.
+::  the SAME `unsigned` byte for byte, signed with the wrong ring. A key
+::  was available and the signature failed against it, which is the whole
+::  definition of %forged - and the reason a missing key must never
+::  produce one.
 ++  test-vectors-forged-copy
+  %+  weld  (msg-case 'forged-copy' m-forged ~nec ~[[~zod 1]])
   ;:  weld
-    %+  expect-eq
-      !>  `@ux`0xdda.b17e.5c95.a842.8f1a.2620.3c2b.3f5a
-      !>  `@ux`(id:auspex unsigned:m-forged)
-    %+  expect-eq
-      !>  `@ux`0x58d3.9974.c4e1.d511.57bf.1796.d14e.f1fd
-      !>  `@ux`(digest:auspex unsigned:m-forged)
-    %+  expect-eq
-      !>  `@ux`0xd19.8959.ae9d.6fe6.99d8.dfdf.d073.80ce.7c00.5f1b.ada9.546b.c73c.a3aa.ee0f.a0c8.b4b4.8222.8a86.0593.41fc.a26f.155d.057d.5aeb.1431.3b29.cb6e.c7f5.2b58.0b68.b7f4
-      !>  sig:m-forged
-    %+  expect-eq
-      !>  %forged
-      !>  (verdict-of m-forged ~[[~zod 1]])
-    ::  one id, two signatures.
     (expect !>(=((id:auspex unsigned:m-root) (id:auspex unsigned:m-forged))))
     (expect !>(!=(sig:m-root sig:m-forged)))
   ==
 ::
-::  vector `unverifiable-life`: a GENUINE ~zod signature whose `life` names
-::  99. The verifier holds ~zod at life 1 and nothing at life 99, so the
-::  verdict is %unverified. It is not a finding about the signature.
+::  a GENUINE ~zod signature whose `life` names 99. The verifier holds
+::  ~zod at life 1 and nothing at life 99, so the verdict is %unverified.
+::  It is not a finding about the signature.
 ++  test-vectors-unverifiable-life
+  %+  weld  (msg-case 'unverifiable-life' m-life99 ~zod ~[[~zod 1]])
+  (expect-eq !>(%verified) !>((verdict-of m-life99 ~[[~zod 99]])))
+::
+::  THE MULTI-RECIPIENT CASE, and it is the only one that pins the treap.
+::  Every other signed case here names one recipient, so a `to` built in
+::  any shape at all would reproduce their ids.
+++  test-vectors-three-recipients
+  %+  weld  (msg-case 'three-recipients' m-three ~zod ~[[~zod 1]])
   ;:  weld
-    %+  expect-eq
-      !>  `@ux`0x9a59.9850.758e.4b63.fc3b.5dff.ca1b.a0c7
-      !>  `@ux`(id:auspex unsigned:m-life99)
-    %+  expect-eq
-      !>  `@ux`0x1fe5.0102.4703.57c8.ddc7.5920.1b14.31c0
-      !>  `@ux`(digest:auspex unsigned:m-life99)
-    %+  expect-eq
-      !>  `@ux`0x499.c2dd.294d.d949.59ff.5fd8.6faa.390e.30fc.b981.d016.b254.bccc.3718.275e.d675.3c00.4441.9fed.e37b.214a.ad3e.82b0.a2a1.2276.2215.d1b8.fbd3.56f9.03ef.1fd7.3e2c
-      !>  sig:m-life99
-    %+  expect-eq
-      !>  %unverified
-      !>  (verdict-of m-life99 ~[[~zod 1]])
-    ::  and it is %verified the moment the verifier holds that life.
-    %+  expect-eq
-      !>  %verified
-      !>  (verdict-of m-life99 ~[[~zod 99]])
+    (expect-eq !>(3) !>(~(wyt in to:unsigned:m-three)))
+    ::  and the id really does depend on the set, not on a count of it.
+    %+  expect-eq  !>(|)
+    !>  =((id:auspex unsigned:m-three) (id:auspex unsigned:m-three(to (sy ~[~zod ~nec]))))
   ==
 ::
-::  vector `two-attachments`: the metadata is INSIDE the signature, so the
-::  hashes are part of the id. The two content addresses are (sham octs)
-::  over fixed byte strings and are the vectors' `blobs` entries.
 ++  test-vectors-two-attachments
+  %+  weld  (msg-case 'two-attachments' m-attach ~zod ~[[~zod 1]])
+  =/  b  (jarr (jget doc 'blobs'))
   ;:  weld
-    %+  expect-eq
-      !>  `@uv`0v7.ho47b.m4otv.mkrog.7p0g3.0g307
-      !>  (blob-hash:auspex o-one)
-    %+  expect-eq
-      !>  `@uv`0v7.v89o9.0b03c.f1k9n.hgtch.dfso6
-      !>  (blob-hash:auspex o-two)
-    %+  expect-eq
-      !>  `attachment:sur`['one.txt' 5 'text/plain' 0v7.ho47b.m4otv.mkrog.7p0g3.0g307]
-      !>  a-one
-    %+  expect-eq
-      !>  `attachment:sur`['two.txt' 5 'text/plain' 0v7.v89o9.0b03c.f1k9n.hgtch.dfso6]
-      !>  a-two
-    %+  expect-eq
-      !>  `@ux`0x95ea.ed2d.5582.d91a.f0ca.7cd7.39c9.223c
-      !>  `@ux`(id:auspex unsigned:m-attach)
-    %+  expect-eq
-      !>  `@ux`0xd6db.ad76.d1e5.0ed4.6229.4b25.fd96.149c
-      !>  `@ux`(digest:auspex unsigned:m-attach)
-    %+  expect-eq
-      !>  `@ux`0xe5a.e6ec.b9ab.be21.334c.63c6.7e63.f827.cbc7.6d3e.6d9d.b524.eb90.2293.b9c2.bc2e.6fbb.1017.88e4.67f3.b031.1525.16ea.e8a0.58a5.000f.1f98.a741.1e36.1052.eca8.36b4
-      !>  sig:m-attach
-    %+  expect-eq
-      !>  %verified
-      !>  (verdict-of m-attach ~[[~zod 1]])
+    (expect-eq !>((blob-hash:auspex o-one)) !>((juv (jget (snag 0 b) 'hash'))))
+    (expect-eq !>((blob-hash:auspex o-two)) !>((juv (jget (snag 1 b) 'hash'))))
+    (expect-eq !>(p.o-one) !>((jnum (jget (snag 0 b) 'octs_p'))))
+    (expect-eq !>(`@ux`q.o-one) !>((jux (jget (snag 0 b) 'octs_q'))))
+    (expect-eq !>(a-one) !>(`attachment:sur`['one.txt' 5 'text/plain' (blob-hash:auspex o-one)]))
   ==
 ::
 ::  ── the chain cases ─────────────────────────────────────────────────
 ::
-::  vector `two-branch-tree`: two replies to one root are siblings. The
-::  thread key is the root's id; the tree is three distinct ids and two
-::  deep; and a forward of the first branch ships root+branch and NOT the
-::  sibling, which is the leak this format closes.
 ++  test-vectors-two-branch-tree
   =/  c=chain:sur  ~[m-root m-reply m-branch]
-  =/  tk  (thread-key:auspex *(map thread-id:sur thread:sur) c)
+  =/  k  (case-by 'two-branch-tree')
   =/  pc  (path-chain:auspex c (id:auspex unsigned:m-reply))
+  %+  weld  (chain-case 'two-branch-tree' c ~[[~zod 1] [~nec 1] [~bud 1]])
   ;:  weld
     %+  expect-eq
-      !>  `@ux`0xe5c1.288e.4bb8.eb72.deb7.c21e.aad8.2858
-      !>  `@ux`(id:auspex unsigned:m-branch)
-    %+  expect-eq
-      !>  `@ux`0x733b.d97d.69a2.b837.71bc.2f8f.e1b3.35e1
-      !>  `@ux`(digest:auspex unsigned:m-branch)
-    %+  expect-eq
-      !>  `@ux`0x408.96fa.27cc.b7ba.c442.a35b.a10d.f8c9.8d5a.3cef.b00f.0fc6.40a5.472b.31ac.c2d3.0c04.a3e9.5814.7166.5237.1cbf.2510.317c.82a3.55d0.6576.4184.e054.fd66.bc8a.b33b
-      !>  sig:m-branch
-    %+  expect-eq
-      !>  `@ux`0xdda.b17e.5c95.a842.8f1a.2620.3c2b.3f5a
-      !>  `@ux`tk
-    %+  expect-eq  !>(3)  !>((distinct-ids:auspex c))
-    %+  expect-eq  !>(2)  !>((max-ancestry:auspex c))
-    %+  expect-eq  !>(2)  !>((lent pc))
+      !>  `@ux`(thread-key:auspex *(map thread-id:sur thread:sur) c)
+      !>  (jux (jget k 'thread_key'))
+    (expect-eq !>(`@ux`i-root) !>((jux (jget k 'root_id'))))
+    (expect-eq !>((distinct-ids:auspex c)) !>((jnum (jget k 'distinct_ids'))))
+    (expect-eq !>((max-ancestry:auspex c)) !>((jnum (jget k 'max_ancestry'))))
+    (expect-eq !>((lent pc)) !>((jnum (jget k 'path_chain_to_reply_len'))))
     ::  the sibling is absent from the forwarded path.
     %+  expect-eq
-      !>  ~[i-root (id:auspex unsigned:m-reply)]
-      !>  (turn pc |=(m=msg:sur (id:auspex unsigned.m)))
-    ::  every message in the tree verifies on its own.
-    %+  expect-eq
-      !>  ~[%verified %verified %verified]
-      !>  (turn c |=(m=msg:sur (verdict-of m ~[[~zod 1] [~nec 1] [~bud 1]])))
+      !>  (turn pc |=(m=msg:sur `@t`(scot %ux (id:auspex unsigned.m))))
+      !>  (turn (jarr (jget k 'path_chain_to_reply')) jstr)
   ==
 ::
-::  vector `same-id-pair`: +merge keeps both copies, because deduping on
-::  the id alone would let whichever arrived first shadow the other. At a
-::  cap of one, +prune keeps the %verified copy - never the forged one,
-::  whatever the arrival order.
 ++  test-vectors-same-id-pair
   =/  c=chain:sur  ~[m-root m-forged]
+  =/  k  (case-by 'same-id-pair')
   =/  merged  (merge:auspex ~ c)
   =/  vs  (malt (verify-chain:auspex (keys-of ~[[~zod 1]]) merged))
   =/  pruned  (prune:auspex merged vs 1)
   =/  flipped  (prune:auspex (merge:auspex ~ (flop c)) vs 1)
+  %+  weld  (chain-case 'same-id-pair' c ~[[~zod 1]])
   ;:  weld
-    %+  expect-eq  !>(2)  !>((lent merged))
-    %+  expect-eq  !>(1)  !>((lent pruned))
+    (expect-eq !>((lent merged)) !>((jnum (jget k 'merge_kept'))))
+    (expect-eq !>((lent pruned)) !>((jnum (jget k 'prune_kept'))))
+    (expect !>((jbool (jget k 'same_msg_id'))))
     %+  expect-eq
-      !>  ~[sig:m-root]
-      !>  (turn pruned |=(m=msg:sur sig.m))
-    ::  and the same answer from the other arrival order.
+      !>  (turn pruned |=(m=msg:sur `@t`(scot %ux sig.m)))
+      !>  (turn (jarr (jget k 'prune_kept_sigs')) jstr)
+    ::  and the same answer from the other arrival order: whichever
+    ::  copy landed first, the verified one survives.
     %+  expect-eq
-      !>  ~[sig:m-root]
       !>  (turn flipped |=(m=msg:sur sig.m))
+      !>  ~[sig:m-root]
     %+  expect-eq
-      !>  ~[%verified %forged]
-      !>  (turn merged |=(m=msg:sur (verdict-of m ~[[~zod 1]])))
+      !>  `@t`(scot %ux sig:m-root)
+      !>  (jstr (jget (jget k 'prune_kept_is_genuine') 'genuine_sig'))
   ==
 ::
-::  vector `orphan-chain`: `prev` names an id absent from the chain, so
-::  the chain holds no prev=~ message and +thread-key refuses it. The
-::  message itself is still PLACED - as a root of its own - because
-::  refusing to store a message is worse than filing it shallow.
 ++  test-vectors-orphan-chain
   =/  c=chain:sur  ~[m-orphan]
+  =/  k  (case-by 'orphan-chain')
   =/  rk  (mule |.((thread-key:auspex *(map thread-id:sur thread:sur) c)))
+  %+  weld  (chain-case 'orphan-chain' c ~[[~zod 1]])
   ;:  weld
+    (expect-eq !>(?=(%| -.rk)) !>((jbool (jget k 'thread_key_refused'))))
+    (expect-eq !>('+thread-key') !>((jstr (jget k 'refusing_arm'))))
+    (expect-eq !>('%auspex-no-unique-root') !>((jstr (jget k 'thread_key_crash'))))
     %+  expect-eq
-      !>  `@ux`0x792d.0567.621a.2b61.e5b2.a8d3.3ab3.134f
-      !>  `@ux`(id:auspex unsigned:m-orphan)
-    %+  expect-eq
-      !>  `@ux`0x72f5.0b68.de59.07c9.3247.5dfa.41f3.f9ad
-      !>  `@ux`(digest:auspex unsigned:m-orphan)
-    %+  expect-eq
-      !>  `@ux`0x465.f84e.8869.f609.ac2b.2722.3b26.a787.bbbb.8cbf.f21f.83e3.5ffa.434c.8da6.239c.f1db.641b.ab04.56a3.4e36.7ce6.d0e0.5d68.44f9.5bc5.c2d1.4599.1a6c.db2c.2be2.34a3
-      !>  sig:m-orphan
-    ::  refused, and refused by +thread-key rather than by anything upstream.
-    (expect !>(?=(%| -.rk)))
-    %+  expect-eq
-      !>  1
       !>  (lent (place-of:auspex c (id:auspex unsigned:m-orphan)))
-    ::  the message still verifies. A chain the receiver refuses to FILE
-    ::  is not a chain of bad signatures.
-    %+  expect-eq  !>(%verified)  !>((verdict-of m-orphan ~[[~zod 1]]))
+      !>  (jnum (jget k 'ancestors_place_it_as_its_own_root'))
   ==
 ::
 ::  ── the cap cases ───────────────────────────────────────────────────
 ::
-::  every cap in the vectors, over the limit and AT it. The at-limit half
-::  is what makes these bounds inclusive rather than approximately right,
-::  and a cap that refused its own limit would reject legitimate mail
-::  permanently: every send ships the path it replies into.
-++  test-vectors-caps
+::  every cap in the file, over the limit and AT it, recomputed here and
+::  compared to what the file claims. The at-limit half is what makes
+::  these bounds inclusive rather than approximately right: a cap that
+::  refused its own limit would reject legitimate mail permanently,
+::  because every send ships the path it replies into.
+::
+++  test-vectors-caps-refuse-and-admit
+  =/  over-blob=attachment:sur
+    ['big.bin' +(max-blob:auspex) 'application/octet-stream' 0v2]
+  =/  c-over-blob=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ ~[over-blob]])]
   ;:  weld
-    ::  max-chain, +fits-length
-    (expect !>(!(fits-length:auspex (reap +(max-chain:auspex) m-root) max-chain:auspex)))
-    (expect !>((fits-length:auspex (reap max-chain:auspex m-root) max-chain:auspex)))
-    ::  max-body, +fits-bodies
-    %+  expect-eq  !>(|)
-    !>  %+  fits-bodies:auspex
+    %^  cap-case  'cap-max-chain'  '+fits-length'
+    :*  max-chain:auspex  +(max-chain:auspex)
+        !(fits-length:auspex (reap +(max-chain:auspex) m-root) max-chain:auspex)
+        (fits-length:auspex (reap max-chain:auspex m-root) max-chain:auspex)
+    ==
+    %^  cap-case  'cap-max-body'  '+fits-bodies'
+    :*  max-body:auspex  +(max-body:auspex)
+        %-  not
+        %+  fits-bodies:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 +(max-body:auspex) 'a') '' ~2026.1.1 ~ ~])]
         max-body:auspex
-    %+  expect-eq  !>(&)
-    !>  %+  fits-bodies:auspex
+        %+  fits-bodies:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 max-body:auspex 'a') '' ~2026.1.1 ~ ~])]
         max-body:auspex
-    ::  max-subj, +fits-subjects
-    %+  expect-eq  !>(|)
-    !>  %+  fits-subjects:auspex
+    ==
+    %^  cap-case  'cap-max-subj'  '+fits-subjects'
+    :*  max-subj:auspex  +(max-subj:auspex)
+        %-  not
+        %+  fits-subjects:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) (fil 3 +(max-subj:auspex) 'a') 'b' '' ~2026.1.1 ~ ~])]
         max-subj:auspex
-    ::  max-to, +fits-recipients
-    %+  expect-eq  !>(|)
-    !>  %+  fits-recipients:auspex
+        %.y
+    ==
+    %^  cap-case  'cap-max-to'  '+fits-recipients'
+    :*  max-to:auspex  +(max-to:auspex)
+        %-  not
+        %+  fits-recipients:auspex
           ~[(bare [~zod 1 (ships +(max-to:auspex)) 's' 'b' '' ~2026.1.1 ~ ~])]
         max-to:auspex
-    %+  expect-eq  !>(&)
-    !>  %+  fits-recipients:auspex
+        %+  fits-recipients:auspex
           ~[(bare [~zod 1 (ships max-to:auspex) 's' 'b' '' ~2026.1.1 ~ ~])]
         max-to:auspex
-    ::  max-mime, +fits-body-mimes: length AND control bytes. A CR in a
-    ::  Content-Type is a header-injection primitive and the field is
-    ::  signed, so the recipient cannot repair it - only refuse it.
-    %+  expect-eq  !>(|)
-    !>  %+  fits-body-mimes:auspex
+    ==
+    %^  cap-case  'cap-max-mime-length'  '+fits-body-mimes'
+    :*  max-mime:auspex  +(max-mime:auspex)
+        %-  not
+        %+  fits-body-mimes:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (fil 3 +(max-mime:auspex) 'a') ~2026.1.1 ~ ~])]
         max-mime:auspex
-    %+  expect-eq  !>(|)
-    !>  %+  fits-body-mimes:auspex
+        %.y
+    ==
+    %^  cap-case  'cap-mime-control-byte'  '+fits-body-mimes'
+    :*  max-mime:auspex  11
+        %-  not
+        %+  fits-body-mimes:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (cat 3 'text/plain' 0xd) ~2026.1.1 ~ ~])]
         max-mime:auspex
-    ::  max-attach, +fits-attachments
-    %+  expect-eq  !>(|)
-    !>  %+  fits-attachments:auspex
+        %.y
+    ==
+    %^  cap-case  'cap-max-attach'  '+fits-attachments'
+    :*  max-attach:auspex  +(max-attach:auspex)
+        %-  not
+        %+  fits-attachments:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat +(max-attach:auspex))])]
         max-attach:auspex
-    %+  expect-eq  !>(&)
-    !>  %+  fits-attachments:auspex
+        %+  fits-attachments:auspex
           ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat max-attach:auspex)])]
         max-attach:auspex
-    ::  max-blob, +attach-ok. A claimed size is refused at the boundary:
-    ::  it is not evidence of what the bytes weigh, and discovering the
-    ::  lie at fetch time is more expensive than refusing the claim.
-    %+  expect-eq  !>(|)
-    !>  %+  fits-attachments:auspex
-          :~  %-  bare
-              :*  ~zod  1  (sy ~[~nec])  's'  'b'  ''  ~2026.1.1  ~
-                  ~[['big.bin' +(max-blob:auspex) 'application/octet-stream' 0v2]]
-              ==
-          ==
-        max-attach:auspex
-    (expect !>((attach-ok:auspex ['ok.bin' max-blob:auspex 'application/octet-stream' 0v2])))
-    ::  max-depth, +fits-depth
-    (expect !>(!(fits-depth:auspex (deep +(max-depth:auspex)) max-depth:auspex)))
-    (expect !>((fits-depth:auspex (deep max-depth:auspex) max-depth:auspex)))
-    ::  max-signers, +fits-signers: distinct [ship life] pairs, which is
-    ::  one key lookup each and the only cap here that bounds round trips.
-    (expect !>(!(fits-signers:auspex (signers-chain +(max-signers:auspex)) max-signers:auspex)))
-    (expect !>((fits-signers:auspex (signers-chain max-signers:auspex) max-signers:auspex)))
+    ==
+    %^  cap-case  'cap-max-blob'  '+attach-ok'
+    :*  max-blob:auspex  +(max-blob:auspex)
+        !(fits-attachments:auspex c-over-blob max-attach:auspex)
+        (attach-ok:auspex ['ok.bin' max-blob:auspex 'application/octet-stream' 0v2])
+    ==
+    %^  cap-case  'cap-max-depth'  '+fits-depth'
+    :*  max-depth:auspex  +(max-depth:auspex)
+        !(fits-depth:auspex (deep +(max-depth:auspex)) max-depth:auspex)
+        (fits-depth:auspex (deep max-depth:auspex) max-depth:auspex)
+    ==
+    %^  cap-case  'cap-max-signers'  '+fits-signers'
+    :*  max-signers:auspex  +(max-signers:auspex)
+        !(fits-signers:auspex (signers-chain +(max-signers:auspex)) max-signers:auspex)
+        (fits-signers:auspex (signers-chain max-signers:auspex) max-signers:auspex)
+    ==
   ==
 ::
-::  the caps the vectors publish are the caps the lib holds. A vectors
-::  file naming different numbers is a spec that has drifted from its
-::  implementation, which is the failure this whole file exists to make
-::  loud.
-++  test-vectors-cap-values
+::  the structural cap cases carry the JAM of the offending message's
+::  `unsigned`, so an implementer can rebuild the input rather than
+::  being told a predicate answered %.n. The size cases carry a recipe
+::  instead, because a hundred-kilobyte body jams to a hundred and
+::  thirty and a fixture nine tenths one case is a file nobody reads.
+++  test-vectors-cap-samples-rebuild-the-input
+  =/  kd  (case-by 'cap-max-depth')
+  =/  ks  (case-by 'cap-max-signers')
+  =/  kb  (case-by 'cap-max-body')
+  =/  dc  (deep +(max-depth:auspex))
+  =/  sc  (signers-chain +(max-signers:auspex))
   ;:  weld
-    (expect-eq !>(1.000) !>(max-chain:auspex))
-    (expect-eq !>(100.000) !>(max-body:auspex))
-    (expect-eq !>(1.000) !>(max-subj:auspex))
-    (expect-eq !>(100) !>(max-to:auspex))
-    (expect-eq !>(4) !>(max-copies:auspex))
-    (expect-eq !>(10.000) !>(max-threads:auspex))
-    (expect-eq !>(64) !>(max-depth:auspex))
-    (expect-eq !>(128) !>(max-signers:auspex))
-    (expect-eq !>(262.144) !>(max-blob:auspex))
-    (expect-eq !>(16) !>(max-attach:auspex))
-    (expect-eq !>(256) !>(max-name:auspex))
-    (expect-eq !>(128) !>(max-mime:auspex))
-    (expect-eq !>(1.000) !>(max-blobs:auspex))
-    (expect-eq !>(33.554.432) !>(max-blob-bytes:auspex))
+    (expect-eq !>((lent dc)) !>((jnum (jget kd 'sample_len'))))
+    (expect-eq !>((lent sc)) !>((jnum (jget ks 'sample_len'))))
+    (expect-eq !>(`@uw`(jam unsigned:(snag 0 dc))) !>((juw (jget kd 'sample_jam'))))
+    (expect-eq !>(`@uw`(jam unsigned:(snag 0 sc))) !>((juw (jget ks 'sample_jam'))))
+    ::  and the oversized-body case names its recipe rather than jamming
+    ::  a hundred kilobytes into the fixture.
+    (expect !>(?=(~ (jget kb 'sample_jam'))))
+    %+  expect-eq
+      !>  'the `root` unsigned with body = (fil 3 100.001 \'a\')'
+      !>  (jstr (jget kb 'sample_recipe'))
   ==
 ::
-::  the digest's domain-separation tag is %auspex and nothing else. A
-::  changed tag is a changed protocol under docs/protocol #1.2, and it
-::  would silently invalidate every signature in the vectors above.
-++  test-vectors-digest-tag
-  =/  u  unsigned:m-root
-  ;:  weld
-    (expect-eq !>((shaf %auspex (sham u))) !>((digest:auspex u)))
-    (expect !>(!=((digest:auspex u) (sham u))))
-    (expect !>(!=((digest:auspex u) (shaf %ames (sham u)))))
-    (expect !>(!=((digest:auspex u) (shaf %urmail (sham u)))))
-  ==
-
 ::  ── discovery ───────────────────────────────────────────────────────
 ::
-::  the vectors' `proto` fixture: the exact noun a version-1 nexus
-::  publishes at /proto, where it is bound, and where a peer reads it.
-::
-::  This is the one assertion in the suite that pins a noun BY ITS JAM.
-::  Every other case pins a hash of a noun; here the noun itself is the
-::  wire format - a peer clams what it keens - so the bytes are the
-::  contract, and a field added to $proto or a cap reordered inside
-::  $proto-caps changes them without changing any id or digest anywhere.
-::
+::  the exact noun a version-1 nexus publishes at /proto, where it is
+::  bound, and where a peer reads it. This is the one assertion in the
+::  suite that pins a noun BY ITS JAM, because $proto is the only noun
+::  in this protocol that crosses the wire un-hashed: a peer clams what
+::  it keens, so the bytes are the contract, and a field added to $proto
+::  or a cap reordered inside $proto-caps changes them without changing
+::  any id or digest anywhere.
 ++  test-vectors-proto
+  =/  k  (jget doc 'proto')
   =/  q  our-proto:auspex
   ;:  weld
+    (expect-eq !>(`@uw`(jam q)) !>((juw (jget k 'jam'))))
+    (expect-eq !>(`@ux`(jam q)) !>((jux (jget k 'jam_ux'))))
+    (expect-eq !>(`@t`(scot %tas proto-page-mark:auspex)) !>((jstr (jget k 'page_mark'))))
+    (expect-eq !>(`@t`(spat proto-spur:auspex)) !>((jstr (jget k 'spur'))))
     %+  expect-eq
-      !>  ^-  @ux
-          0x100.3040.0818.0103.0383.9383.d821.b86a.0180.fd0a.060c.1800.0070.1b73.4b0b.4319.6bc3.2b83.9bab.0bf0.05b1.7c32.b839.bab0.be01
-      !>  `@ux`(jam q)
-    (expect-eq !>(~[1]) !>(versions.q))
-    (expect-eq !>(~[%auspex-chain]) !>(marks.q))
-    (expect-eq !>(`path`/auspex/proto) !>(proto-spur:auspex))
-    (expect-eq !>(%auspex-proto) !>(proto-page-mark:auspex))
-    ::  the keen path at case 1, cons-built because of the empty knot.
+      !>  `@t`(spat (proto-keen-path:auspex %grubbery 1))
+      !>  (jstr (jget k 'keen_path'))
+    (expect-eq !>(`@t`(scot %dr proto-ttl:auspex)) !>((jstr (jget k 'ttl'))))
+    (expect-eq !>(1) !>((jnum (jget k 'silent_peer_is_version'))))
     %+  expect-eq
-      !>  `path`~[%g %x '1' %grubbery '' '1' %auspex %proto]
-      !>  (proto-keen-path:auspex %grubbery 1)
-    ::  and the compatibility rule the fixture states: a peer that
-    ::  publishes nothing is version 1, which is what makes this
-    ::  mechanism additive rather than a flag day.
+      !>  (turn our-versions:auspex |=(v=@ud `@ud`v))
+      !>  (turn (jarr (jget k 'versions')) jnum)
+    %+  expect-eq
+      !>  (turn our-marks:auspex |=(t=@tas `@t`t))
+      !>  (turn (jarr (jget k 'marks')) jstr)
+    ::  the keen path really does carry the empty knot, which is the one
+    ::  segment a path literal cannot spell.
+    (expect-eq !>(`@ta`'') !>((snag 4 (proto-keen-path:auspex %grubbery 1))))
+    ::  a peer that publishes nothing IS version 1, which is what makes
+    ::  discovery additive rather than a flag day.
     (expect-eq !>(`(unit @tas)`[~ %auspex-chain]) !>((peer-mark:auspex ~)))
-    (expect-eq !>(`@dr`~d1) !>(proto-ttl:auspex))
   ==
 --
