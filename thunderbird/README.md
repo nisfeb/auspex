@@ -43,6 +43,22 @@ A `403` anywhere flips the status to **signed out**, raises one notification,
 and stops syncing until you connect again. That is what an expired session
 looks like, and no amount of retrying fixes it.
 
+### If Connect says `NetworkError` and the name ends in `.ts.net`
+
+**Thunderbird's DNS-over-HTTPS cannot resolve a tailnet (MagicDNS) name.**
+DoH sends the lookup to a public resolver, and a public resolver has never
+heard of your tailnet: the name is real, it resolves fine in a terminal on
+the same machine, and Thunderbird still cannot reach it. What you see is a
+bare `NetworkError` on Connect, which is the same word Thunderbird uses for
+a dozen unrelated causes — this is the first one to rule out.
+
+Either fix works:
+
+- put the ship's **IP address** in the options page instead of its name
+  (`http://100.x.y.z:8080`), or
+- turn DoH off: **Settings → Privacy & Security → DNS over HTTPS → Off**,
+  so lookups go through the system resolver that knows about the tailnet.
+
 ## Addresses
 
 A ship is `~feb`; Thunderbird's whole world is `user@domain`. The mapping is
@@ -79,13 +95,44 @@ parent are a branch — and `References` is exactly what makes Thunderbird's
 threaded view draw that tree rather than a flat list. Switch the message list
 to **View → Sort by → Threaded** to see it.
 
-**Not mirrored.** Lists, filters, labels, drafts, the tree view's
-select-a-node-and-reply, the attachment fetch control, delete-thread, search.
-The web client owns all of them and the popup's **Open web client** button is
-the honest answer to each. This is a ceiling, not a bug: a mirror that
-invented local state for a label the ship has never heard of would be a
-second source of truth for something that is already stored in exactly one
-place.
+**The star and the flame.** Thunderbird's two per-message buttons are two of
+the ship's labels, and nothing else:
+
+| Thunderbird | auspex |
+|---|---|
+| ★ starred | the `flagged` label on the thread |
+| 🔥 junk | the `junk` label on the thread, **and** archived |
+
+Both ways. Star a mirrored message and the thread gains `flagged` on the
+ship; add `flagged` in the web client and every mirrored message of that
+thread is starred at the next sync. Junk does the same with two calls — the
+label, then `POST /api/archive` — because junk mail is not mail you want
+left in the listing, and a flame that only labelled would be a star with a
+worse icon. Un-junking clears both.
+
+A label is a **thread's** and a Thunderbird flag is a **message's**, so the
+two directions are not symmetrical, deliberately: ship → Thunderbird applies
+the thread's flags to every message in it, and Thunderbird → ship lets any
+one message's click speak for its thread. Star one message of a thread and
+the next sync stars its siblings — that is the ship's answer coming back,
+not a bug.
+
+**Thunderbird's junk filter training is not used.** The flame writes a label
+to the ship and nothing else; it does not train the local Bayesian filter,
+and no message is ever moved to a Junk folder. The mirror's folders are
+chosen once at import (below) and the flame does not change that — a junked
+thread's *future* messages import to `Auspex/Archived`, the ones already
+mirrored stay where they are.
+
+**Not mirrored.** Lists, filters, labels other than those two, drafts, the
+tree view's select-a-node-and-reply, the attachment fetch control,
+delete-thread, search. The web client owns all of them and the popup's
+**Open web client** button is the honest answer to each. This is a ceiling,
+not a bug: a mirror that invented local state for a label the ship has never
+heard of would be a second source of truth for something that is already
+stored in exactly one place. `flagged` and `junk` escape that rule precisely
+because they are *not* invented here — they are ordinary labels the web
+client shows and edits like any other.
 
 **Folders.** A message goes to exactly one folder, chosen once at import and
 never moved: archived thread → `Archived`, otherwise written by you → `Sent`,
@@ -93,11 +140,15 @@ otherwise → `Inbox`. Archiving a thread in the web client later does *not*
 move the messages already mirrored — the alternative is either moving mail
 behind your back or holding two copies of it.
 
-**Read state** goes both ways, and only where the two sides differ. Marking
-a message read in Thunderbird posts `/api/read` (debounced, one request for
-the batch); a message the ship says is read gets its local flag set, but only
-if the flag actually differs — which is what stops the two sides echoing a
-mark back and forth forever.
+**Read state, the star and the flame** all go both ways, and all three by the
+same rule: **only where the two sides differ.** Marking a message read in
+Thunderbird posts `/api/read` (debounced, one request for the batch) and
+starring one posts `/api/label` (debounced, per thread); in the other
+direction a flag is written locally *only* when it actually differs from
+what is there. That is what stops the two sides echoing a mark back and
+forth forever — `messages.update` fires `messages.onUpdated` whether or not
+it changed anything, so a blind write would put the whole mirror through the
+relay every sixty seconds.
 
 ## Sending
 
@@ -138,7 +189,8 @@ button on the open message reading `✓`, `○` or `FORGED`.
 
 ## Ceilings, in one list
 
-- Read state is the only thing that flows Thunderbird → ship besides a send.
+- Read state, the star and the flame are the only things that flow
+  Thunderbird → ship besides a send.
 - A message is imported once. If an attachment's bytes had not been fetched
   by the ship at that moment, its place holds a note saying so, and that note
   is permanent for that import — open the thread in the web client to pull
@@ -168,7 +220,10 @@ npm run build -- --selftest /path/to/config.json
 ```
 
 whose config names the ship origin, its `+code`, a sink URL to POST results
-to, and the messages to send. It packages one extra file, `selftest.json`,
+to, the messages to send, and the four thread ids the star/flame steps act
+on (`starThread`, `junkThread`, `inboundThread`, `untouchedThread` — the
+third has its label added from outside with `curl` while the test polls for
+it). It packages one extra file, `selftest.json`,
 which the background fetches at startup; an ordinary build has no such file
 and none of that code is even imported. **Never install a selftest build you
 did not build yourself: it carries an access code.**

@@ -230,6 +230,22 @@ class Api {
   markUnread(ids) {
     return ids.length ? this.post('/api/unread', { 'msg-ids': ids }) : Promise.resolve()
   }
+
+  //  LOCAL STATE, PER THREAD. The same two routes the web client uses
+  //  (ui/src/api.ts): neither field is signed, neither travels to another
+  //  ship, and neither moves the ship's change beacon — which is why a
+  //  star set here does not cost every open tab a full listing.
+  //
+  //  These are what the star and the flame are made of. The extension has
+  //  no label UI of its own and asks for none: it writes exactly the two
+  //  labels Thunderbird already has a button for.
+  setLabel(threadId, label, add) {
+    return this.post('/api/label', { 'thread-id': threadId, label, add })
+  }
+
+  setArchived(threadId, archived) {
+    return this.post('/api/archive', { 'thread-id': threadId, archived })
+  }
 }
 
 export {

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   dedupeCopies, referencesFor, folderFor, threadsToFetch, snapshotOf,
-  readStateOps, planThread,
+  readStateOps, planThread, flagsFor, flagUpdate, flagOps,
 } from '../lib/sync.js'
 
 const msg = (id, prev, over = {}) => ({
@@ -67,19 +67,88 @@ test('the folder choice', () => {
 
 test('only changed threads are fetched', () => {
   const entries = [
-    { id: 't1', last: 5, count: 2, archived: false },
-    { id: 't2', last: 9, count: 1, archived: false },
-    { id: 't3', last: 1, count: 1, archived: true },
-    { id: 't4', last: 4, count: 1, archived: false },
+    { id: 't1', last: 5, count: 2, archived: false, labels: [] },
+    { id: 't2', last: 9, count: 1, archived: false, labels: [] },
+    { id: 't3', last: 1, count: 1, archived: true, labels: [] },
+    { id: 't4', last: 4, count: 1, archived: false, labels: [] },
   ]
-  const snap = {
-    t1: { last: 5, count: 2, archived: false },   // unchanged
-    t2: { last: 8, count: 1, archived: false },   // last moved
-    t3: { last: 1, count: 1, archived: false },   // archived flipped
+  const snap = snapshotOf([
+    { id: 't1', last: 5, count: 2, archived: false, labels: [] },   // unchanged
+    { id: 't2', last: 8, count: 1, archived: false, labels: [] },   // last moved
+    { id: 't3', last: 1, count: 1, archived: false, labels: [] },   // archived flipped
     // t4 unknown → new
-  }
+  ])
   assert.deepEqual(threadsToFetch(entries, snap), ['t2', 't3', 't4'])
   assert.deepEqual(threadsToFetch(entries, snapshotOf(entries)), [])
+})
+
+test('a thread that only changed its labels is a change', () => {
+  const before = [{ id: 't', last: 5, count: 1, archived: false, labels: ['work'] }]
+  //  the star arrives on the ship and nothing else about the thread moves:
+  //  no new message, no new timestamp, no archive flip.
+  const after = [{ id: 't', last: 5, count: 1, archived: false, labels: ['work', 'flagged'] }]
+  assert.deepEqual(threadsToFetch(after, snapshotOf(before)), ['t'])
+  //  the same labels in another order are not a change: the ship makes no
+  //  promise about the order within the set.
+  const reordered = [{ id: 't', last: 5, count: 1, archived: false, labels: ['flagged', 'work'] }]
+  assert.deepEqual(threadsToFetch(reordered, snapshotOf(after)), [])
+  //  and a snapshot written before labels existed re-reads once.
+  assert.deepEqual(threadsToFetch(after, { t: { last: 5, count: 1, archived: false } }), ['t'])
+})
+
+test('the star and the flame come off the thread labels', () => {
+  assert.deepEqual(flagsFor({ labels: ['flagged'] }), { flagged: true, junk: false })
+  assert.deepEqual(flagsFor({ labels: ['junk'] }), { flagged: false, junk: true })
+  assert.deepEqual(flagsFor({ labels: ['junk', 'work', 'flagged'] }),
+    { flagged: true, junk: true })
+  //  any other label is not a flag, and a thread with no labels at all —
+  //  or no entry at all — carries neither.
+  assert.deepEqual(flagsFor({ labels: ['flag', 'Flagged', 'junky'] }),
+    { flagged: false, junk: false })
+  assert.deepEqual(flagsFor({ labels: [] }), { flagged: false, junk: false })
+  assert.deepEqual(flagsFor(undefined), { flagged: false, junk: false })
+})
+
+test('flags that already match produce no write', () => {
+  //  THE RULE THAT STOPS THE CHURN. An update fires onUpdated whether or
+  //  not it changed anything, and onUpdated is the relay to the ship.
+  assert.equal(flagUpdate({ flagged: true, junk: false }, { flagged: true, junk: false }), null)
+  assert.equal(flagUpdate({ flagged: false, junk: false }, { flagged: false, junk: false }), null)
+  //  only the half that differs is written.
+  assert.deepEqual(
+    flagUpdate({ flagged: false, junk: false }, { flagged: true, junk: false }),
+    { flagged: true },
+  )
+  assert.deepEqual(
+    flagUpdate({ flagged: true, junk: true }, { flagged: true, junk: false }),
+    { junk: false },
+  )
+  assert.deepEqual(
+    flagUpdate({ flagged: true, junk: false }, { flagged: false, junk: true }),
+    { flagged: false, junk: true },
+  )
+  //  a header that names neither flag reads as neither set.
+  assert.equal(flagUpdate({}, { flagged: false, junk: false }), null)
+  assert.deepEqual(flagUpdate({}, { flagged: true, junk: false }), { flagged: true })
+})
+
+test('the flame is two calls, the label before the archive', () => {
+  assert.deepEqual(flagOps('T', 'flagged', true),
+    [{ call: 'label', threadId: 'T', label: 'flagged', add: true }])
+  assert.deepEqual(flagOps('T', 'flagged', false),
+    [{ call: 'label', threadId: 'T', label: 'flagged', add: false }])
+  //  ORDER: the label first, so a thread that lands in the archived view
+  //  is already labelled when it gets there.
+  assert.deepEqual(flagOps('T', 'junk', true), [
+    { call: 'label', threadId: 'T', label: 'junk', add: true },
+    { call: 'archive', threadId: 'T', archived: true },
+  ])
+  assert.deepEqual(flagOps('T', 'junk', false), [
+    { call: 'label', threadId: 'T', label: 'junk', add: false },
+    { call: 'archive', threadId: 'T', archived: false },
+  ])
+  //  nothing else is relayed as a label.
+  assert.deepEqual(flagOps('T', 'read', true), [])
 })
 
 test('read state does not loop', () => {

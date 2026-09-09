@@ -128,6 +128,113 @@ export async function runSelftest(cfg, api) {
     return JSON.stringify(out)
   })
 
+  //  ── the star and the flame, both directions ───────────────────────
+  //
+  //  Two per-message buttons in Thunderbird, two labels on the ship. What
+  //  is worth proving here is not that a click reaches the ship — that is
+  //  one POST — but the two rules around it: that the flame writes BOTH
+  //  the label and the archive flag, and that a label arriving from
+  //  outside reaches EVERY mirrored message of its thread and no message
+  //  of any other.
+
+  //  Every mirrored message of one thread. `threadId` is on the imported
+  //  record precisely so the relay can find it; reading it back here is
+  //  also the proof that it was recorded.
+  const mirrored = async (threadId) => {
+    const imported = (await api.getState()).imported
+    return Object.entries(imported)
+      .filter(([, r]) => r.threadId === threadId && r.tbId !== null)
+      .map(([id, r]) => ({ id, tbId: r.tbId }))
+  }
+
+  const shipThread = async (id) => (await api.apiFor()).thread(id)
+
+  const flagsOf = async (ms) => {
+    const out = []
+    for (const m of ms) {
+      try { out.push(!!(await browser.messages.get(m.tbId)).flagged) } catch { out.push(null) }
+    }
+    return out
+  }
+
+  await step('flag-star', async () => {
+    const ms = await mirrored(cfg.starThread)
+    if (!ms.length) throw new Error(`nothing mirrored for ${cfg.starThread}`)
+    await browser.messages.update(ms[0].tbId, { flagged: true })
+    //  the relay is debounced by two seconds; five is that plus the round
+    //  trip, and a bare sleep is honest here because the thing waited on
+    //  is a timer this process owns.
+    await sleep(5000)
+    const t = await shipThread(cfg.starThread)
+    const labels = t.labels || []
+    if (!labels.includes('flagged')) throw new Error(`labels ${JSON.stringify(labels)}`)
+    return JSON.stringify({ starred: ms[0].id, labels, archived: t.archived })
+  })
+
+  await step('flag-junk', async () => {
+    const ms = await mirrored(cfg.junkThread)
+    if (!ms.length) throw new Error(`nothing mirrored for ${cfg.junkThread}`)
+    await browser.messages.update(ms[0].tbId, { junk: true })
+    await sleep(5000)
+    const t = await shipThread(cfg.junkThread)
+    const labels = t.labels || []
+    //  BOTH, and this is the whole point of the flame being two calls.
+    if (!labels.includes('junk')) throw new Error(`labels ${JSON.stringify(labels)}`)
+    if (t.archived !== true) throw new Error(`archived ${t.archived}`)
+    return JSON.stringify({ junked: ms[0].id, labels, archived: t.archived })
+  })
+
+  await step('flag-unjunk', async () => {
+    const ms = await mirrored(cfg.junkThread)
+    await browser.messages.update(ms[0].tbId, { junk: false })
+    await sleep(5000)
+    const t = await shipThread(cfg.junkThread)
+    const labels = t.labels || []
+    if (labels.includes('junk')) throw new Error(`labels ${JSON.stringify(labels)}`)
+    if (t.archived !== false) throw new Error(`archived ${t.archived}`)
+    return JSON.stringify({ unjunked: ms[0].id, labels, archived: t.archived })
+  })
+
+  //  SHIP → THUNDERBIRD. The label is put on by the harness outside, with
+  //  curl, while this waits: polled rather than slept on, because what is
+  //  waited for belongs to another process.
+  await step('flag-inbound', async () => {
+    let t = null
+    for (let i = 0; i < 45; i += 1) {
+      t = await shipThread(cfg.inboundThread)
+      if ((t.labels || []).includes('flagged')) break
+      await sleep(2000)
+    }
+    if (!((t && t.labels) || []).includes('flagged')) {
+      throw new Error(`${cfg.inboundThread} never gained the label from outside`)
+    }
+    //  a sync already in flight answers `skipped`, and a skipped sync
+    //  proves nothing: ask again until one actually runs.
+    let r = await api.syncNow()
+    for (let i = 0; i < 15 && r && r.skipped; i += 1) {
+      await sleep(2000)
+      r = await api.syncNow()
+    }
+    const ours = await mirrored(cfg.inboundThread)
+    const others = await mirrored(cfg.untouchedThread)
+    const flags = await flagsOf(ours)
+    const otherFlags = await flagsOf(others)
+    if (!ours.length) throw new Error('nothing mirrored for the inbound thread')
+    if (!others.length) throw new Error('nothing mirrored for the untouched thread')
+    if (flags.some((f) => !f)) throw new Error(`not every message flagged: ${JSON.stringify(flags)}`)
+    if (otherFlags.some((f) => f)) {
+      throw new Error(`an untouched thread is flagged: ${JSON.stringify(otherFlags)}`)
+    }
+    return JSON.stringify({
+      sync: r,
+      thread: cfg.inboundThread,
+      labels: t.labels,
+      flagged: flags,
+      untouched: cfg.untouchedThread,
+      untouchedFlags: otherFlags,
+    })
+  })
+
   //  ── a fresh send ──────────────────────────────────────────────────
 
   //  compose.sendMessage rejects when onBeforeSend cancels, and this

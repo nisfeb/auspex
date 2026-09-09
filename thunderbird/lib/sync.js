@@ -75,6 +75,32 @@ const folderFor = (msg, entry, ourShip) => {
   return msg.from === ourShip ? 'Sent' : 'Inbox'
 }
 
+//  THE STAR AND THE FLAME, which are two of the ship's labels.
+//
+//    Thunderbird has a per-message `flagged` (the star) and a per-message
+//    `junk` (the flame). Auspex has per-THREAD labels. So the mapping is
+//    two named labels and nothing else — no new state anywhere, and the
+//    web client shows the same two as ordinary labels, which is what
+//    makes them honest: the mirror invents nothing.
+//
+//    The flame carries the archive flag with it. Junk mail is not mail
+//    you want left in the inbox, and the web client's own answer to junk
+//    is to archive it; a flame that labelled and left the thread in the
+//    listing would be a star with a worse icon.
+const FLAGGED = 'flagged'
+const JUNK = 'junk'
+
+const flagsFor = (entry) => {
+  const labels = (entry && entry.labels) || []
+  return { flagged: labels.includes(FLAGGED), junk: labels.includes(JUNK) }
+}
+
+//  The labels of a thread as ONE comparable string. Sorted, because the
+//  ship's order within the set is not a promise and a reordering is not a
+//  change; joined with a byte no label can contain, so `['a','b']` and
+//  `['a,b']` are not the same key.
+const labelKey = (entry) => [...((entry && entry.labels) || [])].sort().join('\u0000')
+
 //  Which threads changed since the last sync.
 //
 //    `last` and `count` together: `last` misses a copy arriving with an
@@ -82,24 +108,62 @@ const folderFor = (msg, entry, ourShip) => {
 //    claim any time it likes), `count` misses nothing that is stored but
 //    would not notice a thread going from archived to not. The meta
 //    fields ride along for the same reason — the folder choice reads
-//    `archived`, so a thread that only changed its flag still has to be
-//    looked at once.
+//    `archived` and the message flags read `labels`, so a thread that
+//    only changed one of those still has to be looked at once.
 //
-//    A thread with no snapshot is new and is always fetched.
+//    A thread with no snapshot is new and is always fetched — which is
+//    also what makes a snapshot written by an older version safe: it has
+//    no `labels` key, every thread mismatches once, and the next sync
+//    re-reads the lot.
 function threadsToFetch(entries, snapshot) {
   const out = []
   for (const e of entries) {
     const s = snapshot[e.id]
     if (!s || s.last !== e.last || s.count !== e.count
-      || s.archived !== e.archived) out.push(e.id)
+      || s.archived !== e.archived || s.labels !== labelKey(e)) out.push(e.id)
   }
   return out
 }
 
 const snapshotOf = (entries) => {
   const out = {}
-  for (const e of entries) out[e.id] = { last: e.last, count: e.count, archived: e.archived }
+  for (const e of entries) {
+    out[e.id] = {
+      last: e.last, count: e.count, archived: e.archived, labels: labelKey(e),
+    }
+  }
   return out
+}
+
+//  NEVER A BLIND WRITE.
+//
+//    `messages.update` fires `messages.onUpdated` whether or not it
+//    changed anything, and onUpdated is the relay back to the ship. So a
+//    sync that wrote the flags every message already carries would push
+//    the whole mirror through the relay every sixty seconds, forever.
+//    The patch is what DIFFERS, or nothing at all.
+function flagUpdate(current, wanted) {
+  const patch = {}
+  if (!!(current && current.flagged) !== wanted.flagged) patch.flagged = wanted.flagged
+  if (!!(current && current.junk) !== wanted.junk) patch.junk = wanted.junk
+  return Object.keys(patch).length ? patch : null
+}
+
+//  WHAT TO SEND when a flag is changed in Thunderbird, in order.
+//
+//    The star is one call. The flame is two — the label and the archive
+//    flag are two routes — and the label goes FIRST, so a thread that
+//    reaches the archived view is already labelled when it gets there and
+//    never appears there unexplained.
+function flagOps(threadId, flag, on) {
+  if (flag === 'flagged') return [{ call: 'label', threadId, label: FLAGGED, add: on }]
+  if (flag === 'junk') {
+    return [
+      { call: 'label', threadId, label: JUNK, add: on },
+      { call: 'archive', threadId, archived: on },
+    ]
+  }
+  return []
 }
 
 //  READ STATE, IN THE DIRECTION THAT DOES NOT LOOP.
@@ -159,4 +223,5 @@ function planThread(thread, entry, ourShip, imported) {
 export {
   VERDICT_RANK, rank, dedupeCopies, referencesFor, folderFor,
   threadsToFetch, snapshotOf, readStateOps, planThread,
+  FLAGGED, JUNK, flagsFor, labelKey, flagUpdate, flagOps,
 }

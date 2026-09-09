@@ -13,6 +13,7 @@ import {
 import { buildMessage, idFromMessageId, notFetchedNote } from './lib/rfc822.js'
 import {
   threadsToFetch, snapshotOf, planThread, readStateOps,
+  flagsFor, flagUpdate, flagOps,
 } from './lib/sync.js'
 
 const PARENT = 'Auspex'
@@ -33,8 +34,8 @@ const DEFAULTS = {
   lastError: '',
   lastSync: 0,
   folders: {},              // name → MailFolderId
-  snapshot: {},             // threadId → {last, count, archived}
-  imported: {},             // auspex msg id → {tbId, folder, read}
+  snapshot: {},             // threadId → {last, count, archived, labels}
+  imported: {},             // auspex msg id → {tbId, folder, threadId, read, flagged, junk}
   counts: { messages: 0, threads: 0 },
 }
 
@@ -147,7 +148,10 @@ async function attachmentBytes(api, att, from) {
   return null
 }
 
-async function importOne(api, item, folders, imported) {
+//  `flags` is the thread's star and flame AT IMPORT TIME, so a message
+//  arriving into a thread the owner already starred is starred the moment
+//  it appears rather than one sync later.
+async function importOne(api, item, folders, imported, flags) {
   const { msg } = item
   const parts = []
   for (const a of (msg.attachments || [])) {
@@ -170,9 +174,16 @@ async function importOne(api, item, folders, imported) {
   })
   const file = new File([raw], `${msg.id}.eml`, { type: 'message/rfc822' })
   const header = await browser.messages.import(file, folders[item.folder], {
-    read: !!msg.read, new: false,
+    read: !!msg.read, new: false, flagged: flags.flagged, junk: flags.junk,
   })
-  imported[msg.id] = { tbId: header.id, folder: item.folder, read: !!msg.read }
+  imported[msg.id] = {
+    tbId: header.id,
+    folder: item.folder,
+    threadId: item.threadId,
+    read: !!msg.read,
+    flagged: flags.flagged,
+    junk: flags.junk,
+  }
 }
 
 let syncing = false
@@ -202,6 +213,12 @@ async function syncNow() {
     //  agrees with us produces no local update, so nothing is echoed back.
     const remote = []
 
+    //  The star and the flame live on the THREAD and Thunderbird's flags
+    //  live on the MESSAGE, so both directions need the thread of a
+    //  message: this map is filled for every thread looked at this sync,
+    //  and `imported[id].threadId` is what the relay reads later.
+    const want = new Map()   // threadId → {flagged, junk}
+
     for (const id of wanted) {
       let thread
       try {
@@ -213,10 +230,18 @@ async function syncNow() {
         throw e
       }
       remote.push(...(thread.messages || []))
+      const entry = byThread.get(id) || thread
+      const flags = flagsFor(entry)
+      want.set(id, flags)
+      //  Every message of this thread now knows its thread, including the
+      //  ones imported by an older version that recorded no such field.
+      for (const m of (thread.messages || [])) {
+        if (imported[m.id]) imported[m.id].threadId = id
+      }
       const plan = planThread(thread, byThread.get(id), ship, importedIds)
       for (const item of plan) {
         try {
-          await importOne(api, item, folders, imported)
+          await importOne(api, item, folders, imported, flags)
           importedIds.add(item.msg.id)
           added += 1
         } catch (e) {
@@ -224,7 +249,10 @@ async function syncNow() {
           //  which is a mirror that lost its bookkeeping and not a
           //  failure: record it as imported so the next sync moves on.
           if (/Message-ID/i.test(String(e && e.message))) {
-            imported[item.msg.id] = { tbId: null, folder: item.folder, read: !!item.msg.read }
+            imported[item.msg.id] = {
+              tbId: null, folder: item.folder, threadId: id,
+              read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
+            }
             importedIds.add(item.msg.id)
           } else throw e
         }
@@ -243,6 +271,25 @@ async function syncNow() {
         rec.read = read
         try { await browser.messages.update(rec.tbId, { read }) } catch { /* gone */ }
       }
+    }
+
+    //  ship → local star and flame, for every thread looked at this sync.
+    //  READ FIRST, WRITTEN ONLY WHERE THEY DIFFER, for exactly the reason
+    //  the read pass above is written that way: an update fires
+    //  onUpdated whether or not it changed anything, and onUpdated is the
+    //  relay back to the ship.
+    for (const rec of Object.values(imported)) {
+      if (rec.tbId === null || !want.has(rec.threadId)) continue
+      const wantFlags = want.get(rec.threadId)
+      let current
+      try { current = await browser.messages.get(rec.tbId) } catch { continue }
+      const patch = flagUpdate(current, wantFlags)
+      //  the record moves FIRST, so the onUpdated this provokes sees
+      //  flags that already match and posts nothing back.
+      rec.flagged = wantFlags.flagged
+      rec.junk = wantFlags.junk
+      if (!patch) continue
+      try { await browser.messages.update(rec.tbId, patch) } catch { /* gone */ }
     }
 
     await setState({
@@ -292,19 +339,69 @@ async function flushReadState() {
   } catch (e) { await classify(e) }
 }
 
+//  ── the star and the flame, local → ship ────────────────────────────
+//
+//  Per THREAD, because a label is a thread's, and debounced like the read
+//  relay for the same reason. Keyed by thread and flag, so a star clicked
+//  twice inside the debounce is one request and the LAST state wins.
+const pendingFlags = new Map()   // `${threadId}\0${flag}` → boolean
+let flagTimer = null
+
+function queueFlag(threadId, flag, on) {
+  pendingFlags.set(`${threadId}\u0000${flag}`, on)
+  if (flagTimer) clearTimeout(flagTimer)
+  flagTimer = setTimeout(flushFlags, 2000)
+}
+
+async function flushFlags() {
+  flagTimer = null
+  const batch = [...pendingFlags.entries()]
+  pendingFlags.clear()
+  if (!batch.length) return
+  try {
+    const api = await apiFor()
+    for (const [key, on] of batch) {
+      const [threadId, flag] = key.split('\u0000')
+      //  IN ORDER, and awaited one at a time: the flame is a label and an
+      //  archive, and the ship's writer is one serialisation point.
+      for (const op of flagOps(threadId, flag, on)) {
+        if (op.call === 'label') await api.setLabel(op.threadId, op.label, op.add)
+        else await api.setArchived(op.threadId, op.archived)
+      }
+    }
+  } catch (e) { await classify(e) }
+}
+
+//  THE ONE RELAY, for all three flags.
+//
+//  `changed` names the properties that moved; the values are read off the
+//  header. The no-loop rule is the same for each: a flag that already
+//  matches what we recorded is the echo of an update this extension just
+//  made during a sync, and relaying it is how a mirror starts talking to
+//  itself. Recorded state is compared loosely because a record written by
+//  an older version has no `flagged` or `junk` field at all, and absent
+//  must read as "not set" rather than as "differs from false".
+const RELAYED = ['read', 'flagged', 'junk']
+
 browser.messages.onUpdated.addListener(async (message, changed) => {
-  if (!('read' in changed)) return
+  const touched = RELAYED.filter((k) => k in changed)
+  if (!touched.length) return
   const id = idFromMessageId(message.headerMessageId)
   if (!id) return
   const state = await getState()
   const rec = state.imported[id]
-  //  NOT OURS, or ALREADY WHAT WE RECORDED. The second is the echo of an
-  //  update this extension just made, and skipping it is what keeps the
-  //  relay from looping.
-  if (!rec || rec.read === message.read) return
-  rec.read = message.read
-  await setState({ imported: state.imported })
-  queueReadState(id, message.read)
+  if (!rec) return                                    // not ours
+  let moved = false
+  for (const key of touched) {
+    if (!!rec[key] === !!message[key]) continue       // already what we recorded
+    rec[key] = !!message[key]
+    moved = true
+    if (key === 'read') queueReadState(id, !!message.read)
+    //  A message imported before this version knows no thread, and a
+    //  label without one has nowhere to go. The next sync fills it in.
+    else if (rec.threadId) queueFlag(rec.threadId, key, !!message[key])
+  }
+  if (moved) await setState({ imported: state.imported })
 })
 
 //  ── send ────────────────────────────────────────────────────────────
