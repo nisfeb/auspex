@@ -1257,14 +1257,24 @@ Two dojo facts that will otherwise cost an hour:
 
 ### 8.3 The conformance test
 
-`grubbery-overlay/tests/lib/auspex-vectors.hoon` embeds the same cases as Hoon
-literals and asserts the library reproduces every id, digest, signature and
-verdict. Run it with `-test`, alongside the main suite:
+`grubbery-overlay/tests/lib/auspex-vectors.hoon` rebuilds the same fixtures with
+the same constructors and asserts the library reproduces every id, digest,
+signature and verdict. Every expected atom in it is **transcribed from
+`protocol/vectors/v1.json`**, mechanically, not recomputed — an assertion that
+recomputed its own expectation would pass against any change to the format it
+exists to pin. `jam` is deliberately not asserted there: it is in the JSON for
+an implementer to byte-compare a noun against, and in Hoon it would only restate
+what the id and digest already cover.
+
+**11 tests.** Run it with `-test`, alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~
--test /=grubbery=/tests/lib/auspex-vectors ~
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  75 tests
+-test /=grubbery=/tests/lib/auspex-vectors ~   ::  11 tests
 ```
+
+Last run on `~feb` at revision 181: both `ok=%.y`, 75 and 11 `OK` lines, zero
+failures.
 
 ### 8.4 Rule → test
 
