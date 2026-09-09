@@ -1260,8 +1260,19 @@ is nothing here worth checking a reader for.
 **Case, and republishing.** A spur never grown and never culled binds at
 **case 1**. A publisher MUST NOT `%grow` unconditionally: `+grow` assigns
 `las+1` on a non-empty fan, so a grow per deploy pushes `/proto` past the probe
-ceiling in three deploys and it becomes unreadable by every peer, forever, with
-no error. A reader SHOULD probe cases 1 through 3, as the blob fetch does.
+ceiling and it becomes unreadable by every peer, forever, with no error.
+
+A reader SHOULD probe **cases 1 through 8**, with a deadline of **4 seconds**
+each. That is a wider ladder than a blob fetch uses and a shorter deadline, and
+both halves are deliberate: a blob is immutable, so its spur moves only when a
+restrict culls it, while `/proto` moves one case every time a ship changes its
+version ladder or its caps — a normal thing for a deployed protocol to do, and
+two changes are enough to reach the three-case blob ceiling. A namespace read is
+answered from a cache or from the publisher's kernel with no agent in the loop,
+so a keen that is slow is a keen that is not coming; 8 × 4s is 32 seconds for a
+total miss, against the 30 the three-case blob ladder already costs, and those
+seconds hold queued mail on first contact — which is why the total, and not the
+per-case number, is what was held fixed.
 
 So a publisher **reads back what is bound** — through the same keen a peer uses
 — and acts on the difference:
@@ -1349,9 +1360,9 @@ chain has arrived, verified and been stored while the sender's deadline had
 already fired. A nack is its own line (`~ship nacked the send`), and both drop
 the cached record so the next send re-asks.
 
-**Timeouts, as numbers.** The discovery keen is bounded at **10 seconds per
-case** and probes cases 1 through 3, so a fully unreachable peer costs at most
-**30 seconds** of the probe's own time — never the writer's. The poke's deadline
+**Timeouts, as numbers.** The discovery keen is bounded at **4 seconds per
+case** and probes cases 1 through 8, so a fully unreachable peer costs at most
+**32 seconds** of the probe's own time — never the writer's. The poke's deadline
 is **20 seconds** per recipient.
 
 **Where each step runs.** The discovery read MUST NOT run on the ship's write

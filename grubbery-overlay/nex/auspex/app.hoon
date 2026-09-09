@@ -2213,11 +2213,36 @@
 ::    peer treated as version 1, which is what every Auspex before
 ::    discovery speaks.
 ::
+::  +proto-probe-cases / +proto-timeout: /proto's OWN ladder.
+::
+::    A blob is content-addressed and immutable, so its spur moves only
+::    when a restrict culls it - +max-case-probe's 3 is generous for
+::    that. /proto is MUTABLE: it moves one case every time a ship
+::    changes its version ladder or its caps, which is a normal thing
+::    for a deployed protocol to do. Measured on ~feb, two content
+::    changes put it at case 3, which is the blob ceiling exactly - one
+::    more and every peer would silently report a miss, read that as
+::    silence, and treat the ship as version 1 forever.
+::
+::    So a wider ladder, and a shorter deadline to pay for it. A
+::    namespace read is answered from a cache or from the publisher's
+::    kernel with no agent in the loop, so a keen that is slow is a keen
+::    that is not coming - which is +blob-timeout's own argument, and it
+::    licenses a tighter bound here than the ten seconds a blob fetch
+::    allows. Eight cases at four seconds is 32s for a total miss,
+::    against the 30s the three-case blob ladder already costs, and
+::    those seconds hold QUEUED MAIL on first contact - which is the
+::    reason the total, and not the per-case number, is what was held
+::    fixed.
+::
+++  proto-probe-cases  ^-(@ud 8)
+++  proto-timeout      ^-(@dr ~s4)
+::
 ++  keen-proto
   |=  [who=ship case=@ud]
   =/  m  (fiber:fiber:nexus ,(unit proto:uc))
   ^-  form:m
-  ?:  (gth case max-case-probe)  (pure:m ~)
+  ?:  (gth case proto-probe-cases)  (pure:m ~)
   ;<  got=(unit proto:uc)  bind:m  (keen-proto-at who case)
   ?^  got  (pure:m got)
   (keen-proto who +(case))
@@ -2237,7 +2262,7 @@
   ^-  form:m
   =/  pax=path  (proto-keen-path:uc mesa-agent case)
   ;<  res=(unit (unit page))  bind:m
-    ((deadline ,(unit page)) blob-timeout (keen:io who pax))
+    ((deadline ,(unit page)) proto-timeout (keen:io who pax))
   ?~  res
     ;<  ~  bind:m  (yawn:io who pax)
     (pure:m ~)
