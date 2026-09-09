@@ -2350,13 +2350,41 @@
   ;<  res=(unit (unit tang))  bind:m
     ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ u.mk] c]))
   ?~  res
-    ::  A DEADLINE BOUNDS HOW LONG WE WAIT. It says nothing about what
-    ::  the far end did, and between two live ships a chain has arrived,
-    ::  verified and stored while this deadline had already fired - so
-    ::  the sentence must not claim the send failed. The record is
-    ::  dropped either way, so the next send re-asks.
-    ;<  ~  bind:m  (cull-if-there (peer-rail root who))
-    (say-send root who (late-ack-note:uc who (div send-timeout ~s1)) notes)
+    ::  THE ACK IS NOT OBSERVABLE FROM HERE, so its absence is not
+    ::  evidence of anything.
+    ::
+    ::    Grubbery does not return a poke-ack to a nexus fiber. Every
+    ::    cross-ship send this project has made both timed out here and
+    ::    arrived, verified and stored, at the far end - measured
+    ::    repeatedly between ~feb and ~wex. So this deadline fires on
+    ::    every successful send, and treating it as a failure cost two
+    ::    things: a line of alarm to the user on every message, and the
+    ::    peer record, culled - which meant a fresh probe before every
+    ::    single send and a day-long TTL that was never once in force.
+    ::
+    ::    DISCOVERY IS THE LIVENESS SIGNAL, not the ack. A peer that
+    ::    answered /proto answered over a channel that does return
+    ::    something, and it answered recently; a peer that did not is
+    ::    already told about, before the poke, by +unanswered-note.
+    ::    There is nothing this branch can add to either.
+    ::
+    ::    So: the record STAYS, the user is told nothing, and the fact
+    ::    is written where an operator looks - the console, and
+    ::    /tr/discovery rather than /tr/last, because /tr/last is the
+    ::    outcome of the send a person is waiting on and this is not an
+    ::    outcome.
+    ::
+    ::    An explicit NACK is different in kind and is handled below: it
+    ::    is the far end SAYING no, which is a fact, and it does drop
+    ::    the record.
+    =/  why=@t  (late-ack-note:uc who (div send-timeout ~s1))
+    ;<  ~  bind:m
+      %-  trace:io
+      :~  leaf+"auspex: {(trip why)}"
+          leaf+"auspex: grubbery returns no poke-ack to a nexus fiber; not a failure"
+      ==
+    ?.  notes  (pure:m ~)
+    (note-at root %discovery 'send' & why)
   ?~  u.res  (pure:m ~)
   ;<  ~  bind:m  (cull-if-there (peer-rail root who))
   (say-send root who (nacked-note:uc who) notes)

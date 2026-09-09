@@ -1348,17 +1348,34 @@ A sender resolves the recipient's `$proto` and then:
    cache entry that merely happens to be absent — those are different findings
    and a sender that conflates them reports a failure it has not observed.
 
-**And when the poke itself is not acked**, at either 1 or 4:
+**A poke that is not acked is not a failed send, and MUST NOT be reported as
+one.** On the reference transport the ack does not come back at all: grubbery
+returns no poke-ack to a nexus fiber, so the sender's deadline fires on every
+successful send. Measured repeatedly between two live ships, every cross-ship
+send both timed out at the sender and arrived, verified and stored, at the
+receiver.
+
+A sender therefore MUST NOT treat a send timeout as evidence about the peer. It
+MUST NOT drop the cached discovery record on one, and SHOULD NOT surface it to
+the user; recording it for an operator is enough:
 
 ```
 ~ship did not ack within 20s; it may still arrive
 ```
 
-**Not** "did not ack the send". A deadline bounds how long the sender waits and
-says nothing about what the far end did: measured between two live ships, a
-chain has arrived, verified and been stored while the sender's deadline had
-already fired. A nack is its own line (`~ship nacked the send`), and both drop
-the cached record so the next send re-asks.
+**Discovery is the liveness signal, not the ack.** A peer that answered `/proto`
+answered over a channel that does return something, and answered recently. A
+peer that did not was already told about before the poke went out
+(outcome 4 above). Neither leaves the timeout anything to add.
+
+Treating the timeout as a failure cost two things and both were observed: a line
+of alarm on every successful message, and the peer record culled on every send —
+which meant a fresh probe before each one and a day-long TTL that was never once
+in force.
+
+**An explicit nack is different in kind.** It is the far end *saying* no, which
+is a fact. It is reported (`~ship nacked the send`) and it MUST drop the cached
+record, so the next send re-asks.
 
 **Timeouts, as numbers.** The discovery keen is bounded at **4 seconds per
 case** and probes cases 1 through 8, so a fully unreachable peer costs at most
