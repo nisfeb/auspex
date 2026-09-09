@@ -161,6 +161,36 @@ Two things the rehearsal did **not** prove:
   nexuses the dist desk deleted: permanently grey on production, invisible on
   `~feb`. **Decided: the launcher is not modified.** It is upstream code and stays upstream's, bell included. A grey bell on production is accepted over carrying a fork of the launcher.
 
+**Rehearsed on `~wex` — the production-shaped ship — 2026-09-08.** The
+launcher lists **both** Lattice and Mail, each from its own `on-load`
+`tile.json`, both icons served, both click-throughs work. Landscape reads
+Grubbery 1.1.0. Launcher applied unmodified. Mount files byte-identical to
+`5ea5700` after the ball round-trip; 72 chain tests green against the explicit
+revision.
+
+Production deltas observed on `~wex`, each of which will differ on ricsul only
+by that ship's ball history:
+
+- **Ghost tiles.** The launcher showed 12 tiles, not 4: eight app-tier
+  *instances* survive in the ball, because `%fall` only ever creates. Three
+  (Calendar, Pad, Guestbook) hang when clicked. Ricsul's ball also holds
+  BANGed app-tier instances from before the strip, so **production will show
+  dead tiles for apps that no longer have source.** Removing them is a ball
+  write on production, not a launcher change — a separate decision.
+- **The bell's fetch hangs**, 40 s with no status, rather than failing fast: a
+  stale eyre binding from an instance whose source no longer compiles. Grey
+  either way; whether it hangs or 404s on ricsul depends on its bindings.
+- The compile warnings and `BANG file /apps/forge…` spam are `~wex`-only — it
+  keeps the app-tier *sources* on disk. The dist desk deletes them.
+
+**A test-invocation trap, found here and now recorded:** `=dir /=base=` then
+`-test /=grubbery=/…` silently tests an **older** case — the dojo fills the `=`
+from the pinned dir's case, not from `now` — and reported 57 OK against a
+72-test file. Every earlier "green" run in this project that used that form is
+suspect in count (not in outcome; the older arms passed). Use an explicit
+revision: `-test /~wex/grubbery/<rev>/tests/lib/urmail-chain ~`, and read the OK
+count from the run.
+
 Still open under this gate: urmail's sources and `root.hoon` row are not
 vendored into the dist desk. The docket's `base` also changed
 `lattice` → `grubbery`, which was not in the four listed changes and is correct.
