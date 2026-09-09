@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { Message, Verdict } from './api'
 import VerdictBadge from './VerdictBadge'
 import { when } from './ThreadList'
@@ -200,17 +201,46 @@ export default function ThreadTree({
   const w = PAD * 2 + STUB + Math.max(1, cols) * COL - (COL - NODE_W)
   const h = PAD * 2 + Math.max(1, rows) * ROW - (ROW - NODE_H)
 
+  // ZOOM. The layout is computed once in its own units; zooming is the
+  // SVG's rendered size against a fixed viewBox, so the nodes, the text
+  // inside the foreignObjects and the edges all scale together and the
+  // hit targets stay where the picture says they are. Half to double:
+  // below half a node's label is unreadable, above double a phone shows
+  // one node. Ctrl+wheel (pinch, on a trackpad) over the box, or the
+  // buttons; the listener is attached by hand because React registers
+  // wheel as passive and a passive listener cannot stop the page zoom.
+  const [zoom, setZoom] = useState(1)
+  const box = useRef<HTMLDivElement>(null)
+  const clamp = (z: number) => Math.min(2, Math.max(0.5, Math.round(z * 20) / 20))
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      setZoom((z) => clamp(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   return (
     // The box scrolls; the page does not. A thread eight generations
     // deep is wider than a phone and there is no honest way around that
     // — but a pane that scrolls sideways is a pane the user chose to
     // scroll, and a PAGE that does is a layout bug.
     <div
-      className="mb-3 max-w-full overflow-auto rounded-sm border border-line bg-sunken"
+      ref={box}
+      className="relative mb-3 max-w-full overflow-auto rounded-sm border border-line bg-sunken"
       role="group"
       aria-label="Conversation tree"
     >
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block">
+      <div className="sticky top-1 left-1 z-10 inline-flex items-center gap-1 rounded-sm border border-line bg-surface px-1 text-xs text-ink-faint">
+        <button type="button" className="btn px-1" aria-label="Zoom out" onClick={() => setZoom((z) => clamp(z / 1.25))}>−</button>
+        <button type="button" className="px-1 tabular-nums" title="Reset zoom" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
+        <button type="button" className="btn px-1" aria-label="Zoom in" onClick={() => setZoom((z) => clamp(z * 1.25))}>+</button>
+      </div>
+      <svg width={w * zoom} height={h * zoom} viewBox={`0 0 ${w} ${h}`} className="block">
         {nodes.map((n) => {
           const p = n.parent ? byId.get(n.parent) : undefined
           if (!p) {
