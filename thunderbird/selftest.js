@@ -15,6 +15,7 @@
 //  Thunderbird. The sink is a plain node http server on localhost; the
 //  selftest manifest grants that origin and the ship's, and nothing else.
 
+import { patternFor } from './lib/api.js'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export async function runSelftest(cfg, api) {
@@ -71,8 +72,8 @@ export async function runSelftest(cfg, api) {
       }],
     ]
     try {
-      out.hasShipOrigin = await browser.permissions.contains({ origins: [`${cfg.origin}/*`] })
-      out.hasSinkOrigin = await browser.permissions.contains({ origins: [`${new URL(cfg.sink).origin}/*`] })
+      out.hasShipOrigin = await browser.permissions.contains({ origins: [patternFor(cfg.origin)] })
+      out.hasSinkOrigin = await browser.permissions.contains({ origins: [patternFor(cfg.sink)] })
       out.all = JSON.stringify(await browser.permissions.getAll())
     } catch (e) { out.perms = `THREW ${e && e.message}` }
     for (const [name, url, init] of tries) {
@@ -86,7 +87,7 @@ export async function runSelftest(cfg, api) {
     //  an already-granted permission resolves without a prompt, and if the
     //  fetch works afterwards the two were out of step.
     try {
-      out.reRequest = await browser.permissions.request({ origins: [`${cfg.origin}/*`] })
+      out.reRequest = await browser.permissions.request({ origins: [patternFor(cfg.origin)] })
       const r = await fetch(`${cfg.origin}/apps/auspex/api/whoami`, { credentials: 'include' })
       out.afterRequest = `${r.status} ${r.type}`
     } catch (e) { out.afterRequest = `THREW ${e && e.message}` }

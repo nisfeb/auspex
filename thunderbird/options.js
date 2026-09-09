@@ -8,6 +8,7 @@
 //  that nothing is granted until this moment; it never asks for
 //  <all_urls> outright.
 
+import { patternFor } from './lib/api.js'
 const $ = (id) => document.getElementById(id)
 const say = (text, bad = false) => {
   $('status').textContent = text
@@ -40,7 +41,7 @@ $('connect').addEventListener('click', async () => {
   say('Asking Thunderbird for permission to talk to that origin…')
   let granted = false
   try {
-    granted = await browser.permissions.request({ origins: [`${origin}/*`] })
+    granted = await browser.permissions.request({ origins: [patternFor(origin)] })
   } catch (e) { say(`Permission request failed: ${e.message}`, true); return }
   if (!granted) { say('Without permission for that origin nothing can be fetched.', true); return }
 

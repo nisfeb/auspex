@@ -10,6 +10,7 @@
 //                                  extra permissions it needs. NEVER ship
 //                                  this one: it carries an access code.
 
+import { patternFor } from './lib/api.js'
 import { mkdirSync, rmSync, cpSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -54,7 +55,7 @@ if (selftest) {
   //  user gesture, and the whole point of this build is that there is no
   //  user. `cookies` is for the signed-out case, which has to be able to
   //  take the session away.
-  m.permissions.push('cookies', `${cfg.origin}/*`, `${new URL(cfg.sink).origin}/*`)
+  m.permissions.push('cookies', patternFor(cfg.origin), patternFor(cfg.sink))
   writeFileSync(join(stage, 'manifest.json'), JSON.stringify(m, null, 2))
 }
 

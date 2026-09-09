@@ -56,6 +56,21 @@ function normaliseOrigin(raw) {
   return u.origin
 }
 
+//  A MATCH PATTERN HAS NO PORT. Firefox's match patterns are
+//  scheme://host/path; a host with a port is not a syntax error, it is a
+//  pattern that never matches anything, and `permissions.request` grants it
+//  happily. With `http://127.0.0.1:8081/*` granted, every fetch to the ship
+//  was CORS-checked as ordinary cross-origin traffic and failed on a
+//  response with no access-control-allow-origin — which the ship never
+//  sends, and should not. Proven with a bare probe extension in
+//  Thunderbird 147: the same fetch succeeds with `http://127.0.0.1/*`. So
+//  the pattern is the scheme and the bare host, which in Firefox matches
+//  every port on it.
+function patternFor(origin) {
+  const u = new URL(origin)
+  return `${u.protocol}//${u.hostname}/*`
+}
+
 class Api {
   constructor(origin) {
     this.origin = normaliseOrigin(origin)
@@ -63,7 +78,7 @@ class Api {
 
   //  The match pattern this origin needs, for permissions.request. Exactly
   //  one origin — never <all_urls>, and never a wildcard host.
-  get pattern() { return `${this.origin}/*` }
+  get pattern() { return patternFor(this.origin) }
 
   //  EVERY URL IN THIS FILE COMES THROUGH HERE. `path` is written by this
   //  file; anything interpolated into it is encoded by its caller.
@@ -218,6 +233,6 @@ class Api {
 }
 
 export {
-  Api, ApiError, UnreachableError, normaliseOrigin,
+  Api, ApiError, UnreachableError, normaliseOrigin, patternFor,
   BASE, MAX_BLOB, MAX_ATTACH, NOT_FETCHED,
 }
