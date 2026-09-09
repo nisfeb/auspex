@@ -367,12 +367,15 @@ export default function ThreadView({
   // click. Within a node that has an honest copy, that copy speaks.
   const pickedCopies = picked ? copiesOf(t.messages, picked) : []
   const target = mode === 'tree' && pickedCopies.length ? speaker(pickedCopies) : last
-  // Only ever true in the tree view: `last` above already falls back to
-  // a forged message when the whole thread is forged, and that is the
-  // list view's long-standing behaviour, not something to change here.
-  const targetForged = mode === 'tree' && pickedCopies.length
-    ? allForged(pickedCopies)
-    : false
+  // Only ever true in the tree view — and true of the DEFAULT selection
+  // too, not just a clicked one. On a thread where every copy is forged
+  // `last` above falls back to a forged message, so the node the tree
+  // opens on is a node nothing may point at, and it has to say so from
+  // the first render rather than only after the user clicks it. The list
+  // view keeps its long-standing behaviour: with no way to say "that
+  // one" it has nowhere else to fall back to, and that is not something
+  // to change here.
+  const targetForged = mode === 'tree' && allForged(copiesOf(t.messages, target.id))
   const noTarget = targetForged
     ? 'Every stored copy of this message failed its signature, so nothing can'
       + ' point at it: a reply naming it would carry a chain nobody signed.'
