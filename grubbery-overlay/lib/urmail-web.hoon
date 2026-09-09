@@ -185,7 +185,15 @@
         add+(ar:dejs:format so:dejs:format)
         archive+bo:dejs:format
     ==
-  ?:(?=(%| -.res) ~ `p.res)
+  ?:  ?=(%| -.res)  ~
+  =/  r  p.res
+  ::  AN EMPTY SUBJECT IS NOT A CONDITION, so it decodes to ~ rather
+  ::  than to [~ '']. Belt to +rule-ok's braces, which refuses the same
+  ::  shape at the writer: a rule whose only condition is an empty cord
+  ::  fires on every delivered chain, because +has-sub answers %.y for
+  ::  an empty needle by design. Normalising here means the shape is
+  ::  never spelled rather than spelled and then caught.
+  `r(subject ?~(subject.r ~ ?:(=('' u.subject.r) ~ subject.r)))
 ::
 ::  +de-id: {"id": "0v..."} -> the id. Shared by delete-draft,
 ::  send-draft and delete-rule, which differ only in what they act on.

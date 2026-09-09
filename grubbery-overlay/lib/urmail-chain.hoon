@@ -1451,13 +1451,33 @@
 ::    condition, so a rule is always a statement about some mail rather
 ::    than about all of it.
 ::
+::    AN EMPTY SUBJECT IS NOT A CONDITION, and the distinction is not
+::    pedantry. `[~ '']` is a cell, so a presence check passes it; the
+::    length check passes on zero bytes; and +has-sub answers %.y for an
+::    empty needle, deliberately, because that is what lets an absent
+::    search query mean "no filter" with no branch at any call site.
+::    Those three correct decisions compose into a rule that fires on
+::    every delivered chain - the exact rule this arm exists to refuse,
+::    arriving through the one door the presence check leaves open. A
+::    JSON body carrying "subject": "" decodes straight to it.
+::
+::    So a condition is present AND non-empty, here, once, rather than
+::    at each of the places that ask whether a rule has one.
+::
 ++  rule-ok
   |=  r=rule
   ^-  ?
-  ?&  ?|(?=(^ from.r) ?=(^ subject.r))
+  ?&  ?|(?=(^ from.r) (has-subject r))
       ?~(subject.r & (lte (met 3 u.subject.r) max-subj))
       (labels-ok add.r)
   ==
+::
+::  +has-subject: does this rule actually constrain the subject?
+::
+++  has-subject
+  |=  r=rule
+  ^-  ?
+  ?&(?=(^ subject.r) !=('' u.subject.r))
 ::
 ::  +rule-matches: one rule against one message. AND across the
 ::  conditions a rule actually sets; an absent condition is not a

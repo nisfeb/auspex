@@ -112,4 +112,23 @@
 ++  test-de-read-bad-id
   %+  expect-eq  !>(`(unit (set @uv))`~)
   !>  (de-read:web (jo '{"msg-ids":["~zod"]}'))
+::
+::  AN EMPTY SUBJECT DECODES TO ~, NOT TO [~ '']. The cell shape passes
+::  every presence check a rule is asked, and +has-sub answers %.y for
+::  an empty needle by design, so a rule carrying it fires on every
+::  delivered chain. The writer refuses it too; this is what stops the
+::  shape from ever being spelled.
+++  test-de-rule-empty-subject-is-no-subject
+  =/  got  (de-rule:web (jo '{"id":"0v1a","from":null,"subject":"","add":[],"archive":true}'))
+  ;:  weld
+    (expect !>(?=(^ got)))
+    (expect-eq !>(`(unit @t)`~) !>(?~(got ~ subject.u.got)))
+  ==
+::
+++  test-de-rule-keeps-a-real-subject
+  =/  got  (de-rule:web (jo '{"id":"0v1a","from":null,"subject":"invoice","add":["work"],"archive":false}'))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`[~ 'invoice']) !>(?~(got ~ subject.u.got)))
+    (expect-eq !>(`(list @t)`~['work']) !>(?~(got ~ add.u.got)))
+  ==
 --

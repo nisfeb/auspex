@@ -1105,6 +1105,28 @@
     (expect !>(!(rule-ok:urmail bad-label)))
   ==
 ::
+::  AN EMPTY SUBJECT IS NOT A CONDITION. [~ ''] is a cell, so a presence
+::  check passes it and the length check passes on zero bytes, and
+::  +has-sub answers %.y for an empty needle by design - so a rule
+::  carrying it fires on every delivered chain and, with archive set,
+::  empties the inbox permanently and silently. The test above stops at
+::  both-conditions-null and does not discriminate this at all.
+++  test-an-empty-subject-is-not-a-condition
+  =/  hollow=rule:sur  [%0 0v1 ~ `'' (sy ~[%everything]) &]
+  =/  real=rule:sur    [%0 0v1 ~ `'invoice' (sy ~[%everything]) &]
+  =/  m  (forge ~sampel-palnet ~ 'anything at all' 'body' ~2026.1.1 ~)
+  ;:  weld
+    (expect !>(!(rule-ok:urmail hollow)))
+    (expect !>((rule-ok:urmail real)))
+    ::  an empty sender-less rule paired with a real sender is fine: the
+    ::  refusal is about having NO condition, not about the empty cord
+    ::  being poisonous
+    (expect !>((rule-ok:urmail hollow(from `~sampel-palnet))))
+    ::  and the reason it has to be refused: it matches everything
+    (expect !>((rule-matches:urmail hollow unsigned.m)))
+    (expect !>(!(rule-matches:urmail real unsigned.m)))
+  ==
+::
 ++  test-rule-matches-and-across-its-conditions
   =/  m  (forge ~sampel-palnet ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
   =/  both=rule:sur    [%0 0v1 `~sampel-palnet `'invoice' ~ |]
