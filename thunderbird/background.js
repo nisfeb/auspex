@@ -35,7 +35,7 @@ const DEFAULTS = {
   lastSync: 0,
   folders: {},              // name → MailFolderId
   snapshot: {},             // threadId → {last, count, archived, labels}
-  imported: {},             // auspex msg id → {tbId, folder, threadId, read, flagged, junk}
+  imported: {},             // auspex msg id → {tbId, folder, read, flagged, junk}
   counts: { messages: 0, threads: 0 },
 }
 
@@ -179,7 +179,6 @@ async function importOne(api, item, folders, imported, flags) {
   imported[msg.id] = {
     tbId: header.id,
     folder: item.folder,
-    threadId: item.threadId,
     read: !!msg.read,
     flagged: flags.flagged,
     junk: flags.junk,
@@ -214,10 +213,9 @@ async function syncNow() {
     const remote = []
 
     //  The star and the flame live on the THREAD and Thunderbird's flags
-    //  live on the MESSAGE, so both directions need the thread of a
-    //  message: this map is filled for every thread looked at this sync,
-    //  and `imported[id].threadId` is what the relay reads later.
-    const want = new Map()   // threadId → {flagged, junk}
+    //  live on the MESSAGE, so applying them needs the membership: the
+    //  flags of each thread looked at this sync, and the ids in it.
+    const want = new Map()   // threadId → {flagged, junk, ids}
 
     for (const id of wanted) {
       let thread
@@ -232,12 +230,7 @@ async function syncNow() {
       remote.push(...(thread.messages || []))
       const entry = byThread.get(id) || thread
       const flags = flagsFor(entry)
-      want.set(id, flags)
-      //  Every message of this thread now knows its thread, including the
-      //  ones imported by an older version that recorded no such field.
-      for (const m of (thread.messages || [])) {
-        if (imported[m.id]) imported[m.id].threadId = id
-      }
+      want.set(id, { ...flags, ids: (thread.messages || []).map((m) => m.id) })
       const plan = planThread(thread, byThread.get(id), ship, importedIds)
       for (const item of plan) {
         try {
@@ -250,7 +243,7 @@ async function syncNow() {
           //  failure: record it as imported so the next sync moves on.
           if (/Message-ID/i.test(String(e && e.message))) {
             imported[item.msg.id] = {
-              tbId: null, folder: item.folder, threadId: id,
+              tbId: null, folder: item.folder,
               read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
             }
             importedIds.add(item.msg.id)
@@ -278,18 +271,20 @@ async function syncNow() {
     //  the read pass above is written that way: an update fires
     //  onUpdated whether or not it changed anything, and onUpdated is the
     //  relay back to the ship.
-    for (const rec of Object.values(imported)) {
-      if (rec.tbId === null || !want.has(rec.threadId)) continue
-      const wantFlags = want.get(rec.threadId)
-      let current
-      try { current = await browser.messages.get(rec.tbId) } catch { continue }
-      const patch = flagUpdate(current, wantFlags)
-      //  the record moves FIRST, so the onUpdated this provokes sees
-      //  flags that already match and posts nothing back.
-      rec.flagged = wantFlags.flagged
-      rec.junk = wantFlags.junk
-      if (!patch) continue
-      try { await browser.messages.update(rec.tbId, patch) } catch { /* gone */ }
+    for (const wantFlags of want.values()) {
+      for (const msgId of wantFlags.ids) {
+        const rec = imported[msgId]
+        if (!rec || rec.tbId === null) continue
+        let current
+        try { current = await browser.messages.get(rec.tbId) } catch { continue }
+        const patch = flagUpdate(current, wantFlags)
+        //  the record moves FIRST, so the onUpdated this provokes sees
+        //  flags that already match and posts nothing back.
+        rec.flagged = wantFlags.flagged
+        rec.junk = wantFlags.junk
+        if (!patch) continue
+        try { await browser.messages.update(rec.tbId, patch) } catch { /* gone */ }
+      }
     }
 
     await setState({
@@ -372,6 +367,19 @@ async function flushFlags() {
   } catch (e) { await classify(e) }
 }
 
+//  WHICH THREAD a mirrored message belongs to, read off the message
+//  itself rather than out of storage. `X-Auspex-Thread` is written at
+//  import by lib/rfc822.js and every mirrored message has one, including
+//  the ones imported by a version that had never heard of labels — which
+//  is the whole reason the thread is not a field on the record.
+async function threadOf(tbId) {
+  try {
+    const full = await browser.messages.getFull(tbId)
+    const h = (full.headers && full.headers['x-auspex-thread']) || []
+    return h.length ? String(h[0]).trim() : null
+  } catch { return null }
+}
+
 //  THE ONE RELAY, for all three flags.
 //
 //  `changed` names the properties that moved; the values are read off the
@@ -392,14 +400,14 @@ browser.messages.onUpdated.addListener(async (message, changed) => {
   const rec = state.imported[id]
   if (!rec) return                                    // not ours
   let moved = false
+  let threadId
   for (const key of touched) {
     if (!!rec[key] === !!message[key]) continue       // already what we recorded
     rec[key] = !!message[key]
     moved = true
-    if (key === 'read') queueReadState(id, !!message.read)
-    //  A message imported before this version knows no thread, and a
-    //  label without one has nowhere to go. The next sync fills it in.
-    else if (rec.threadId) queueFlag(rec.threadId, key, !!message[key])
+    if (key === 'read') { queueReadState(id, !!message.read); continue }
+    if (threadId === undefined) threadId = await threadOf(message.id)
+    if (threadId) queueFlag(threadId, key, !!message[key])
   }
   if (moved) await setState({ imported: state.imported })
 })

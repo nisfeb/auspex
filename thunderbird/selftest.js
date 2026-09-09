@@ -150,17 +150,23 @@ export async function runSelftest(cfg, api) {
   //  outside reaches EVERY mirrored message of its thread and no message
   //  of any other.
 
-  //  Every mirrored message of one thread. `threadId` is on the imported
-  //  record precisely so the relay can find it; reading it back here is
-  //  also the proof that it was recorded.
-  const mirrored = async (threadId) => {
-    const imported = (await api.getState()).imported
-    return Object.entries(imported)
-      .filter(([, r]) => r.threadId === threadId && r.tbId !== null)
-      .map(([id, r]) => ({ id, tbId: r.tbId }))
-  }
-
   const shipThread = async (id) => (await api.apiFor()).thread(id)
+
+  //  Every mirrored message of one thread: the ship's own membership,
+  //  looked up in the mirror's bookkeeping. Asking the ship rather than
+  //  the mirror is what makes "EVERY message of that thread" mean the
+  //  thread's messages and not just the ones the mirror happens to agree
+  //  are in it.
+  const mirrored = async (threadId) => {
+    const t = await shipThread(threadId)
+    const imported = (await api.getState()).imported
+    const out = []
+    for (const m of (t.messages || [])) {
+      const rec = imported[m.id]
+      if (rec && rec.tbId !== null) out.push({ id: m.id, tbId: rec.tbId })
+    }
+    return out
+  }
 
   const flagsOf = async (ms) => {
     const out = []

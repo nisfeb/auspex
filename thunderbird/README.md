@@ -117,6 +117,11 @@ one message's click speak for its thread. Star one message of a thread and
 the next sync stars its siblings — that is the ship's answer coming back,
 not a bug.
 
+Which thread a starred message belongs to is read from its own
+`X-Auspex-Thread` header, not from anything the mirror wrote down, so a
+message mirrored by a version that had never heard of labels can be starred
+the moment you upgrade.
+
 **Thunderbird's junk filter training is not used.** The flame writes a label
 to the ship and nothing else; it does not train the local Bayesian filter,
 and no message is ever moved to a Junk folder. The mirror's folders are
