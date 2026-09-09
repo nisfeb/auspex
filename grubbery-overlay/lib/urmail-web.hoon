@@ -297,7 +297,10 @@
   ?:  (gth (met 3 data.i.ins) lim)  ~
   =/  o=(unit octs)  (de-b64 data.i.ins)
   ?~  o  ~
-  =/  rest=(unit (list up-file))  $(ins t.ins)
+  ::  recursion by ARM NAME, not $. ?~ narrowed `ins` to a lest, and a
+  ::  %= against that narrowing is the same widening trap +safe-name
+  ::  documents below.
+  =/  rest=(unit (list up-file))  (de-file-list t.ins lim)
   ?~  rest  ~
   `[[name.i.ins mime.i.ins u.o] u.rest]
 ::
@@ -342,7 +345,12 @@
   =/  res=@  (rsh [1 dif] (rep [0 6] (flop dat)))
   =/  amt=@ud  (met 3 res)
   =/  trl=@ud  ?:((lth len amt) 0 (sub len amt))
-  `[len (lsh [3 trl] (swp 3 res))]
+  ::  TRIMMED TO `len`, which is the declared length and the authority.
+  ::  +file-ok refuses an octs whose atom measures MORE than it declares,
+  ::  and +blob-hash hashes the pair, so a stray high byte is a file the
+  ::  sender and the receiver hash differently. `len` came from the digit
+  ::  count and nothing downstream may widen it.
+  `[len (end [3 len] (lsh [3 trl] (swp 3 res)))]
 ::
 ++  b64-digits
   |=  cs=(list @)
@@ -432,23 +440,28 @@
   =/  t=tape  (scag 128 keep)
   ?~  t  fallback
   ::  a name of nothing but dots is a path, not a name.
-  ?:  (levy t |=(c=@tD =(c '.')))  fallback
+  ::
+  ::  `tape`t, WIDENED AT THE CALL SITE. ?~ narrows t to a lest, +levy
+  ::  is a wet gate, and mulling it against a lest fails on its own
+  ::  internal $(a t.a) - the same shape recorded against +has-sub in
+  ::  the chain lib, and it bites every wet list gate called inside a ?~.
+  ?:  (levy `tape`t |=(c=@tD =(c '.')))  fallback
   (crip t)
 ::
 ++  name-bytes
-  |=  t=tape
+  |=  a=tape
   ^-  tape
-  ?~  t  ~
-  =/  c=@tD  i.t
-  =/  rest=tape  $(t t.t)
-  ?:  (lth c 0x20)   rest
-  ?:  (gth c 0x7e)   rest
-  ?:  =(c '/')       rest
-  ?:  =(c 0x5c)      rest
-  ?:  =(c '"')       rest
-  ?:  =(c 0x27)      rest
-  ?:  =(c ';')       rest
-  [c rest]
+  %+  skim  a
+  |=  c=@tD
+  ^-  ?
+  ?&  (gte c 0x20)
+      (lte c 0x7e)
+      !=(c '/')
+      !=(c 0x5c)
+      !=(c '"')
+      !=(c 0x27)
+      !=(c ';')
+  ==
 ::
 ::  +de-fetch: {"hash":"0v...","from":"~ship"} -> the fetch request.
 ::

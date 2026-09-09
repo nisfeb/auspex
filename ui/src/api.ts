@@ -173,12 +173,126 @@ export const thread = async (id: string): Promise<Thread | null> => {
   }
 }
 
+// The caps, mirrored from grubbery-overlay/lib/urmail-chain.hoon. A
+// GUARD RAIL, never the boundary: /api/send checks +files-ok on the
+// decoded bytes and refuses the send again. What these buy is a refusal
+// the user can act on — "this file is too big" at the moment they pick
+// it, rather than after a quarter-megabyte upload comes back 400.
+export const MAX_BLOB = 262144
+export const MAX_ATTACH = 16
+
+// One file on its way UP. `data` is standard base64 (padded, not
+// url-safe) of the file's bytes.
+//
+// WHY BASE64 AND NOT MULTIPART: /api/send already takes a JSON body and
+// the nexus's JSON decoder is jetted, so a 32MB body round-trips on a
+// request fiber in about a second — two orders above max-blob even with
+// MAX_ATTACH files in one send. The multipart alternative needed a
+// decoder the nexus cannot import, whose part type carries a bare atom
+// with no length and so drops a file's trailing zero bytes.
+export interface Upload {
+  name: string
+  mime: string
+  data: string
+}
+
+// Read a File as base64, without the data: prefix FileReader adds.
+//
+// readAsDataURL, not readAsText: text decoding would mangle every byte
+// above ASCII, and the hash the ship signs is taken over the bytes.
+export const toUpload = (f: File): Promise<Upload> =>
+  new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onerror = () => reject(new Error(`Could not read ${f.name}`))
+    r.onload = () => {
+      const s = String(r.result)
+      const comma = s.indexOf(',')
+      resolve({
+        name: f.name,
+        // The BROWSER's guess, and it is a guess: it comes off the file
+        // extension. It is sent, signed and shown as the sender's claim,
+        // and the download route never echoes it into a header without
+        // checking it against an allow-list first.
+        mime: f.type || 'application/octet-stream',
+        data: comma < 0 ? '' : s.slice(comma + 1),
+      })
+    }
+    r.readAsDataURL(f)
+  })
+
+// `files` is omitted entirely when there are none, so a send with no
+// attachment is byte-for-byte the request every earlier client made.
 export const send = (
   to: string[],
   subject: string,
   body: string,
   prev: string | null,
-) => post('/api/send', { to, subj: subject, body, prev })
+  files: Upload[] = [],
+) => post('/api/send', {
+  to, subj: subject, body, prev,
+  ...(files.length ? { files } : {}),
+})
+
+// ── attachment bytes ─────────────────────────────────────────────────
+
+// The download route. `name` and `mime` ride in the query, out of the
+// signed attachment record the client just rendered, because a blob grub
+// on the ship is bytes and an arrival time and nothing else. They are
+// hostile either way — signed by whoever wrote the message, in a chain
+// any ship may deliver — and the nexus sanitises both before either one
+// reaches a header.
+const blobUrl = (a: Attachment) =>
+  `${BASE}/api/blob/${a.hash}`
+  + `?name=${encodeURIComponent(a.name)}&mime=${encodeURIComponent(a.mime)}`
+
+// NOT FETCHED IS NOT NOT FOUND. Bytes are never pushed, so an
+// attachment on a message we hold and have not pulled is the ordinary
+// state of an inbound file. The nexus answers 409 for it; the caller
+// turns that into a Fetch control, not into "this file is gone".
+export const NOT_FETCHED = 409
+
+export const getAttachment = async (a: Attachment): Promise<Blob | null> => {
+  const res = await fetch(blobUrl(a), { headers: { accept: '*/*' } })
+  if (res.status === NOT_FETCHED) return null
+  if (!res.ok) {
+    let why = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      if (j && typeof j.error === 'string') why = j.error
+    } catch { /* the error path is JSON; a non-JSON body keeps the code */ }
+    throw new ApiError(res.status, why)
+  }
+  return await res.blob()
+}
+
+// Ask the ship to keen for the bytes. `from` is a HINT about where to
+// look and nothing more: any ship holding the bytes may serve them, the
+// hash proves them, and naming the wrong ship costs a miss.
+//
+// This answers as soon as the writer has queued the request, never when
+// the bytes land — the keen runs on its own fiber with a deadline per
+// case probe. Nothing pushes the arrival either: a blob arriving does
+// not move the change beacon, because it is not message content. The
+// caller retries getAttachment instead.
+export const fetchAttachment = (a: Attachment, from: string) =>
+  post('/api/fetch-blob', { hash: a.hash, from })
+
+// Hand a downloaded blob to the browser under the name the message
+// claims. The nexus already sent Content-Disposition with its own
+// sanitised copy of that name; this is the same string, and the browser
+// applies its own rules to it.
+export const saveBlob = (b: Blob, name: string) => {
+  const url = URL.createObjectURL(b)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name || 'attachment'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Revoked on a turn of its own: revoking synchronously races the
+  // click in some browsers and the download arrives empty.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}
 
 // The escape hatch for a thread frozen at a capacity limit, and the only
 // way to remove anything from the tree short of culling it by hand. The

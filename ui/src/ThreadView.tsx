@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   deleteThread, isShip, markRead, markUnread, ourShip, send, setArchived, setLabel,
-  thread, type Message, type Thread,
+  thread, toUpload, type Message, type Thread,
 } from './api'
 import VerdictBadge from './VerdictBadge'
+import { AttachmentRow, FilePicker } from './Attachments'
 import type { ForwardIntent } from './Compose'
 
 // The default reply audience.
@@ -32,17 +33,6 @@ function defaultRecipients(th: Thread): string[] {
   }
   ships.delete(ourShip)
   return [...ships].sort()
-}
-
-// `size` in something a person reads. It is signed and tied to the
-// content hash, so unlike the name and the mime type it cannot drift
-// from the bytes — which makes it the one attachment field worth
-// rendering prominently.
-function fileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown size'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export default function ThreadView({
@@ -79,6 +69,11 @@ export default function ThreadView({
   const [pending, setPending] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  // Files on the reply. Not seeded from the message being replied to:
+  // re-sending someone else's attachment would re-sign its metadata
+  // under our name, and the bytes are already fetchable by anyone on
+  // the chain from their own content hash.
+  const [files, setFiles] = useState<File[]>([])
 
   // Tracks the id the effect below most recently committed to, so
   // onReply's post-send refetch (see below) can tell whether the user has
@@ -368,7 +363,8 @@ export default function ThreadView({
     // already went out; clearing the draft and saying so (not "could not
     // send") avoids the user resending a message that already landed.
     try {
-      await send(to, `re: ${last.subject}`, reply, last.id)
+      const ups = await Promise.all(files.map(toUpload))
+      await send(to, `re: ${last.subject}`, reply, last.id, ups)
     } catch (e) {
       console.error(e)
       setSendError('Could not send that reply. Try again.')
@@ -376,6 +372,7 @@ export default function ThreadView({
       return
     }
     setReply('')
+    setFiles([])
     onSent()
     try {
       const th = await thread(forId)
@@ -512,12 +509,11 @@ export default function ThreadView({
               Sent as <code>{m['body-mime']}</code>; shown as plain text.
             </p>
           )}
-          {/* ATTACHMENTS: name and size, and nothing that acts on them.
-              Download is deliberately not here — the bytes are fetched
-              over a keen and that is its own slice. What this buys now is
-              that a message carrying a file stops being invisible: until
-              the API emitted the list, a client could not have shown one
-              however it was written.
+          {/* ATTACHMENTS. Metadata plus the one action the bytes can
+              honestly support: download what this ship holds, and fetch
+              what it does not. Nothing is pushed, so an attachment we
+              have not pulled is the ordinary state of an inbound file
+              and says so rather than reading as an error.
 
               `mime` is rendered as text, on its own line, marked as the
               sender's claim. It never picks an icon, never picks a
@@ -533,18 +529,12 @@ export default function ThreadView({
           {(m.attachments?.length ?? 0) > 0 && (
             <ul className="mt-3 space-y-1">
               {m.attachments!.map((a, j) => (
-                <li
-                  key={j}
-                  className="rounded border border-neutral-200 px-3 py-2 text-sm"
-                >
-                  <span className="break-all">{a.name || '(unnamed file)'}</span>
-                  <span className="ml-2 text-neutral-500">{fileSize(a.size)}</span>
-                  {a.mime && (
-                    <span className="ml-2 text-xs text-neutral-400">
-                      sender says <code>{a.mime}</code>
-                    </span>
-                  )}
-                </li>
+                // `from` is a HINT about where to look for the bytes and
+                // nothing more: any ship holding them may serve them,
+                // the hash proves them, and naming the wrong ship costs
+                // a miss and never a bad file. The author is the best
+                // guess available from a message alone.
+                <AttachmentRow key={j} a={a} from={m.from} />
               ))}
             </ul>
           )}
@@ -602,10 +592,15 @@ export default function ThreadView({
         placeholder="Reply"
         className="h-28 w-full rounded border border-neutral-300 p-3"
       />
-      <div className="mt-2 flex items-center gap-3">
+      <FilePicker files={files} onChange={setFiles} disabled={sending} />
+      <div className="mt-3 flex items-center gap-3">
         <button
           onClick={onReply}
-          disabled={!reply.trim() || sending || (recipients.length === 0 && !pending.trim())}
+          disabled={
+            (!reply.trim() && files.length === 0)
+            || sending
+            || (recipients.length === 0 && !pending.trim())
+          }
           className="rounded-full bg-blue-600 px-6 py-2 text-white disabled:opacity-40"
         >
           {sending ? 'Sending…' : 'Send'}

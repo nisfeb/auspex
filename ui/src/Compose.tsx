@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft, isShip, newId, saveDraft, send, sendDraft, type Draft,
+  deleteDraft, isShip, newId, saveDraft, send, sendDraft, toUpload, type Draft,
 } from './api'
+import { FilePicker } from './Attachments'
 
 // What a Forward control hands the composer: the message the new message
 // will point `prev` at, the subject to base the forwarded one on, and how
@@ -52,6 +53,14 @@ export default function Compose({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  // ATTACHMENTS DO NOT SURVIVE A DRAFT. A draft is a local grub with no
+  // files field, and the writer's %save-draft carries none — so a
+  // composer with a file attached takes the direct /api/send path and
+  // never the save-then-send-draft one. Resuming a draft starts with no
+  // files for the same reason: there were never any on disk to restore,
+  // and pretending otherwise would send a message the user believes
+  // carries a file it does not.
+  const [files, setFiles] = useState<File[]>([])
 
   // The draft this panel owns. Minted once, on mount, and never changed:
   // a new id per save would lay one grub per keystroke burst and leave
@@ -138,7 +147,18 @@ export default function Compose({
         setSending(false)
         return
       }
-      if (written.current) {
+      // A FILE ON THE COMPOSER TAKES THE DIRECT PATH. %send-draft signs
+      // what is on disk, and what is on disk has no files: routing an
+      // attached send through it would drop every attachment silently
+      // and report success. The draft, if one was written, is deleted
+      // after the send the way discarding one is.
+      if (files.length > 0) {
+        const ups = await Promise.all(files.map(toUpload))
+        await send(list, subject, body, forward ? forward.prev : resume ? resume.prev : null, ups)
+        if (written.current) {
+          try { await deleteDraft(draftId.current) } catch (e) { console.error(e) }
+        }
+      } else if (written.current) {
         // SIGN THE DRAFT AND DELETE IT, in one action at the writer.
         // Saving first means the message that goes out is exactly the
         // one on disk, and the writer deletes the draft only if the
@@ -246,7 +266,8 @@ export default function Compose({
           placeholder={forward ? 'Add a note (optional)' : undefined}
           className="h-56 w-full resize-none py-2 text-sm outline-none"
         />
-        <div className="flex items-center gap-3">
+        <FilePicker files={files} onChange={setFiles} disabled={sending} />
+        <div className="mt-3 flex items-center gap-3">
           <button
             onClick={onSend}
             disabled={!to.trim() || bad.length > 0 || sending}
