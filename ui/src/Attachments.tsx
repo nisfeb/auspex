@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   fetchAttachment, getAttachment, MAX_ATTACH, MAX_BLOB, saveBlob,
   type Attachment,
@@ -134,15 +134,27 @@ type State =
 export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
   const [state, setState] = useState<State>({ at: 'idle' })
 
+  // IS THIS ROW STILL ON SCREEN? `pull` below sleeps and asks up to
+  // twenty times over forty seconds, and a thread the user navigated
+  // away from unmounts every row in it. Without this the poll keeps
+  // running against a dead component: twenty more requests to the ship
+  // for bytes nobody is waiting on, each one ending in a setState React
+  // discards. Checked after every await, because every await is a point
+  // where the component can have gone.
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+
   const download = async () => {
     setState({ at: 'busy', why: 'Opening…' })
     try {
       const b = await getAttachment(a)
+      if (!alive.current) return
       if (b === null) { setState({ at: 'absent' }); return }
-      saveBlob(b, a.name)
+      saveBlob(b)
       setState({ at: 'idle' })
     } catch (e) {
       console.error(e)
+      if (!alive.current) return
       setState({ at: 'error', why: e instanceof Error ? e.message : 'Could not open that file.' })
     }
   }
@@ -155,20 +167,25 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
       await fetchAttachment(a, from)
     } catch (e) {
       console.error(e)
+      if (!alive.current) return
       setState({ at: 'error', why: e instanceof Error ? e.message : 'Could not ask for that file.' })
       return
     }
+    if (!alive.current) return
     for (let i = 0; i < POLL_TRIES; i += 1) {
       await new Promise((r) => { setTimeout(r, POLL_MS) })
+      if (!alive.current) return
       try {
         const b = await getAttachment(a)
+        if (!alive.current) return
         if (b !== null) {
-          saveBlob(b, a.name)
+          saveBlob(b)
           setState({ at: 'idle' })
           return
         }
       } catch (e) {
         console.error(e)
+        if (!alive.current) return
         setState({ at: 'error', why: e instanceof Error ? e.message : 'Could not open that file.' })
         return
       }

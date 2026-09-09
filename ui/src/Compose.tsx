@@ -285,6 +285,20 @@ export default function Compose({
           className="field mt-1 h-40 resize-none border-b-0 md:h-48"
         />
         <FilePicker files={files} onChange={setFiles} disabled={sending} />
+        {/* SAID WHILE THE FILES ARE ATTACHED, not on the way out. A
+            draft grub has no files field, so the autosave that runs
+            every 1.5s and the save on close both write this message
+            without its attachments — and a resumed draft comes back
+            with none. That is a real limit of the draft store, and the
+            one thing that would make it a data-loss bug is the user not
+            knowing. It is a line of text and not a confirm dialog: the
+            composer is not closing yet, there is nothing to confirm,
+            and the fix is for the user to press Send. */}
+        {files.length > 0 && (
+          <p className="mt-1 text-[11px] text-warn-ink">
+            Attachments are not saved with drafts — send this message to keep them.
+          </p>
+        )}
         {/* ONE FILLED BUTTON ON THIS SURFACE, and it is Send. Discard
             is text-weight: it is the destructive one, and a control that
             competes for the eye with the primary action is a control

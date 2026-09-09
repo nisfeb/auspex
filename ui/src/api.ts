@@ -286,8 +286,15 @@ export const send = (
 // hostile either way — signed by whoever wrote the message, in a chain
 // any ship may deliver — and the nexus sanitises both before either one
 // reaches a header.
+//
+// EVERY interpolated field is encoded, the hash included. It reaches the
+// client as a `0v…` cord off a signed record and the route parses it
+// with `slaw %uv`, so a hash that is not one is a 400 — but "the value
+// is well formed by the time anyone looks" is not a reason to build a
+// URL by concatenation, and the two fields beside it were already
+// encoded.
 const blobUrl = (a: Attachment) =>
-  `${BASE}/api/blob/${a.hash}`
+  `${BASE}/api/blob/${encodeURIComponent(a.hash)}`
   + `?name=${encodeURIComponent(a.name)}&mime=${encodeURIComponent(a.mime)}`
 
 // NOT FETCHED IS NOT NOT FOUND. Bytes are never pushed, so an
@@ -296,7 +303,36 @@ const blobUrl = (a: Attachment) =>
 // turns that into a Fetch control, not into "this file is gone".
 export const NOT_FETCHED = 409
 
-export const getAttachment = async (a: Attachment): Promise<Blob | null> => {
+// Bytes, plus the name the SERVER chose for them.
+export interface Download {
+  blob: Blob
+  name: string
+}
+
+// The filename out of Content-Disposition, or null if the header is not
+// there or not the shape this nexus sends.
+//
+// THE SERVER'S NAME, NEVER THE MESSAGE'S. `name` on an attachment is
+// signed and hostile — a signature proves the author chose the string,
+// not that it is safe — and the nexus's +safe-name is what makes it a
+// filename: separators, quotes, backslashes, semicolons, control bytes
+// and every byte above ASCII are dropped, it is capped at 128, and a
+// name that survives as nothing becomes the hash. Handing the raw name
+// to `a.download` instead put that sanitiser on the wrong side of the
+// boundary: it went out in the header and the browser saved under the
+// unsanitised original, leaving the browser's own rules as the only
+// guard on a string an attacker signed.
+//
+// The quoted form is exact rather than lenient BECAUSE of that
+// sanitiser: no name the nexus emits can contain a quote, so there is
+// no escaping to interpret and nothing to guess at.
+const dispositionName = (h: string | null): string | null => {
+  if (h === null) return null
+  const m = /;\s*filename="([^"]*)"/.exec(h)
+  return m && m[1] ? m[1] : null
+}
+
+export const getAttachment = async (a: Attachment): Promise<Download | null> => {
   const res = await fetch(blobUrl(a), { headers: { accept: '*/*' } })
   if (res.status === NOT_FETCHED) return null
   if (!res.ok) {
@@ -307,7 +343,11 @@ export const getAttachment = async (a: Attachment): Promise<Blob | null> => {
     } catch { /* the error path is JSON; a non-JSON body keeps the code */ }
     throw new ApiError(res.status, why)
   }
-  return await res.blob()
+  // The hash is the fallback, which is also what +safe-name falls back
+  // to: a file that arrives with no usable name downloads as its content
+  // address rather than as a string nobody checked.
+  const name = dispositionName(res.headers.get('content-disposition'))
+  return { blob: await res.blob(), name: name ?? a.hash }
 }
 
 // Ask the ship to keen for the bytes. `from` is a HINT about where to
@@ -322,15 +362,16 @@ export const getAttachment = async (a: Attachment): Promise<Blob | null> => {
 export const fetchAttachment = (a: Attachment, from: string) =>
   post('/api/fetch-blob', { hash: a.hash, from })
 
-// Hand a downloaded blob to the browser under the name the message
-// claims. The nexus already sent Content-Disposition with its own
-// sanitised copy of that name; this is the same string, and the browser
-// applies its own rules to it.
-export const saveBlob = (b: Blob, name: string) => {
-  const url = URL.createObjectURL(b)
+// Hand a downloaded blob to the browser under the name the SHIP sent
+// back in Content-Disposition — see `dispositionName`. This function is
+// deliberately given no way to name a file itself: the sanitised name
+// travels with the bytes, so there is no second string here to get
+// wrong.
+export const saveBlob = (d: Download) => {
+  const url = URL.createObjectURL(d.blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = name || 'attachment'
+  a.download = d.name || 'attachment'
   document.body.appendChild(a)
   a.click()
   a.remove()

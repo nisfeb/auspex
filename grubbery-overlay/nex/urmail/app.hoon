@@ -1800,9 +1800,17 @@
   =/  id=@ta  (scot %uv (sham [h who]))
   ;<  ~  bind:m
     (put-file [%& %& (weld root /fetch) id] [/urmail %fetchreq] [%0 h who])
-  ::  %.n: a queued request is not something any reader renders. The
-  ::  bump that matters is +take-blob's, when the bytes actually land
-  ::  and the attachment becomes readable.
+  ::  %.n, AND +take-blob ANSWERS %.n TOO: neither queueing the fetch
+  ::  nor the bytes arriving moves /beacon/rev, so nothing on this path
+  ::  ever bumps it. A queued request is not something any reader
+  ::  renders, and an arrival is not message content either - no
+  ::  message appeared, none changed, no listing row reads differently.
+  ::  The reason it must stay that way is that the ANSWER COMES FROM A
+  ::  PEER: a bump here would let whoever serves the bytes decide when
+  ::  this ship refetches its whole mailbox, at O(total stored
+  ::  messages) per open tab. The waiting tab polls GET /api/blob
+  ::  instead, which is a route it was going to call anyway. See
+  ::  +take-blob for the same argument at the other end.
   ;<  ~  bind:m  (note root 'fetch-blob' & 'queued')
   (pure:m |)
 ::
@@ -2570,6 +2578,14 @@
     (serve-ui eyre-id %'manifest.json')
   ?:  &(=(`path`[%'sw.js' ~] suffix) =(%'GET' meth))
     (serve-ui eyre-id %'sw.js')
+  ::  the launcher tile's icon, and the manifest's. It is a NEXUS-ROOT
+  ::  grub rather than one of the four under /app - the tiles nexus
+  ::  pulls it from there through /grubbery/tiles/icon/urmail - so it
+  ::  needs a route of its own even though +serve-ui serves it. Without
+  ::  this arm the path +on-load's comment names 404s, which is what
+  ::  drove the manifest to carry the icon as a data: URI instead.
+  ?:  &(=(`path`[%'icon.svg' ~] suffix) =(%'GET' meth))
+    (serve-ui eyre-id %'icon.svg')
   ::  GET /api/thread/<id>: the id is the last segment, so this cannot
   ::  sit in the table below, which keys on the whole suffix. The ?= comes
   ::  FIRST in the &, so the branch can reach into the path it matched.
@@ -2629,9 +2645,15 @@
       %'app.js'         'text/javascript'
       %'sw.js'          'text/javascript'
       %'manifest.json'  'application/manifest+json'
+      %'icon.svg'       'image/svg+xml'
     ==
   ;<  root=path  bind:m  nexus-root
-  ;<  pv=view:nexus  bind:m  (peek:io [%& %& (weld root /app) nam] ~)
+  ::  the client's four files are grubs under /app; the icon is a grub
+  ::  at the nexus ROOT, because that is where the tiles nexus reads it
+  ::  from. One arm, two directories, rather than a second copy of the
+  ::  peek-and-unwrap for one file.
+  =/  dir=path  ?:(=(%'icon.svg' nam) root (weld root /app))
+  ;<  pv=view:nexus  bind:m  (peek:io [%& %& dir nam] ~)
   ?.  ?=([%file *] pv)  (send-err eyre-id 404 'not found')
   =/  res=(each mime tang)  (mule |.(!<(mime (need-vase:tarball sang.pv))))
   ?:  ?=(%| -.res)  (send-err eyre-id 500 'bad asset')

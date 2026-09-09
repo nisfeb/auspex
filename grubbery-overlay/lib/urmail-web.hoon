@@ -284,8 +284,12 @@
     ==
   ?:  ?=(%| -.res)  ~
   ?:  (gth (lent p.res) most)  ~
-  ::  four base64 characters per three bytes, plus padding.
-  (de-file-list p.res (add 4 (mul 4 (div (add cap 2) 3))))
+  ::  four base64 characters per three bytes, ROUNDED UP - and the
+  ::  rounding IS the padding, so there is nothing to add for it. A
+  ::  spare +4 admits one more base64 quantum through the cheap gate,
+  ::  which +files-ok then refuses after paying for a full decode of a
+  ::  file it was always going to reject.
+  (de-file-list p.res (mul 4 (div (add cap 2) 3)))
 ::
 ++  de-file-list
   |=  [ins=(list [name=@t mime=@t data=@t]) lim=@ud]
@@ -314,35 +318,68 @@
 ::    size that makes it hurt. This does the same arithmetic over jetted
 ::    atom ops: one +rip in, one +rep and one +swp out.
 ::
-::    The REDUCTION is zuse's, kept line for line, because it is the
-::    part that is easy to get subtly wrong: base64 is big-endian
-::    within each 24-bit group and an urbit atom is little-endian, so
-::    the digits are flopped before +rep, the padding bits shifted off,
-::    the bytes swapped, and the result shifted back up by however many
-::    LEADING ZERO BYTES the swap could not carry. `len` is computed
-::    from the digit count and never from +met, which is the whole
-::    reason a file ending - or beginning - in a zero byte survives.
+::    The REDUCTION is zuse's, because it is the part that is easy to
+::    get subtly wrong: base64 is big-endian within each 24-bit group
+::    and an urbit atom is little-endian, so the digits reach +rep in
+::    reverse, the padding bits are shifted off, the bytes swapped, and
+::    the result shifted back up by however many LEADING ZERO BYTES the
+::    swap could not carry. `len` is computed from the digit count and
+::    never from +met, which is the whole reason a file ending - or
+::    beginning - in a zero byte survives.
+::
+::    EVERYTHING AROUND THE REDUCTION IS ARITHMETIC ON THE ATOM, and
+::    that is the fix for a measured cost, not a preference. +de:json
+::    ahead of this is jetted; every arm here is interpreted, so a
+::    traversal of a 350K list is a traversal nobody jets away. The
+::    first shape walked that list six times over - +lent, two +snags,
+::    a +scag, a second +lent and two +flops - around a per-character
+::    ladder. The counts now come from +met and subtraction, the
+::    padding from +cut, the trim from +end, and the one remaining walk
+::    is the character loop itself. See the spec's
+::    "Bytes across the HTTP surface" for what that measured.
 ::
 ++  de-b64
   |=  a=@t
   ^-  (unit octs)
-  =/  cs=(list @)  (rip 3 a)
-  =/  n=@ud  (lent cs)
+  ::  the CHARACTER COUNT, from +met and not from +lent. An atom's byte
+  ::  length is one jetted measurement where +lent walks the list, and
+  ::  no base64 character is a zero byte, so nothing is lost to the
+  ::  measurement.
+  =/  n=@ud  (met 3 a)
+  ::  the padding, read off the ATOM with +cut rather than off a list
+  ::  with +snag. +snag walks to its index, and the index here is the
+  ::  end of a ~350K character encoding.
   =/  lap=@ud
-    ?:  &((gte n 2) =('=' (snag (sub n 2) cs)) =('=' (snag (dec n) cs)))  2
-    ?:  &((gte n 1) =('=' (snag (dec n) cs)))  1
+    ?:  ?&  (gte n 2)
+            =('=' (cut 3 [(sub n 2) 1] a))
+            =('=' (cut 3 [(dec n) 1] a))
+        ==
+      2
+    ?:  &((gte n 1) =('=' (cut 3 [(dec n) 1] a)))  1
     0
-  =/  got=(unit (list @))  (b64-digits (scag (sub n lap) cs))
-  ?~  got  ~
-  =/  dat=(list @)  u.got
-  =/  lat=@ud  (lent dat)
+  ::  the digit count is the character count less the padding, which is
+  ::  arithmetic - the previous shape built the digit list first and
+  ::  then measured it with a second +lent.
+  =/  lat=@ud  (sub n lap)
   =/  dif=@ud  (~(dif fo 4) 0 lat)
   ::  padding is REQUIRED and must be exactly the missing digits. A
   ::  digit count of 4n+1 cannot be base64 at all: dif is 3 and no
   ::  amount of padding matches it.
   ?.  =(dif lap)  ~
+  ::  +end trims the padding off the ATOM, so the list +rip builds holds
+  ::  digits and nothing else. +scag built a second list as long as the
+  ::  first to drop at most two characters from its end.
+  =/  got=(unit (list @))  (b64-digits (rip 3 (end [3 lat] a)))
+  ?~  got  ~
   =/  len=@ud  (sub (mul 3 (div (add lat dif) 4)) dif)
-  =/  res=@  (rsh [1 dif] (rep [0 6] (flop dat)))
+  ::  NO +flop, IN EITHER DIRECTION. +b64-digits answers LOWEST-ORDER
+  ::  DIGIT FIRST, which is the order +rep consumes - base64 is
+  ::  big-endian within its 24-bit group and an urbit atom is
+  ::  little-endian. The previous shape flopped the accumulator back
+  ::  into reading order and then flopped it again to feed +rep: two
+  ::  full traversals of a 350K list, per file, to rebuild the list the
+  ::  loop had already produced.
+  =/  res=@  (rsh [1 dif] (rep [0 6] u.got))
   =/  amt=@ud  (met 3 res)
   =/  trl=@ud  ?:((lth len amt) 0 (sub len amt))
   ::  TRIMMED TO `len`, which is the declared length and the authority.
@@ -352,25 +389,53 @@
   ::  count and nothing downstream may widen it.
   `[len (end [3 len] (lsh [3 trl] (swp 3 res)))]
 ::
+::  +b64-table: character to digit, as ONE ATOM indexed by character.
+::
+::    Byte `c` of this atom is the base64 value of character `c` PLUS
+::    ONE, so the zero that +cut answers for a byte outside the alphabet
+::    - and for every index past the end of the table - is "not a
+::    digit". The offset is what lets one +cut do both the lookup and
+::    the validation.
+::
+::    Built from the alphabet rather than written out as a 123-byte
+::    literal: a hand-typed table is a transcription error waiting to
+::    happen, it does not fit on a line, and 64 iterations once per file
+::    is not a cost when the loop it serves runs 350K times.
+::
+++  b64-table
+  ^-  @
+  =/  al=@t
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  =/  i=@ud  0
+  =|  t=@
+  |-  ^-  @
+  ?:  =(i 64)  t
+  $(i +(i), t (con t (lsh [3 (cut 3 [i 1] al)] +(i))))
+::
+::  +b64-digits: every character's digit, LOWEST-ORDER DIGIT FIRST, or ~
+::  if any character is not one.
+::
+::    ONE +cut PER CHARACTER against +b64-table, where this was a ladder
+::    of five range comparisons behind a gate call. THIS LOOP IS THE
+::    TRANSPORT'S COST: it runs once per character of the encoding -
+::    ~350K times for one max-blob file, up to 16 files in a send - on
+::    the request fiber holding the connection open. +de:json:html above
+::    it is jetted; this is not, and the measurement in the spec is of
+::    this arm.
+::
+::    The accumulator is answered as it was built, reversed, because
+::    reversed is what +rep wants. See +de-b64.
+::
 ++  b64-digits
   |=  cs=(list @)
   ^-  (unit (list @))
+  =/  tbl=@  b64-table
   =|  acc=(list @)
   |-  ^-  (unit (list @))
-  ?~  cs  `(flop acc)
-  =/  v=(unit @)  (b64-digit i.cs)
-  ?~  v  ~
-  $(cs t.cs, acc [u.v acc])
-::
-++  b64-digit
-  |=  c=@
-  ^-  (unit @)
-  ?:  &((gte c 'A') (lte c 'Z'))  `(sub c 'A')
-  ?:  &((gte c 'a') (lte c 'z'))  `(add 26 (sub c 'a'))
-  ?:  &((gte c '0') (lte c '9'))  `(add 52 (sub c '0'))
-  ?:  =(c '+')  `62
-  ?:  =(c '/')  `63
-  ~
+  ?~  cs  `acc
+  =/  v=@  (cut 3 [i.cs 1] tbl)
+  ?:  =(0 v)  ~
+  $(cs t.cs, acc [(dec v) acc])
 ::
 ::  ── hostile signed strings, at the header boundary ──────────────────
 ::

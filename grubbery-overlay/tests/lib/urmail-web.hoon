@@ -219,6 +219,51 @@
       0
       4
 ::
+::  THE BOUNDARY, EXACTLY. `lim` is four base64 characters per three
+::  bytes ROUNDED UP - which is the encoded length of a cap-sized file,
+::  padding included, because the rounding IS the padding. With cap 3
+::  that is 4 characters, and the arithmetic is the same at 262.144,
+::  where it is 349.528.
+::
+::  The +4 this replaces let one more base64 quantum through the cheap
+::  gate: a payload decoding to cap+5 bytes was fully decoded and then
+::  refused by +files-ok, which is a quarter-megabyte of interpreted
+::  work spent on a file that was never going to be stored.
+++  test-de-files-takes-a-cap-sized-file
+  =/  got
+    %^  de-files:web
+      (jo '{"files":[{"name":"a","mime":"t","data":"YWJj"}]}')
+    3
+    4
+  %+  expect-eq  !>(`(unit up-file:web)`[~ ['a' 't' 3 'abc']])
+  !>  ?~(got ~ `(snag 0 u.got))
+::
+::  one more quantum, REFUSED BEFORE ANY OF IT IS DECODED.
+++  test-de-files-refuses-one-quantum-past-the-cap
+  %+  expect-eq  !>(`(unit (list up-file:web))`~)
+  !>  %^  de-files:web
+        (jo '{"files":[{"name":"a","mime":"t","data":"YWJjZA=="}]}')
+      3
+      4
+::
+::  and at the real cap, in the numbers the transport was measured on: a
+::  max-blob file is 262.144 bytes and encodes to 349.528 characters, so
+::  349.532 - one quantum past it - is refused on its length. Written
+::  out rather than reasoned about because this is the arithmetic a
+::  request fiber's whole cost hangs on.
+++  test-de-files-refuses-one-quantum-past-max-blob
+  %+  expect-eq  !>(`(unit (list up-file:web))`~)
+  !>  %^  de-files:web
+        %-  jo
+        %-  crip
+        ;:  weld
+          (trip '{"files":[{"name":"a","mime":"t","data":"')
+          (reap 349.532 'A')
+          (trip '"}]}')
+        ==
+      262.144
+      16
+::
 ++  test-de-files-refuses-too-many-files
   %+  expect-eq  !>(`(unit (list up-file:web))`~)
   !>  %^  de-files:web
