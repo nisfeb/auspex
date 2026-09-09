@@ -2225,12 +2225,16 @@
   ;<  ~  bind:m  (cull-if-there (probe-rail root who.r))
   ;<  ~  bind:m  (ensure-dir (peer-dir root))
   ;<  ~  bind:m  (put-file (peer-rail root who.r) [/auspex %peer] r)
-  ;<  ~  bind:m
-    %^  note  root  'discovery'
-    :-  &
+  ::  traced as well as noted. /tr/last survives a reload and is the
+  ::  record; the console line is what makes a cross-ship deploy
+  ::  verifiable at the moment it happens, and it is the same pairing
+  ::  +send-one's refusals already use.
+  =/  why=@t
     ?~  proto.r
       (rap 3 ~[(scot %p who.r) ' published no /proto'])
     (rap 3 ~[(scot %p who.r) ' speaks ' (num-list:uc versions.u.proto.r)])
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip why)}"])
+  ;<  ~  bind:m  (note root 'discovery' & why)
   (pure:m |)
 ::
 ::  +do-fetch-blob: fetch one attachment's bytes on demand.
