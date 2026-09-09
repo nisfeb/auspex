@@ -176,7 +176,7 @@ by that ship's ball history:
   (Calendar, Pad, Guestbook) hang when clicked. Ricsul's ball also holds
   BANGed app-tier instances from before the strip, so **production will show
   dead tiles for apps that no longer have source.** Removing them is a ball
-  write on production, not a launcher change — a separate decision.
+  write on production, not a launcher change. **Open, deliberately: no production writes of any kind until the release itself.** Decide at release time whether to clear those instances first or ship with dead tiles.
 - **The bell's fetch hangs**, 40 s with no status, rather than failing fast: a
   stale eyre binding from an instance whose source no longer compiles. Grey
   either way; whether it hangs or 404s on ricsul depends on its bindings.
