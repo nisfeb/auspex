@@ -35,16 +35,26 @@ npm run build
 ```
 
 The output is **not** `dist/`. It lands in
-`../grubbery-overlay/nex/urmail/ui-app/` as exactly two files, `index.html` and
-`app.js`, which the nexus lays down as grubs in `+on-load` and serves at
-`/apps/urmail` and `/apps/urmail/app.js`. The CSS is inlined into the shell and
-the build fails rather than emit a third file: every asset request costs about
+`../grubbery-overlay/nex/urmail/ui-app/` as exactly four files — `index.html`,
+`app.js`, `manifest.json` and `sw.js` — which the nexus lays down as grubs in
+`+on-load` and serves under `/apps/urmail/`. The CSS is inlined into the shell
+and the build fails rather than emit a fifth: every asset request costs about
 two seconds on a serialized pier and burns its own request fiber, which is why
-lattice ships one document plus one script and why this does too.
+lattice ships one document plus one script and why the *app* here is still one
+document and one script. The manifest and the service worker are not part of
+that budget — the browser fetches each once, not the app.
 
-Those two files are committed. The overlay is the deploy source, so an artifact
-that is not in it does not ship — a UI change that skips the build deploys the
-previous one silently.
+`sw.js` is copied from `ui/sw.js` rather than bundled (it is not a module of
+the app), with a build hash stamped into `__URMAIL_BUILD__` as its cache key;
+`manifest.json` is copied from `ui/public/`. It is called `.json` and not
+`.webmanifest` because grubbery converts each non-hoon gub file to a `%mime`
+grub through the clay tube for its extension, and this desk has no
+`webmanifest` mark — the route sets `application/manifest+json`, which is what
+a browser actually reads.
+
+Those four files are committed. The overlay is the deploy source, so an
+artifact that is not in it does not ship — a UI change that skips the build
+deploys the previous one silently.
 
 ## Deploying a build to a ship
 

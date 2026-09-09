@@ -150,9 +150,10 @@ UIA=$(count "$DEST/gub/nex/urmail/ui-app" -type f)
 MAR=$(count "$DEST/gub/mar/urmail" -type f)
 WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'urmail-*.hoon')
 echo "synced overlay -> $DEST (urmail libs: $LIB, tests: $TST, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
-if [ "$UIA" -ne 2 ]; then
-  echo "WARNING: ui-app should be exactly index.html and app.js; found $UIA" >&2
-  echo "  Run (cd ui && npm run build) and sync again, or /apps/urmail will 404." >&2
+if [ "$UIA" -ne 4 ]; then
+  echo "WARNING: ui-app should be exactly index.html, app.js, manifest.json and sw.js;" >&2
+  echo "  found $UIA. Run (cd ui && npm run build) and sync again, or /apps/urmail" >&2
+  echo "  will 404 on whichever of the four is missing." >&2
 fi
 if [ "$LIB" -eq 0 ]; then
   echo "WARNING: overlay did not land - do NOT commit the desk" >&2

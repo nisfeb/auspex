@@ -58,12 +58,17 @@
 ::                                 and pokes the answer back; only the
 ::                                 writer touches the tree.
 ::    /mail/idx                    the derived inbox order, newest first.
-::    /app/index.html              the web client, laid down as two grubs:
-::    /app/app.js                  a shell with its css inlined and one
-::                                 script. Assets in cords wedge every
-::                                 request fiber, so the shell is one
-::                                 document and one script, the shape
-::                                 lattice ships for the same reason.
+::    /app/index.html              the web client, laid down as four
+::    /app/app.js                  grubs: a shell with its css inlined,
+::    /app/manifest.json           one script, a web manifest and a
+::    /app/sw.js                   service worker. Assets in cords wedge
+::                                 every request fiber, so the client is
+::                                 one document and one script, the shape
+::                                 lattice ships for the same reason. The
+::                                 other two are fetched by the BROWSER
+::                                 rather than by the app - once each -
+::                                 and are what make it installable and
+::                                 openable offline.
 ::    /ui/main.sig                 binds /apps/urmail and dispatches each
 ::                                 request into its own fiber.
 ::    /ui/requests/<id>            ONE EPHEMERAL FIBER PER HTTP REQUEST.
@@ -110,6 +115,19 @@
 ::  writes exactly these two files and fails if it would emit a third.
 /<  uih  ui-app/index.html
 /<  uij  ui-app/app.js
+::  the PWA's other two files, built by the same `npm run build` and
+::  laid down as grubs exactly like the two above. Same %mime marc, so
+::  no new marc.
+::
+::  `manifest.json` and not the conventional `manifest.webmanifest`:
+::  grubbery turns every non-hoon file in a gub tree into a %mime grub
+::  through the clay tube for that file's EXTENSION, and this desk has
+::  no `webmanifest` mark, so the .webmanifest name would be a sync-gub
+::  that crashes rather than a route that 404s. The extension picks the
+::  mark; the route below sets application/manifest+json, which is the
+::  part a browser reads.
+/<  uim  ui-app/manifest.json
+/<  uisw  ui-app/sw.js
 ::  the launcher tile's icon, served at /apps/urmail/icon.svg and
 ::  pulled by the tiles nexus through /grubbery/tiles/icon/urmail.
 /<  uicon  icon.svg
@@ -198,6 +216,12 @@
           ::  loaded, with no error and no way to tell from outside.
           [%over %& [/app %'index.html'] [[/ %mime] uih]]
           [%over %& [/app %'app.js'] [[/ %mime] uij]]
+          ::  the manifest and the service worker, %over for the same
+          ::  reason: a stale service worker is worse than a stale
+          ::  script, because it is the thing that decides which script
+          ::  the browser gets.
+          [%over %& [/app %'manifest.json'] [[/ %mime] uim]]
+          [%over %& [/app %'sw.js'] [[/ %mime] uisw]]
           ::  /ui: the HTTP front end. main.sig binds /apps/urmail and
           ::  spawns one fiber per request under /ui/requests.
           [%fall %& [/ui %'main.sig'] [[/ %sig] ~]]
@@ -2534,6 +2558,18 @@
     (serve-ui eyre-id %'index.html')
   ?:  &(=(`path`[%'app.js' ~] suffix) =(%'GET' meth))
     (serve-ui eyre-id %'app.js')
+  ::  the PWA's two files, served out of the same /app directory and
+  ::  through the same arm. BEHIND THE OWNER GATE like everything else:
+  ::  urmail has no unauthenticated surface, and these two are not an
+  ::  exception carved for convenience. A manifest is fetched
+  ::  anonymously by default, so the shell asks for it with
+  ::  crossorigin="use-credentials"; a browser that ignores that gets a
+  ::  403 and no install, which is the honest trade for a nexus that
+  ::  never serves a byte to a stranger.
+  ?:  &(=(`path`[%'manifest.json' ~] suffix) =(%'GET' meth))
+    (serve-ui eyre-id %'manifest.json')
+  ?:  &(=(`path`[%'sw.js' ~] suffix) =(%'GET' meth))
+    (serve-ui eyre-id %'sw.js')
   ::  GET /api/thread/<id>: the id is the last segment, so this cannot
   ::  sit in the table below, which keys on the whole suffix. The ?= comes
   ::  FIRST in the &, so the branch can reach into the path it matched.
@@ -2588,7 +2624,12 @@
   |=  [eyre-id=@ta nam=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  =/  ct=@t  ?:(=(%'app.js' nam) 'text/javascript' 'text/html')
+  =/  ct=@t
+    ?+  nam  'text/html'
+      %'app.js'         'text/javascript'
+      %'sw.js'          'text/javascript'
+      %'manifest.json'  'application/manifest+json'
+    ==
   ;<  root=path  bind:m  nexus-root
   ;<  pv=view:nexus  bind:m  (peek:io [%& %& (weld root /app) nam] ~)
   ?.  ?=([%file *] pv)  (send-err eyre-id 404 'not found')

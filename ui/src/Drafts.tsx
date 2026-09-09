@@ -4,6 +4,11 @@ import type { Draft } from './api'
 // the reader knows. There is no sender line and no verdict badge here,
 // because a draft has neither: nothing has been signed yet, and the
 // moment of signing is the moment of sending.
+//
+// The frame — the column width, the border, the scroll — belongs to the
+// pane in App, which is the one that also holds the thread list. Two
+// components each declaring the same width is two places to change it
+// and one place to forget.
 export default function Drafts({
   drafts, onOpen, onDelete,
 }: {
@@ -12,35 +17,33 @@ export default function Drafts({
   onDelete: (id: string) => void
 }) {
   if (drafts.length === 0) {
-    return (
-      <div className="w-96 shrink-0 border-r border-neutral-200 p-4 text-sm text-neutral-400">
-        No drafts.
-      </div>
-    )
+    return <div className="flex-1 p-3 text-ink-faint">No drafts.</div>
   }
   return (
-    <ul className="w-96 shrink-0 overflow-y-auto border-r border-neutral-200">
+    <ul className="min-h-0 flex-1 overflow-y-auto">
       {drafts.map((d) => (
-        <li key={d.id} className="flex items-start gap-1 border-b border-neutral-100">
+        <li key={d.id} className="flex items-center border-b border-line">
           <button
             type="button"
             onClick={() => onOpen(d)}
-            className="flex-1 px-4 py-3 text-left hover:bg-neutral-50"
+            className="touch flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-left hover:bg-sunken"
           >
-            <div className="truncate text-sm">
-              {d.subj || <span className="text-neutral-400">(no subject)</span>}
-            </div>
-            <div className="truncate text-xs text-neutral-500">
-              {d.to.length ? `to ${d.to.join(', ')}` : 'no recipients yet'}
-            </div>
-            <div className="truncate text-xs text-neutral-400">{d.body}</div>
+            <span className="w-24 shrink-0 truncate text-ink-faint md:w-32">
+              {d.to.length ? d.to.join(', ') : 'no recipients yet'}
+            </span>
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="truncate text-ink">
+                {d.subj || <span className="text-ink-faint">(no subject)</span>}
+              </span>
+              <span className="truncate text-ink-faint">{d.body}</span>
+            </span>
           </button>
           <button
             type="button"
             onClick={() => onDelete(d.id)}
             aria-label={`Delete draft ${d.subj || '(no subject)'}`}
             title="Delete this draft. Nothing was ever signed, so nothing is lost but the text."
-            className="px-3 py-3 text-neutral-400 hover:text-red-600"
+            className="btn btn-danger shrink-0"
           >
             ×
           </button>

@@ -1,9 +1,211 @@
 @import "tailwindcss";
 
+/* DARK MODE IS A CLASS, NOT A MEDIA QUERY.
+   `prefers-color-scheme` is the default and a manual override has to be
+   able to beat it, so the variant follows a `dark` class on <html> that
+   index.html's head script sets before first paint (from localStorage,
+   falling back to the media query). A media-query-only variant could
+   not be overridden at all; a class set after mount would flash the
+   wrong palette on every load. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* EVERY COLOUR IS A TOKEN, and both palettes are complete. `inline`
+   matters: it makes `bg-surface` compile to `var(--u-surface)` at the
+   use site rather than to the value read at build time, so one set of
+   utilities picks up the .dark block below. */
+@theme inline {
+  --color-surface: var(--u-surface);
+  --color-raised: var(--u-raised);
+  --color-sunken: var(--u-sunken);
+  --color-line: var(--u-line);
+  --color-line-strong: var(--u-line-strong);
+  --color-ink: var(--u-ink);
+  --color-ink-dim: var(--u-ink-dim);
+  --color-ink-faint: var(--u-ink-faint);
+  --color-accent: var(--u-accent);
+  --color-accent-hover: var(--u-accent-hover);
+  --color-accent-ink: var(--u-accent-ink);
+  --color-accent-soft: var(--u-accent-soft);
+  --color-accent-soft-ink: var(--u-accent-soft-ink);
+  --color-ok: var(--u-ok);
+  --color-danger: var(--u-danger);
+  --color-danger-soft: var(--u-danger-soft);
+  --color-danger-ink: var(--u-danger-ink);
+  --color-danger-line: var(--u-danger-line);
+  --color-warn-soft: var(--u-warn-soft);
+  --color-warn-ink: var(--u-warn-ink);
+  --color-warn-line: var(--u-warn-line);
+  --color-forged-bg: var(--u-forged-bg);
+  --color-forged-ink: var(--u-forged-ink);
+  --color-forged-line: var(--u-forged-line);
+}
+
+:root {
+  color-scheme: light;
+  --u-surface: #ffffff;
+  --u-raised: #ffffff;
+  --u-sunken: #f1f3f4;
+  --u-line: #e0e0e0;
+  --u-line-strong: #c4c7c5;
+  --u-ink: #202124;
+  --u-ink-dim: #5f6368;
+  --u-ink-faint: #80868b;
+  --u-accent: #1a73e8;
+  --u-accent-hover: #1765cc;
+  --u-accent-ink: #ffffff;
+  --u-accent-soft: #d3e3fd;
+  --u-accent-soft-ink: #0b57d0;
+  --u-ok: #137333;
+  --u-danger: #c5221f;
+  --u-danger-soft: #fce8e6;
+  --u-danger-ink: #a50e0e;
+  --u-danger-line: #f28b82;
+  --u-warn-soft: #fef7e0;
+  --u-warn-ink: #7a5900;
+  --u-warn-line: #fdd663;
+  /* FORGED HAS ITS OWN THREE TOKENS in both palettes, and they are not
+     derived from the danger ones. A failed signature is the one thing
+     on this surface that must never soften into "an error happened":
+     red-on-dark is not automatically legible, so the dark values are
+     picked for contrast against the dark forged ground rather than
+     inherited from the light ones. */
+  --u-forged-bg: #fce8e6;
+  --u-forged-ink: #a50e0e;
+  --u-forged-line: #d93025;
+}
+
+.dark {
+  color-scheme: dark;
+  --u-surface: #17181a;
+  --u-raised: #202124;
+  --u-sunken: #282a2d;
+  --u-line: #3c4043;
+  --u-line-strong: #5f6368;
+  --u-ink: #e8eaed;
+  --u-ink-dim: #9aa0a6;
+  --u-ink-faint: #80868b;
+  --u-accent: #8ab4f8;
+  --u-accent-hover: #a8c7fa;
+  --u-accent-ink: #062040;
+  --u-accent-soft: #1f3b62;
+  --u-accent-soft-ink: #d3e3fd;
+  --u-ok: #81c995;
+  --u-danger: #ff8a80;
+  --u-danger-soft: #3d1512;
+  --u-danger-ink: #ffb4ab;
+  --u-danger-line: #ff6b60;
+  --u-warn-soft: #3a2f0b;
+  --u-warn-ink: #fdd663;
+  --u-warn-line: #7a5900;
+  --u-forged-bg: #601410;
+  --u-forged-ink: #ffdad6;
+  --u-forged-line: #ff5449;
+}
+
 html, body, #root {
   height: 100%;
 }
 
 body {
   margin: 0;
+  background: var(--u-surface);
+  color: var(--u-ink);
+  font-size: 13px;
+  /* NO HORIZONTAL SCROLL, EVER — stated once here rather than trusted
+     to every pane. A long ship name, a long filename or a long subject
+     is attacker-chosen text, so the guarantee cannot rest on the
+     content being reasonable. */
+  overflow-x: hidden;
+}
+
+/* BUTTONS. Small, square-cornered, text-weight — Gmail's, not a toy's.
+   One filled `.btn-primary` per surface; `.btn` alone is the quiet
+   default and `.btn-outline` adds a hairline where a control needs to
+   read as a control. Plain CSS on the same tokens, so there is nothing
+   to keep in sync between a utility string and a palette. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0.25rem 0.625rem;
+  font-size: 13px;
+  line-height: 1.25rem;
+  color: var(--u-ink-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--u-sunken);
+  color: var(--u-ink);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.btn-outline {
+  border-color: var(--u-line-strong);
+}
+.btn-primary {
+  background: var(--u-accent);
+  border-color: var(--u-accent);
+  color: var(--u-accent-ink);
+  font-weight: 500;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--u-accent-hover);
+  border-color: var(--u-accent-hover);
+  color: var(--u-accent-ink);
+}
+.btn-danger:hover:not(:disabled) {
+  color: var(--u-danger);
+  background: var(--u-danger-soft);
+}
+
+/* Text inputs and textareas, on the same tokens. A bare Tailwind input
+   inherits the page background, which on dark reads as an unstyled
+   box, so this is a token rule rather than a per-field utility. */
+.field {
+  width: 100%;
+  background: transparent;
+  color: var(--u-ink);
+  border: 0;
+  border-bottom: 1px solid var(--u-line);
+  padding: 0.375rem 0;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.field:focus {
+  border-bottom-color: var(--u-accent);
+}
+.field-bad {
+  border-bottom-color: var(--u-danger);
+}
+.field-box {
+  border: 1px solid var(--u-line);
+  border-radius: 2px;
+  padding: 0.375rem 0.5rem;
+}
+.field-box:focus {
+  border-color: var(--u-accent);
+}
+.field::placeholder {
+  color: var(--u-ink-faint);
+}
+
+/* TOUCH TARGETS ON A PHONE. Above md the density is the point and a
+   28px control row is right; on a finger it is not. One rule, keyed on
+   the same breakpoint the panes collapse at. */
+@media (max-width: 767px) {
+  .btn, .touch {
+    min-height: 40px;
+  }
+  .field, .field-box {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
 }

@@ -43,9 +43,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     // button; a reload refetches everything and is the honest offer.
     // Nothing here reads from the data that failed.
     return (
-      <div className="p-8 text-neutral-800">
-        <h1 className="mb-2 text-xl">Something in this view could not be displayed.</h1>
-        <p className="mb-4 max-w-prose text-sm text-neutral-600">
+      <div className="min-h-full bg-surface p-6 text-ink">
+        <h1 className="mb-2 text-base font-medium">
+          Something in this view could not be displayed.
+        </h1>
+        <p className="mb-4 max-w-prose text-ink-dim">
           Your mail is unaffected — this is a display failure in the client, and
           nothing on the ship has changed. Reload to start again. If it happens
           on the same conversation every time, the browser console holds the
@@ -54,7 +56,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
         <button
           type="button"
           onClick={() => { window.location.reload() }}
-          className="rounded-full bg-blue-600 px-6 py-2 text-white hover:bg-blue-700"
+          className="btn btn-primary"
         >
           Reload
         </button>
@@ -83,3 +85,21 @@ const mount = () =>
 // the app still mounts (the inbox will render its own error) rather than
 // showing a permanently blank page.
 whoami().catch((e) => { console.error(e) }).then(mount)
+
+// THE SERVICE WORKER, and the app mounts whether or not it registers.
+//
+// Registered after the mount call above rather than before it, and never
+// awaited: a worker is what makes the app open offline on the NEXT load,
+// and nothing on this one depends on it. A browser without one (or a tab
+// on a non-secure origin, where the API is simply absent) gets exactly
+// the app it got before this existed.
+//
+// Scoped by its own location: sw.js is served from /apps/urmail/, so its
+// default scope is already the app's route and no Service-Worker-Allowed
+// header is needed.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/apps/urmail/sw.js')
+      .catch((e: unknown) => { console.error('urmail: service worker', e) })
+  })
+}

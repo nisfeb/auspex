@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   deleteDraft as apiDeleteDraft, deleteRule, drafts as apiDrafts, pageOf,
   rules as apiRules, saveRule, subscribeChanges,
@@ -17,6 +17,16 @@ import Filters from './Filters'
 const PER_PAGE = 25
 
 type Pane = View | 'drafts' | 'rules'
+
+// The install prompt, which is the one browser API here with no types in
+// lib.dom: `beforeinstallprompt` is Chromium-only and unspecified. Only
+// the two members this file touches are declared, because inventing the
+// rest would be describing an API nobody has agreed on.
+interface InstallPrompt extends Event {
+  prompt: () => Promise<unknown>
+}
+
+const THEME_KEY = 'urmail:theme'
 
 export default function App() {
   const [pane, setPane] = useState<Pane>('inbox')
@@ -39,14 +49,78 @@ export default function App() {
   // Every label any thread carries, which is the label list the sidebar
   // shows. Derived from the ALL view rather than stored: a label exists
   // exactly as long as some thread carries it, so a separate registry
-  // could only ever drift from the threads it claims to describe.
+  // could only ever drift from the threads it claims to describe. This
+  // is one of the two remaining users of `all`, which is why the view
+  // stayed an API primitive after it left the sidebar.
   const [labels, setLabels] = useState<string[]>([])
 
-  // Non-null while the composer is open as a forward. Held here rather
-  // than in ThreadView so the forward composer is the same panel as the
-  // compose one — one composer, one code path, one place where the
-  // recipient list is built (from nothing).
-  const [forwarding, setForwarding] = useState<ForwardIntent | null>(null)
+  // ── the shell's own state ──────────────────────────────────────────
+
+  // The palette. index.html has already put the class on <html> before
+  // the first paint (from localStorage, else prefers-color-scheme), so
+  // this reads the decision rather than making it — a second, later
+  // decision here would be a flash of the wrong palette on every load.
+  const [theme, setTheme] = useState<'light' | 'dark'>(
+    () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
+  )
+  // Whether the browser has offered to install. There is no way to ask,
+  // so the only honest signal is the event itself: no event, no entry.
+  const [install, setInstall] = useState<InstallPrompt | null>(null)
+  // NOT `!navigator.onLine` as a starting value only. The flag lies in
+  // one direction (a captive portal is "online") and is right in the
+  // other, which is the direction that matters here: false means no
+  // request will succeed, and the app should say so rather than
+  // rendering cached mail as though it were current.
+  const [online, setOnline] = useState(() => navigator.onLine)
+  // The service worker replaced a shell it had already cached, so the
+  // script this tab is running is not the script on the ship any more.
+  const [updated, setUpdated] = useState(false)
+  // Below md the three panes are one pane, and the sidebar is a drawer.
+  const [navOpen, setNavOpen] = useState(false)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    try { localStorage.setItem(THEME_KEY, theme) } catch { /* private mode */ }
+  }, [theme])
+
+  useEffect(() => {
+    const offer = (e: Event) => {
+      // Chromium shows its own bar unless the event is cancelled, and
+      // this app puts the entry in the sidebar footer instead.
+      e.preventDefault()
+      setInstall(e as InstallPrompt)
+    }
+    // One prompt, one use: the event cannot be replayed, so drop it the
+    // moment the browser says the app is installed.
+    const done = () => { setInstall(null) }
+    window.addEventListener('beforeinstallprompt', offer)
+    window.addEventListener('appinstalled', done)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', offer)
+      window.removeEventListener('appinstalled', done)
+    }
+  }, [])
+
+  useEffect(() => {
+    const up = () => { setOnline(true) }
+    const down = () => { setOnline(false) }
+    window.addEventListener('online', up)
+    window.addEventListener('offline', down)
+    return () => {
+      window.removeEventListener('online', up)
+      window.removeEventListener('offline', down)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const heard = (e: MessageEvent) => {
+      if ((e.data as { urmail?: string } | null)?.urmail === 'updated') setUpdated(true)
+    }
+    navigator.serviceWorker.addEventListener('message', heard)
+    return () => { navigator.serviceWorker.removeEventListener('message', heard) }
+  }, [])
+
   // Bumped once per change beacon event, so the open thread (if any) can
   // react to it. The beacon says THAT the tree changed, not which thread
   // changed — it is one small grub the nexus writes on every mutation —
@@ -58,6 +132,12 @@ export default function App() {
   // silently dropped. A counter is guaranteed distinct every call.
   const [threadUpdate, setThreadUpdate] = useState<number | null>(null)
 
+  // Non-null while the composer is open as a forward. Held here rather
+  // than in ThreadView so the forward composer is the same panel as the
+  // compose one — one composer, one code path, one place where the
+  // recipient list is built (from nothing).
+  const [forwarding, setForwarding] = useState<ForwardIntent | null>(null)
+
   const isThreadPane = pane !== 'drafts' && pane !== 'rules'
   // A SEARCH LEAVES THE PANE. The nexus ANDs the query with the view
   // predicate, which is right as a primitive and wrong as the only
@@ -67,6 +147,9 @@ export default function App() {
   // knows your rules. The nexus is honest that archived mail stays
   // searchable and that no rule can hide a failed signature; both were
   // true of the nexus and false of the box the user types into.
+  //
+  // This is the other user of `all`, and the reason it is still a view:
+  // it is what a search escapes INTO, not a folder anyone visits.
   const searching = applied.trim() !== ''
 
   const refresh = useCallback(() => {
@@ -111,6 +194,20 @@ export default function App() {
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { refreshSidebar() }, [refreshSidebar])
 
+  // Coming back from offline is the one moment where everything on
+  // screen is known-stale at once: the beacon was dropped while the
+  // network was gone, so no push will arrive to say what was missed.
+  //
+  // On the TRANSITION only. `onChange` is rebuilt whenever the view
+  // changes, so refetching whenever this effect re-runs would mean a
+  // second full listing fetch on every pane click, for a connection
+  // that never went anywhere.
+  const wasOnline = useRef(online)
+  useEffect(() => {
+    if (online && !wasOnline.current) onChange()
+    wasOnline.current = online
+  }, [online, onChange])
+
   useEffect(() => {
     // subscribeChanges is synchronous and hands back its own teardown, so
     // there is no window in which an unmount (or StrictMode's dev-only
@@ -132,121 +229,218 @@ export default function App() {
     setLabel(l ?? '')
     setOffset(0)
     setSelected(null)
+    setNavOpen(false)
   }
 
   const pages = Math.max(1, Math.ceil(total / PER_PAGE))
   const current = Math.floor(offset / PER_PAGE) + 1
 
+  const paneName = pane === 'rules' ? 'Filters'
+    : pane === 'drafts' ? 'Drafts'
+      : pane === 'label' ? label
+        : pane.charAt(0).toUpperCase() + pane.slice(1)
+
   return (
-    <div className="flex h-screen bg-white text-neutral-900">
-      <Sidebar
-        view={pane}
-        label={label}
-        labels={labels}
-        drafts={drafts.length}
-        rules={rules.length}
-        counts={{}}
-        onView={goto}
-        onCompose={() => { setResume(null); setForwarding(null); setComposing(true) }}
-        onFilters={() => goto('rules')}
-      />
-
-      {pane === 'rules' ? (
-        <Filters
-          rules={rules}
-          onSave={async (r) => { await saveRule(r); refreshSidebar() }}
-          onDelete={(id) => { deleteRule(id).then(refreshSidebar).catch(console.error) }}
-          onClose={() => goto('inbox')}
-        />
-      ) : (
-        <>
-          <div className="flex w-96 shrink-0 flex-col border-r border-neutral-200">
-            {isThreadPane && (
-              <div className="border-b border-neutral-200 p-3">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search subject, body and sender"
-                  aria-label="Search"
-                  className="w-full rounded-full bg-neutral-100 px-4 py-2 text-sm outline-none"
-                />
-                {searching && (
-                  // Search covers forged messages deliberately, and a
-                  // result row is drawn from the message that matched —
-                  // so a hit on a forgery says FORGED rather than
-                  // borrowing a verified copy's sender line. It also
-                  // covers archived mail, and saying so is the point:
-                  // the guarantee is that nothing can hide a message,
-                  // and a search silently scoped to one folder would
-                  // quietly not be that.
-                  <p className="mt-2 text-xs text-neutral-500">
-                    {total} {total === 1 ? 'conversation' : 'conversations'} in
-                    {' '}<strong>all mail</strong> matching “{applied}” — archived
-                    conversations included, and messages whose signature failed are
-                    included and shown as forged.
-                  </p>
-                )}
-              </div>
-            )}
-            {pane === 'drafts' ? (
-              <Drafts
-                drafts={drafts}
-                onOpen={(d) => { setForwarding(null); setComposing(false); setResume(d) }}
-                onDelete={(id) => {
-                  apiDeleteDraft(id).then(refreshSidebar).catch(console.error)
-                }}
-              />
-            ) : (
-              <>
-                <ThreadList
-                  entries={entries}
-                  error={inboxError}
-                  selected={selected}
-                  onSelect={setSelected}
-                />
-                {total > PER_PAGE && (
-                  <div className="flex items-center gap-3 border-t border-neutral-200 p-3 text-sm">
-                    <button
-                      type="button"
-                      disabled={offset === 0}
-                      onClick={() => setOffset(Math.max(0, offset - PER_PAGE))}
-                      className="rounded px-3 py-1 ring-1 ring-neutral-300 disabled:opacity-30"
-                    >
-                      ‹
-                    </button>
-                    <span className="text-neutral-500">
-                      {current} of {pages} · {total} conversations
-                    </span>
-                    <button
-                      type="button"
-                      disabled={offset + PER_PAGE >= total}
-                      onClick={() => setOffset(offset + PER_PAGE)}
-                      className="ml-auto rounded px-3 py-1 ring-1 ring-neutral-300 disabled:opacity-30"
-                    >
-                      ›
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          <main className="flex-1 overflow-y-auto">
-            {selected
-              ? (
-                <ThreadView
-                  id={selected}
-                  onSent={refresh}
-                  onDeleted={() => { setSelected(null); refresh() }}
-                  onForward={(f) => { setComposing(false); setResume(null); setForwarding(f) }}
-                  onFiled={() => { refresh(); refreshSidebar() }}
-                  updatedAt={threadUpdate}
-                />
-              )
-              : <p className="p-8 text-neutral-400">Select a conversation</p>}
-          </main>
-        </>
+    // `overflow-hidden` on the shell and `min-w-0` on every flexible
+    // child: NO HORIZONTAL SCROLL, EVER. Nearly every string on this
+    // surface — a ship name, a subject, a filename — was chosen by
+    // whoever poked the chain, so "the content is reasonable" is not an
+    // assumption this layout is allowed to make.
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-surface text-ink">
+      {!online && (
+        <div className="shrink-0 bg-warn-soft px-3 py-1 text-warn-ink ring-1 ring-warn-line">
+          <strong>Offline.</strong> This is mail cached on this device, not
+          {' '}what is on the ship now. Nothing can be sent until the connection
+          {' '}is back — a message you write is kept here and is not signed.
+        </div>
       )}
+      {updated && (
+        <div className="flex shrink-0 items-center gap-2 bg-accent-soft px-3 py-1 text-accent-soft-ink">
+          A newer urmail is installed on this device.
+          <button
+            type="button"
+            onClick={() => { window.location.reload() }}
+            className="btn btn-outline"
+          >
+            Reload
+          </button>
+        </div>
+      )}
+
+      {/* THE PHONE'S ONLY NAVIGATION, and it is the whole of it: a menu
+          button that opens the sidebar as a drawer, or a back control
+          when a thread is open. Below md exactly one pane is on screen
+          at a time, so every transition between them is one of these
+          two controls. Above md this bar does not exist and the three
+          panes sit side by side as before. */}
+      <header className="flex shrink-0 items-center gap-1 border-b border-line px-1 md:hidden">
+        {selected ? (
+          <button
+            type="button"
+            onClick={() => { setSelected(null) }}
+            className="btn"
+          >
+            ‹ Back
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { setNavOpen(true) }}
+            aria-label="Open the folder list"
+            className="btn"
+          >
+            ☰
+          </button>
+        )}
+        <span className="min-w-0 truncate text-ink-dim">{paneName}</span>
+      </header>
+
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {/* The drawer's backdrop. Only rendered while it is open, so it
+            can never sit invisibly over the desktop layout. */}
+        {navOpen && (
+          <button
+            type="button"
+            aria-label="Close the folder list"
+            onClick={() => { setNavOpen(false) }}
+            className="fixed inset-0 z-20 bg-black/40 md:hidden"
+          />
+        )}
+        <div
+          className={`z-30 shrink-0 md:static md:block
+            ${navOpen ? 'fixed inset-y-0 left-0 w-56' : 'hidden md:block'}`}
+        >
+          <Sidebar
+            view={pane}
+            label={label}
+            labels={labels}
+            drafts={drafts.length}
+            rules={rules.length}
+            counts={{}}
+            onView={goto}
+            onCompose={() => {
+              setResume(null); setForwarding(null); setComposing(true); setNavOpen(false)
+            }}
+            onFilters={() => goto('rules')}
+            theme={theme}
+            onTheme={() => { setTheme(theme === 'dark' ? 'light' : 'dark') }}
+            installable={install !== null}
+            onInstall={() => {
+              // One shot. The event cannot be prompted twice, so it is
+              // dropped whether the user accepts or dismisses — a second
+              // click on a spent prompt does nothing at all, which is
+              // worse than the entry not being there.
+              const p = install
+              setInstall(null)
+              void p?.prompt()
+            }}
+          />
+        </div>
+
+        {pane === 'rules' ? (
+          <Filters
+            rules={rules}
+            onSave={async (r) => { await saveRule(r); refreshSidebar() }}
+            onDelete={(id) => { deleteRule(id).then(refreshSidebar).catch(console.error) }}
+            onClose={() => goto('inbox')}
+          />
+        ) : (
+          <>
+            <div
+              className={`min-w-0 flex-col border-r border-line md:flex md:w-96 md:shrink-0 md:flex-none
+                ${selected ? 'hidden md:flex' : 'flex flex-1'}`}
+            >
+              {isThreadPane && (
+                <div className="shrink-0 border-b border-line p-1">
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search subject, body and sender"
+                    aria-label="Search"
+                    className="field field-box bg-sunken"
+                  />
+                  {searching && (
+                    // Search covers forged messages deliberately, and a
+                    // result row is drawn from the message that matched —
+                    // so a hit on a forgery says FORGED rather than
+                    // borrowing a verified copy's sender line. It also
+                    // covers archived mail, and saying so is the point:
+                    // the guarantee is that nothing can hide a message,
+                    // and a search silently scoped to one folder would
+                    // quietly not be that.
+                    <p className="mt-1 text-[11px] text-ink-dim">
+                      {total} {total === 1 ? 'conversation' : 'conversations'} in
+                      {' '}<strong>all mail</strong> matching “{applied}” — archived
+                      conversations included, and messages whose signature failed are
+                      included and shown as forged.
+                    </p>
+                  )}
+                </div>
+              )}
+              {pane === 'drafts' ? (
+                <Drafts
+                  drafts={drafts}
+                  onOpen={(d) => { setForwarding(null); setComposing(false); setResume(d) }}
+                  onDelete={(id) => {
+                    apiDeleteDraft(id).then(refreshSidebar).catch(console.error)
+                  }}
+                />
+              ) : (
+                <>
+                  <ThreadList
+                    entries={entries}
+                    error={inboxError}
+                    selected={selected}
+                    onSelect={setSelected}
+                  />
+                  {total > PER_PAGE && (
+                    <div className="flex shrink-0 items-center gap-2 border-t border-line px-1 py-0.5">
+                      <button
+                        type="button"
+                        disabled={offset === 0}
+                        onClick={() => setOffset(Math.max(0, offset - PER_PAGE))}
+                        aria-label="Previous page"
+                        className="btn"
+                      >
+                        ‹
+                      </button>
+                      <span className="min-w-0 truncate text-[11px] text-ink-faint">
+                        {current} of {pages} · {total} conversations
+                      </span>
+                      <button
+                        type="button"
+                        disabled={offset + PER_PAGE >= total}
+                        onClick={() => setOffset(offset + PER_PAGE)}
+                        aria-label="Next page"
+                        className="btn ml-auto"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <main
+              className={`min-w-0 flex-1 overflow-y-auto ${selected ? 'block' : 'hidden md:block'}`}
+            >
+              {selected
+                ? (
+                  <ThreadView
+                    id={selected}
+                    onSent={refresh}
+                    onDeleted={() => { setSelected(null); refresh() }}
+                    onForward={(f) => { setComposing(false); setResume(null); setForwarding(f) }}
+                    onFiled={() => { refresh(); refreshSidebar() }}
+                    updatedAt={threadUpdate}
+                  />
+                )
+                : <p className="p-3 text-ink-faint">Select a conversation</p>}
+            </main>
+          </>
+        )}
+      </div>
 
       {(composing || forwarding || resume) && (
         // Keyed so that hitting Forward while a blank compose is open

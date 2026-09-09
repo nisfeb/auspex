@@ -184,8 +184,20 @@ export default function Compose({
       // Leave the panel open with the draft intact — a failed send (an
       // unreachable ship, a malformed @p the route's parser rejects)
       // should not look identical to a successful one.
+      //
+      // AND NO FALSE "SENT" OFFLINE. A send is a poke to the writer and
+      // the service worker never touches a POST, so a message written
+      // with no network did not go anywhere and did not get signed.
+      // Saying "could not send, check the recipient" would send the
+      // user hunting a typo that is not there; the panel says what
+      // actually happened and keeps every word of it.
       console.error(e)
-      setError(e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.')
+      setError(
+        navigator.onLine
+          ? e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.'
+          : 'Offline — not sent. Nothing here has been signed. It is still here;'
+            + ' send it when the connection is back.',
+      )
     } finally {
       setSending(false)
     }
@@ -200,15 +212,19 @@ export default function Compose({
   }
 
   return (
-    <div className="fixed bottom-0 right-8 w-[32rem] rounded-t-lg border border-neutral-300 bg-white shadow-2xl">
-      <header className="flex items-center justify-between bg-neutral-800 px-4 py-2 text-sm text-white">
+    // Full width on a phone, a panel on a desktop. `inset-x-0` below md
+    // rather than a fixed 32rem: a 512px panel on a 360px screen is the
+    // whole of "no horizontal scroll ever" undone by one composer.
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-raised shadow-2xl
+      md:inset-x-auto md:right-4 md:w-[32rem] md:rounded-t md:border">
+      <header className="flex items-center justify-between border-b border-line bg-sunken px-2 py-1 font-medium text-ink">
         {forward ? 'Forward' : resume ? 'Draft' : 'New message'}
-        <span className="flex items-center gap-3">
-          {saved && <span className="text-xs text-neutral-400">saved {saved}</span>}
-          <button onClick={closeAndSave} aria-label="Close">×</button>
+        <span className="flex items-center gap-2">
+          {saved && <span className="text-[11px] font-normal text-ink-faint">saved {saved}</span>}
+          <button type="button" onClick={closeAndSave} aria-label="Close" className="btn">×</button>
         </span>
       </header>
-      <div className="p-4">
+      <div className="p-2">
         {/* Forwarding transfers evidence rather than quoting text: the
             recipient gets every message on the path, each still signed
             by whoever wrote it, and can check those signatures without
@@ -225,7 +241,7 @@ export default function Compose({
             copies: several copies of one message differing in signature
             are one message here. */}
         {forward && (
-          <p className="mb-3 rounded bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200">
+          <p className="mb-2 rounded-sm bg-warn-soft p-2 text-[11px] text-warn-ink ring-1 ring-warn-line">
             This sends the <strong>signed chain leading to this message</strong> —
             {' '}the {forward.count} {forward.count === 1 ? 'message' : 'messages'} from
             the start of “{forward.subject}” down to it, not just the latest one.
@@ -239,11 +255,10 @@ export default function Compose({
           value={to} onChange={(e) => { touched.current = true; setTo(e.target.value) }}
           placeholder="~sampel-palnet, ~palnet-sampel"
           aria-label={forward ? 'Forward to' : 'To'}
-          className={`mb-1 w-full border-b py-2 text-sm outline-none
-            ${bad.length ? 'border-red-400' : 'border-neutral-200'}`}
+          className={`field ${bad.length ? 'field-bad' : ''}`}
         />
         {bad.length > 0 && (
-          <p className="mb-2 text-xs text-red-600">
+          <p className="mt-1 text-[11px] text-danger">
             {bad.length === 1 ? 'Not a ship name: ' : 'Not ship names: '}
             {bad.join(', ')}
           </p>
@@ -252,7 +267,7 @@ export default function Compose({
           value={subject} onChange={(e) => { touched.current = true; setSubject(e.target.value) }}
           maxLength={1000}
           placeholder="Subject"
-          className="mb-2 w-full border-b border-neutral-200 py-2 text-sm outline-none"
+          className="field"
         />
         {/* The writer rejects a body over max-body (100,000 bytes) or a
             subject over max-subj (1,000) at compose time, and every send
@@ -264,14 +279,18 @@ export default function Compose({
           value={body} onChange={(e) => { touched.current = true; setBody(e.target.value) }}
           maxLength={100000}
           placeholder={forward ? 'Add a note (optional)' : undefined}
-          className="h-56 w-full resize-none py-2 text-sm outline-none"
+          className="field mt-1 h-40 resize-none border-b-0 md:h-48"
         />
         <FilePicker files={files} onChange={setFiles} disabled={sending} />
-        <div className="mt-3 flex items-center gap-3">
+        {/* ONE FILLED BUTTON ON THIS SURFACE, and it is Send. Discard
+            is text-weight: it is the destructive one, and a control that
+            competes for the eye with the primary action is a control
+            people press by mistake. */}
+        <div className="mt-2 flex items-center gap-2">
           <button
             onClick={onSend}
             disabled={!to.trim() || bad.length > 0 || sending}
-            className="rounded-full bg-blue-600 px-6 py-2 text-white disabled:opacity-40"
+            className="btn btn-primary"
           >
             {sending ? 'Sending…' : forward ? 'Forward' : 'Send'}
           </button>
@@ -279,12 +298,12 @@ export default function Compose({
             type="button"
             onClick={discard}
             title="Throw this away. Nothing here has been signed, so nothing but the text is lost."
-            className="text-sm text-neutral-500 hover:text-red-600"
+            className="btn btn-danger"
           >
             Discard
           </button>
-          {error && <span className="text-sm text-red-600">{error}</span>}
         </div>
+        {error && <p className="mt-1 text-danger">{error}</p>}
       </div>
     </div>
   )

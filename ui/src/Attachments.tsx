@@ -64,8 +64,8 @@ export function FilePicker({
   }
 
   return (
-    <div className="mt-2">
-      <label className="cursor-pointer text-sm text-neutral-500 hover:text-blue-700">
+    <div className="mt-1">
+      <label className="btn touch cursor-pointer">
         <input
           type="file"
           multiple
@@ -81,19 +81,19 @@ export function FilePicker({
         + attach a file
       </label>
       {files.length > 0 && (
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-1 space-y-0.5">
           {files.map((f, i) => (
             <li
               key={`${f.name}-${i}`}
-              className="flex items-center gap-2 rounded border border-neutral-200 px-3 py-1 text-sm"
+              className="flex min-w-0 items-center gap-2 rounded-sm border border-line px-2 py-0.5"
             >
-              <span className="break-all">{f.name}</span>
-              <span className="text-neutral-500">{fileSize(f.size)}</span>
+              <span className="min-w-0 break-all">{f.name}</span>
+              <span className="shrink-0 text-ink-faint">{fileSize(f.size)}</span>
               <button
                 type="button"
                 aria-label={`Remove ${f.name}`}
                 onClick={() => { onChange(files.filter((_, j) => j !== i)) }}
-                className="ml-auto px-1 text-neutral-500 hover:text-red-600"
+                className="btn btn-danger ml-auto shrink-0"
               >
                 ×
               </button>
@@ -101,7 +101,7 @@ export function FilePicker({
           ))}
         </ul>
       )}
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
     </div>
   )
 }
@@ -181,10 +181,10 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
   }
 
   return (
-    <li className="rounded border border-neutral-200 px-3 py-2 text-sm">
+    <li className="rounded-sm border border-line px-2 py-1">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="break-all">{a.name || '(unnamed file)'}</span>
-        <span className="text-neutral-500">{fileSize(a.size)}</span>
+        <span className="min-w-0 break-all">{a.name || '(unnamed file)'}</span>
+        <span className="shrink-0 text-ink-faint">{fileSize(a.size)}</span>
         {/* `mime` is rendered as text, marked as the sender's claim. It
             never picks an icon, never picks a renderer, and the byte
             route refuses to echo it into a header unless it is on a
@@ -192,12 +192,12 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
             ship may deliver, so the signature proves the author chose
             it and nothing else. */}
         {a.mime && (
-          <span className="text-xs text-neutral-400">
+          <span className="text-[11px] text-ink-faint">
             sender says <code>{a.mime}</code>
           </span>
         )}
         {state.at === 'busy' ? (
-          <span className="ml-auto text-xs text-neutral-500">{state.why}</span>
+          <span className="ml-auto text-[11px] text-ink-dim">{state.why}</span>
         ) : state.at === 'absent' ? (
           <button
             type="button"
@@ -205,7 +205,7 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
             title="This ship does not hold these bytes yet. Attachments are never
               pushed: the message carries the file's content hash and the bytes are
               pulled on request from whoever has them. The hash proves them."
-            className="ml-auto rounded-full px-3 py-1 text-xs text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+            className="btn btn-outline ml-auto"
           >
             Fetch
           </button>
@@ -213,18 +213,18 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
           <button
             type="button"
             onClick={() => { void download() }}
-            className="ml-auto rounded-full px-3 py-1 text-xs text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+            className="btn btn-outline ml-auto"
           >
             Download
           </button>
         )}
       </div>
       {state.at === 'absent' && (
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="mt-1 text-[11px] text-ink-dim">
           Not fetched yet — this ship holds the message, not the bytes.
         </p>
       )}
-      {state.at === 'error' && <p className="mt-1 text-xs text-red-600">{state.why}</p>}
+      {state.at === 'error' && <p className="mt-1 text-[11px] text-danger">{state.why}</p>}
     </li>
   )
 }

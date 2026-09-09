@@ -1,9 +1,30 @@
 import type { InboxEntry } from './api'
 import VerdictBadge from './VerdictBadge'
 
+// A date in the width a list row can spare. Today is a time, this year
+// is a day and a month, anything older is a year — the same ladder every
+// mail client uses, for the same reason: a full timestamp on every row
+// is a column of noise, and the exact one is on the message.
+const when = (ms: number): string => {
+  const d = new Date(ms)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  }
+  return String(d.getFullYear())
+}
+
 // The rows only. The search box and the pager live in App, which owns
 // the page this list is one screenful of — so the list never has to know
 // what view produced it.
+//
+// ONE LINE PER THREAD. Everything on a row is on the same line and every
+// variable-length field truncates, so a row's height does not depend on
+// its content — which is what makes a list scannable, and also what
+// stops a sender-chosen subject or ship name from deciding the layout.
 export default function ThreadList({
   entries, error, selected, onSelect,
 }: {
@@ -15,78 +36,76 @@ export default function ThreadList({
   onSelect: (id: string) => void
 }) {
   if (error) {
-    return <div className="flex-1 p-4 text-sm text-red-600">{error}</div>
+    return <div className="flex-1 p-3 text-danger">{error}</div>
   }
   if (entries.length === 0) {
-    return <div className="flex-1 p-4 text-sm text-neutral-400">Nothing here.</div>
+    return <div className="flex-1 p-3 text-ink-faint">Nothing here.</div>
   }
   return (
-    <ul className="flex-1 overflow-y-auto">
+    <ul className="min-h-0 flex-1 overflow-y-auto">
       {entries.map((e) => (
         <li key={e.id}>
           <button
             onClick={() => onSelect(e.id)}
-            className={`w-full border-b border-neutral-100 px-4 py-3 text-left hover:bg-neutral-50
-              ${selected === e.id ? 'bg-blue-50' : ''}
-              ${e.unread ? 'font-semibold' : ''}`}
+            className={`touch flex w-full items-center gap-2 border-b border-line px-2 py-1
+              text-left hover:bg-sunken
+              ${selected === e.id ? 'bg-accent-soft' : ''}
+              ${e.unread ? 'font-semibold text-ink' : 'text-ink-dim'}`}
           >
-            <div className="flex items-center gap-2 text-sm">
-              <span className="truncate">{e.from}</span>
-              <VerdictBadge verdict={e.verdict} className="shrink-0" />
-              {e.forged && e.verdict !== 'forged' && (
-                <span
-                  className="shrink-0 rounded px-2 py-0.5 text-xs text-red-700 ring-1 ring-red-300"
-                  title="This conversation also holds at least one message whose signature failed. Open it to see which."
-                >
-                  + forged
-                </span>
-              )}
-              {e.count > 1 && (
-                <span
-                  className="ml-auto shrink-0 text-neutral-400"
-                  title={`${e.count} stored copies of this thread's messages, including any unverified or forged duplicates`}
-                >
-                  {e.count} copies
-                </span>
-              )}
-            </div>
+            <VerdictBadge verdict={e.verdict} from={e.from} />
+            <span className="w-24 shrink-0 truncate md:w-32">{e.from}</span>
             {e.count === 0 && e.unreadable > 0 ? (
               /* A thread this ship cannot read a single message of. There
                  is no sender or subject to show without reading one, so
                  the row says what it actually knows. Dropping the row
                  instead would make the thread disappear from the listing
                  while its read state and its index entry survived. */
-              <div className="truncate text-sm text-neutral-500 italic">
-                {e.unreadable} unreadable {e.unreadable === 1 ? 'message' : 'messages'} —
-                {' '}stored in an older format this ship cannot read
-              </div>
+              <span className="min-w-0 flex-1 truncate italic text-ink-faint">
+                {e.unreadable} unreadable {e.unreadable === 1 ? 'message' : 'messages'}
+                {' '}— stored in an older format this ship cannot read
+              </span>
             ) : (
-              <>
-                <div className="truncate text-sm">{e.subject}</div>
-                <div className="truncate text-xs text-neutral-500">{e.snippet}</div>
-              </>
-            )}
-            {/* Local state, shown on the row so a thread's filing is
-                visible without opening it. Neither is signed and neither
-                travels: another ship holding this conversation sees none
-                of it. */}
-            {(e.labels.length > 0 || e.archived) && (
-              <div className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                {/* Local state, on the row so a thread's filing is visible
+                    without opening it. Neither is signed and neither
+                    travels: another ship holding this conversation sees
+                    none of it. */}
                 {e.archived && (
-                  <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500">
+                  <span className="shrink-0 rounded-sm bg-sunken px-1 text-[11px] text-ink-faint">
                     archived
                   </span>
                 )}
                 {e.labels.map((l) => (
                   <span
                     key={l}
-                    className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-800"
+                    className="max-w-20 shrink-0 truncate rounded-sm bg-accent-soft px-1 text-[11px] text-accent-soft-ink"
                   >
                     {l}
                   </span>
                 ))}
-              </div>
+                <span className="truncate text-ink">{e.subject}</span>
+                <span className="truncate font-normal text-ink-faint">{e.snippet}</span>
+              </span>
             )}
+            {e.forged && e.verdict !== 'forged' && (
+              <span
+                className="shrink-0 rounded-sm bg-forged-bg px-1 text-[11px] font-bold uppercase text-forged-ink ring-1 ring-forged-line"
+                title="This conversation also holds at least one message whose signature failed. Open it to see which."
+              >
+                + forged
+              </span>
+            )}
+            {e.count > 1 && (
+              <span
+                className="shrink-0 text-[11px] font-normal text-ink-faint"
+                title={`${e.count} stored copies of this thread's messages, including any unverified or forged duplicates`}
+              >
+                {e.count} copies
+              </span>
+            )}
+            <span className="w-12 shrink-0 text-right text-[11px] font-normal text-ink-faint">
+              {when(e.last)}
+            </span>
           </button>
         </li>
       ))}

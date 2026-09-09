@@ -151,10 +151,10 @@ export default function ThreadView({
   }, [id, updatedAt])
 
   if (loadError) {
-    return <p className="p-8 text-red-600">{loadError}</p>
+    return <p className="p-3 text-danger">{loadError}</p>
   }
   if (notFound) {
-    return <p className="p-8 text-neutral-400">This conversation no longer exists.</p>
+    return <p className="p-3 text-ink-faint">This conversation no longer exists.</p>
   }
   if (!t) return null
 
@@ -250,19 +250,21 @@ export default function ThreadView({
   // no reply target, so there is no composer.
   if (t.messages.length === 0) {
     return (
-      <div className="p-8">
-        <div className="mb-6 flex items-start gap-4">
-          <h1 className="text-2xl text-neutral-500">Unreadable conversation</h1>
+      <div className="p-3">
+        <div className="mb-3 flex items-center gap-2">
+          <h1 className="min-w-0 truncate text-base font-medium text-ink-dim">
+            Unreadable conversation
+          </h1>
           <button
             type="button"
             onClick={onDelete}
             title="Remove this conversation from this ship. Other ships keep their own copies."
-            className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
+            className="btn btn-danger btn-outline ml-auto shrink-0"
           >
             Delete
           </button>
         </div>
-        <p className="rounded bg-neutral-100 p-3 text-sm text-neutral-700 ring-1 ring-neutral-300">
+        <p className="max-w-prose rounded-sm bg-sunken p-2 text-ink-dim ring-1 ring-line">
           {t.unreadable === 0 && 'This conversation holds no message this ship can show.'}
           {t.unreadable === 1 && (
             <>
@@ -283,7 +285,7 @@ export default function ThreadView({
             </>
           )}
         </p>
-        {sendError && <p className="mt-3 text-sm text-red-600">{sendError}</p>}
+        {sendError && <p className="mt-2 text-danger">{sendError}</p>}
       </div>
     )
   }
@@ -366,8 +368,12 @@ export default function ThreadView({
       const ups = await Promise.all(files.map(toUpload))
       await send(to, `re: ${last.subject}`, reply, last.id, ups)
     } catch (e) {
+      // NO FALSE "SENT" OFFLINE. The worker never touches a POST, so a
+      // reply written with no network was not signed and did not leave.
       console.error(e)
-      setSendError('Could not send that reply. Try again.')
+      setSendError(navigator.onLine
+        ? 'Could not send that reply. Try again.'
+        : 'Offline — not sent. Nothing here has been signed; your reply is still here.')
       setSending(false)
       return
     }
@@ -385,9 +391,14 @@ export default function ThreadView({
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6 flex items-start gap-4">
-        <h1 className="text-2xl">{t.messages[0].subject}</h1>
+    <div className="p-3">
+      {/* The subject takes a line of its own below md and shares one
+          above it, so four controls and an attacker-chosen subject
+          cannot between them push this row wider than the pane. */}
+      <div className="mb-2 flex flex-wrap items-center gap-1">
+        <h1 className="min-w-0 basis-full truncate text-base font-medium md:basis-0 md:flex-1">
+          {t.messages[0].subject}
+        </h1>
         {/* Forward is a reply addressed elsewhere: same poke, `prev`
             pointing into this chain, `to` naming someone new. The chain
             it carries is the payload, and the recipient can verify every
@@ -401,7 +412,7 @@ export default function ThreadView({
             count: travels,
           })}
           title={`Hand this line of the conversation to someone new. The ${travels} signed ${travels === 1 ? 'message' : 'messages'} leading to this one travel; other branches do not. The recipient can verify each author independently.`}
-          className="ml-auto shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+          className="btn shrink-0"
         >
           Forward
         </button>
@@ -418,7 +429,7 @@ export default function ThreadView({
             ? 'Put this back in the inbox.'
             : 'Take this out of the inbox. Nothing is deleted, nothing is unsigned, and'
               + ' a new message in this conversation brings it back on its own.'}
-          className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+          className="btn shrink-0"
         >
           {t.archived ? 'Unarchive' : 'Archive'}
         </button>
@@ -427,7 +438,7 @@ export default function ThreadView({
           onClick={onUnread}
           title="Mark every message here unread and go back to the list. Messages whose
             signature failed are left alone: a forgery never counts toward unread."
-          className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300 hover:text-blue-700 hover:ring-blue-400"
+          className="btn shrink-0"
         >
           Mark unread
         </button>
@@ -435,7 +446,7 @@ export default function ThreadView({
           type="button"
           onClick={onDelete}
           title="Remove this conversation from this ship. The only way to free a thread pinned at a capacity limit."
-          className="shrink-0 rounded-full px-4 py-2 text-sm text-neutral-500 ring-1 ring-neutral-300 hover:text-red-700 hover:ring-red-400"
+          className="btn btn-danger shrink-0"
         >
           Delete
         </button>
@@ -443,28 +454,24 @@ export default function ThreadView({
       {/* Labels, and the button that adds one. A FOLDER IS A LABEL: there
           is no separate place a conversation can be filed, so this row is
           the whole of this thread's filing. None of it travels. */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-1">
         {t.labels.map((l) => (
           <span
             key={l}
-            className="flex items-center gap-1 rounded-full bg-blue-50 py-1 pl-3 pr-2 text-xs text-blue-800"
+            className="flex max-w-full items-center gap-1 rounded-sm bg-accent-soft py-0.5 pl-2 pr-1 text-[11px] text-accent-soft-ink"
           >
-            {l}
+            <span className="min-w-0 truncate">{l}</span>
             <button
               type="button"
               onClick={() => { void onLabel(l, false) }}
               aria-label={`Remove the label ${l}`}
-              className="px-1 text-blue-500 hover:text-red-600"
+              className="shrink-0 px-0.5 hover:text-danger"
             >
               ×
             </button>
           </span>
         ))}
-        <button
-          type="button"
-          onClick={addLabel}
-          className="rounded-full px-3 py-1 text-xs text-neutral-500 ring-1 ring-neutral-300 hover:text-blue-700"
-        >
+        <button type="button" onClick={addLabel} className="btn btn-outline">
           + label
         </button>
       </div>
@@ -475,7 +482,7 @@ export default function ThreadView({
           the difference between "your mail is gone" and a true statement
           the user can act on. */}
       {t.unreadable > 0 && (
-        <p className="mb-4 rounded bg-neutral-100 p-3 text-xs text-neutral-700 ring-1 ring-neutral-300">
+        <p className="mb-2 max-w-prose rounded-sm bg-sunken p-2 text-[11px] text-ink-dim ring-1 ring-line">
           {t.unreadable} stored {t.unreadable === 1 ? 'copy' : 'copies'} in this
           conversation {t.unreadable === 1 ? 'is' : 'are'} not shown: they were
           written in an older message format that this ship can no longer read.
@@ -488,15 +495,18 @@ export default function ThreadView({
         // genuine, others forged) — index into the fixed, backend-ordered
         // list, not `m.id`, or React's key collision folds distinct
         // verified/forged copies into one node.
-        <article key={i} className="mb-6 border-b border-neutral-100 pb-6">
-          <header className="mb-2 flex items-center gap-3 text-sm">
-            <span className="font-medium">{m.from}</span>
-            <VerdictBadge verdict={m.verdict} />
-            <span className="ml-auto text-neutral-400">
+        <article key={i} className="mb-3 border-b border-line pb-3">
+          <header className="mb-1 flex min-w-0 items-center gap-2">
+            <VerdictBadge verdict={m.verdict} from={m.from} />
+            <span className="min-w-0 truncate font-medium">{m.from}</span>
+            <span className="ml-auto shrink-0 text-[11px] text-ink-faint">
               {new Date(m.sent).toLocaleString()}
             </span>
           </header>
-          <p className="whitespace-pre-wrap">{m.body}</p>
+          {/* `break-words`, not just `whitespace-pre-wrap`: a body is
+              attacker-chosen text and one unbroken 400-character token
+              would otherwise decide how wide this pane is. */}
+          <p className="whitespace-pre-wrap break-words">{m.body}</p>
           {/* body-mime is signed, so an intermediary cannot change which
               message you read — but a signature proves the author CHOSE
               the value, never that it is safe, and the chain carrying it
@@ -505,7 +515,7 @@ export default function ThreadView({
               and a message that asked for anything else says so rather
               than looking like a rendering bug. */}
           {m['body-mime'] && m['body-mime'] !== 'text/plain' && (
-            <p className="mt-2 text-xs text-neutral-500">
+            <p className="mt-1 text-[11px] text-ink-dim">
               Sent as <code>{m['body-mime']}</code>; shown as plain text.
             </p>
           )}
@@ -527,7 +537,7 @@ export default function ThreadView({
               long one from pushing the layout around, and nothing here
               ever treats it as a path. */}
           {(m.attachments?.length ?? 0) > 0 && (
-            <ul className="mt-3 space-y-1">
+            <ul className="mt-2 space-y-1">
               {m.attachments!.map((a, j) => (
                 // `from` is a HINT about where to look for the bytes and
                 // nothing more: any ship holding them may serve them,
@@ -540,21 +550,21 @@ export default function ThreadView({
           )}
         </article>
       ))}
-      <div className="mb-2 rounded border border-neutral-300 p-3">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span className="text-sm text-neutral-500">To</span>
+      <div className="mb-1 rounded-sm border border-line p-2">
+        <div className="mb-1 flex flex-wrap items-center gap-1">
+          <span className="text-ink-dim">To</span>
           {recipients.map((r) => (
             <span
               key={r}
-              className="flex items-center gap-1 rounded-full bg-neutral-100 py-1 pl-3 pr-2 text-sm"
+              className="flex max-w-full items-center gap-1 rounded-sm bg-sunken py-0.5 pl-2 pr-1"
             >
-              {r}
+              <span className="min-w-0 truncate">{r}</span>
               <button
                 type="button"
                 onClick={() => setRecipients(recipients.filter((x) => x !== r))}
                 aria-label={`Remove ${r}`}
                 title={`Remove ${r} from this reply`}
-                className="px-1 text-neutral-500 hover:text-red-600"
+                className="shrink-0 px-0.5 text-ink-dim hover:text-danger"
               >
                 ×
               </button>
@@ -572,10 +582,10 @@ export default function ThreadView({
             }}
             placeholder="~sampel-palnet"
             aria-label="Add a recipient"
-            className="min-w-40 flex-1 py-1 text-sm outline-none"
+            className="field min-w-32 flex-1 border-b-0"
           />
         </div>
-        <p className="text-xs text-neutral-500">
+        <p className="text-[11px] text-ink-dim">
           Everyone listed receives the {travels} signed{' '}
           {travels === 1 ? 'message' : 'messages'} leading to this one, not just
           your reply — and nothing from other branches of the conversation.
@@ -590,10 +600,13 @@ export default function ThreadView({
         onChange={(e) => setReply(e.target.value)}
         maxLength={100000}
         placeholder="Reply"
-        className="h-28 w-full rounded border border-neutral-300 p-3"
+        className="field field-box h-28 resize-y"
       />
       <FilePicker files={files} onChange={setFiles} disabled={sending} />
-      <div className="mt-3 flex items-center gap-3">
+      {/* The one filled button in this pane. Forward, Archive, Mark
+          unread and Delete are all text-weight: exactly one primary per
+          surface, and on a thread the primary action is the reply. */}
+      <div className="mt-2 flex items-center gap-2">
         <button
           onClick={onReply}
           disabled={
@@ -601,12 +614,12 @@ export default function ThreadView({
             || sending
             || (recipients.length === 0 && !pending.trim())
           }
-          className="rounded-full bg-blue-600 px-6 py-2 text-white disabled:opacity-40"
+          className="btn btn-primary"
         >
           {sending ? 'Sending…' : 'Send'}
         </button>
-        {sendError && <span className="text-sm text-red-600">{sendError}</span>}
       </div>
+      {sendError && <p className="mt-1 text-danger">{sendError}</p>}
     </div>
   )
 }

@@ -56,19 +56,15 @@ export default function Filters({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-8">
-      <div className="mb-6 flex items-start gap-4">
-        <h1 className="text-2xl">Filters</h1>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ml-auto rounded-full px-4 py-2 text-sm text-neutral-600 ring-1 ring-neutral-300"
-        >
+    <div className="min-w-0 flex-1 overflow-y-auto p-3">
+      <div className="mb-3 flex items-center gap-2">
+        <h1 className="text-base font-medium">Filters</h1>
+        <button type="button" onClick={onClose} className="btn btn-outline ml-auto">
           Close
         </button>
       </div>
 
-      <p className="mb-6 max-w-prose rounded bg-neutral-100 p-3 text-sm text-neutral-700 ring-1 ring-neutral-300">
+      <p className="mb-3 max-w-prose rounded-sm bg-sunken p-2 text-ink-dim ring-1 ring-line">
         Rules run on mail as it arrives, <strong>after</strong> its signatures have
         been checked and after it has been stored. A rule can add labels and send a
         thread straight to Archived. It cannot delete anything, cannot mark anything
@@ -76,14 +72,14 @@ export default function Filters({
         evidence, and no rule you write can make it disappear.
       </p>
 
-      <ul className="mb-8 max-w-prose space-y-2">
-        {rules.length === 0 && <li className="text-sm text-neutral-400">No filters yet.</li>}
+      <ul className="mb-4 max-w-prose space-y-1">
+        {rules.length === 0 && <li className="text-ink-faint">No filters yet.</li>}
         {rules.map((r) => (
           <li
             key={r.id}
-            className="flex items-center gap-3 rounded border border-neutral-200 px-3 py-2 text-sm"
+            className="flex min-w-0 items-center gap-2 rounded-sm border border-line px-2 py-1"
           >
-            <span className="flex-1">
+            <span className="min-w-0 flex-1">
               {r.from && <>from <code>{r.from}</code> </>}
               {r.from && r.subject && 'and '}
               {r.subject && <>subject contains “{r.subject}” </>}
@@ -97,7 +93,7 @@ export default function Filters({
               type="button"
               onClick={() => onDelete(r.id)}
               aria-label="Delete this filter"
-              className="text-neutral-400 hover:text-red-600"
+              className="btn btn-danger shrink-0"
             >
               ×
             </button>
@@ -105,31 +101,30 @@ export default function Filters({
         ))}
       </ul>
 
-      <div className="max-w-prose space-y-2 rounded border border-neutral-300 p-4">
-        <h2 className="text-sm font-medium">New filter</h2>
+      <div className="max-w-prose space-y-1 rounded-sm border border-line p-2">
+        <h2 className="font-medium">New filter</h2>
         <input
           value={from} onChange={(e) => setFrom(e.target.value)}
           placeholder="From (~sampel-palnet)"
           aria-label="From"
-          className={`w-full border-b py-2 text-sm outline-none
-            ${shipBad ? 'border-red-400' : 'border-neutral-200'}`}
+          className={`field ${shipBad ? 'field-bad' : ''}`}
         />
         {shipBad && (
-          <p className="text-xs text-red-600">Not a ship name.</p>
+          <p className="text-[11px] text-danger">Not a ship name.</p>
         )}
         <input
           value={subject} onChange={(e) => setSubject(e.target.value)}
           placeholder="Subject contains"
           aria-label="Subject contains"
-          className="w-full border-b border-neutral-200 py-2 text-sm outline-none"
+          className="field"
         />
         <input
           value={labels} onChange={(e) => setLabels(e.target.value)}
           placeholder="Add labels (comma separated, lowercase)"
           aria-label="Labels to add"
-          className="w-full border-b border-neutral-200 py-2 text-sm outline-none"
+          className="field"
         />
-        <label className="flex items-center gap-2 py-2 text-sm">
+        <label className="touch flex items-center gap-2 py-1">
           <input
             type="checkbox"
             checked={archive}
@@ -140,11 +135,11 @@ export default function Filters({
         <button
           type="button"
           onClick={add}
-          className="rounded-full bg-blue-600 px-6 py-2 text-sm text-white"
+          className="btn btn-primary"
         >
           Add filter
         </button>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-danger">{error}</p>}
       </div>
     </div>
   )
