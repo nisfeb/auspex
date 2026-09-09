@@ -9,8 +9,6 @@ mod testutil;
 
 use std::sync::Mutex;
 
-use tauri::Manager;
-
 /// The menubar: Edit, then Preferences.
 ///
 /// Edit is not decoration. On macOS a webview only receives Cmd-C/V/X/A

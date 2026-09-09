@@ -113,15 +113,6 @@ impl Stub {
         r.into_iter().next().unwrap()
     }
 
-    /// The request for `target`. Panics if it never arrived.
-    pub fn got(&self, target: &str) -> Seen {
-        let r = self.requests();
-        r.iter()
-            .find(|s| s.target == target)
-            .unwrap_or_else(|| panic!("never asked for {target}; asked for {:?}", targets(&r)))
-            .clone()
-    }
-
     pub fn asked_for(&self, target: &str) -> bool {
         self.requests().iter().any(|s| s.target == target)
     }
