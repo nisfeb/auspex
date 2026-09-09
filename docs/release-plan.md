@@ -64,6 +64,18 @@ what the freeze exists to prevent. Nothing after this may change `unsigned`.
 
 ### Gate 2 — feature parity with what a mail client is
 
+**Status, 2026-09-08 — done.** All ten built, reviewed, and the review's five
+follow-ups landed (`164b1b8`…`381b1ec`): an empty-subject rule no longer matches
+everything; a search leaves the current pane so an archived forgery is findable;
+ship validation accepts only real syllable-group counts; autosave guards on what
+will be stored rather than what is on screen. Tests at desk revision 81, read
+from an explicit-revision run: **73 chain + 17 web, zero failures.**
+
+Still open and adjacent, not part of this gate: the UI shows an attachment's
+name and size but has no upload or download control. The API can express a
+file; the client cannot yet move one.
+
+
 The ten remaining features, all of which are tree walks on this architecture
 rather than the hand-rolled maps the old design was going to need. The designs
 are in the spec, under `# Specified but unbuilt`.
