@@ -604,7 +604,7 @@
 ::
 ++  max-blob     262.144      ::  bytes in one attachment
 ++  max-attach   16           ::  attachments per message
-++  max-name     257          ::  bytes of filename (THROWAWAY: republish test)
+++  max-name     256          ::  bytes of filename
 ++  max-mime     128          ::  bytes of content type
 ++  max-blobs    1.000        ::  blobs this ship will store
 ::  and the bound the spec actually asked for, which a count is not:
