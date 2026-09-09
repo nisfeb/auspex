@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Auspex</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 13px/1.45 system-ui, sans-serif; width: 19rem; margin: 0; padding: .85rem; }
+    h1 { font-size: 1rem; margin: 0 0 .5rem; }
+    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+           margin-right: .4rem; background: #999; }
+    .ok { background: #2e9e4f; } .bad { background: #c0392b; } .warn { background: #f9a804; }
+    dl { margin: .6rem 0; display: grid; grid-template-columns: auto 1fr; gap: .15rem .6rem; }
+    dt { opacity: .65; } dd { margin: 0; }
+    button, a.btn { font: inherit; padding: .35rem .6rem; margin-right: .35rem; }
+    a.btn { text-decoration: none; }
+    #err { color: #c0392b; margin-top: .5rem; }
+  </style>
+</head>
+<body>
+  <h1><span class="dot" id="dot"></span><span id="who">…</span></h1>
+  <dl>
+    <dt>Last sync</dt><dd id="last">—</dd>
+    <dt>Threads</dt><dd id="threads">—</dd>
+    <dt>Messages</dt><dd id="messages">—</dd>
+  </dl>
+  <div id="err"></div>
+  <p>
+    <button id="sync">Sync now</button>
+    <button id="web">Open web client</button>
+    <button id="opts">Options</button>
+  </p>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
