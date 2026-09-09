@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 const SHIP = process.env.SHIP_URL || 'http://localhost:8081'  // ~wex
 
-// Where the build lands: straight into the grubbery overlay, as the two
+// Where the build lands: straight into the grubbery overlay, as the four
 // files the nexus lays down as grubs in +on-load. They are committed
 // build output, the same way lattice commits its own ui-app/ — the
 // overlay IS the deploy source, so an artifact that is not in it does not
@@ -39,7 +39,7 @@ const SERVED = ['index.html', 'app.js', 'manifest.json', 'sw.js']
 // its own global scope, and running it through Rollup would emit a
 // second entry chunk. Copying it is the whole build step — except for
 // the version stamp, which is the only thing that can invalidate a shell
-// cache whose two files never change their names.
+// cache whose filenames never change.
 const inlineCss = (): Plugin => ({
   name: 'urmail-inline-css',
   apply: 'build',
@@ -49,13 +49,21 @@ const inlineCss = (): Plugin => ({
     const doc = readFileSync(html, 'utf8')
     const style = readFileSync(css, 'utf8')
 
-    // The cache key. Taken over the two files the worker precaches, so
-    // it changes exactly when the shell does and not once per build of
-    // identical output — a version bumped by the clock would evict
-    // every installed client's cache on every deploy, including the
-    // deploys that changed nothing.
+    // The cache key. Taken over EVERY file the worker precaches — the
+    // shell, its inlined CSS, the script and the manifest — so it
+    // changes exactly when one of them does and not once per build of
+    // identical output: a version bumped by the clock would evict every
+    // installed client's cache on every deploy, including the deploys
+    // that changed nothing.
+    //
+    // The manifest is in the chain because it is in SHELL_URLS. Left
+    // out, an edit to the app's name, colours or icon hashed to the
+    // same version, the worker kept serving the precached copy, and the
+    // change reached only browsers that had never installed it.
     const build = createHash('sha256')
-      .update(doc).update(style).update(readFileSync(resolve(OUT, 'app.js')))
+      .update(doc).update(style)
+      .update(readFileSync(resolve(OUT, 'app.js')))
+      .update(readFileSync(resolve(OUT, 'manifest.json')))
       .digest('hex').slice(0, 12)
     const sw = readFileSync(resolve(import.meta.dirname, 'sw.js'), 'utf8')
     if (!sw.includes('__URMAIL_BUILD__')) {

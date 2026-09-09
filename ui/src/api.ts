@@ -113,15 +113,38 @@ class ApiError extends Error {
   }
 }
 
+// THE SHIP ANSWERED AND THE ANSWER WAS NOT READABLE.
+//
+// Thrown only by `post` below, and only once `fetch` has resolved —
+// response headers arrived, so the request reached the ship and the
+// poke reached the writer. What failed after that was reading the body.
+// This is NOT a send that never left, and it is not a send that was
+// refused either: nobody here knows which it was, and the only honest
+// thing a client can say is "go and look at Sent".
+class GarbledError extends Error {}
+
 // DID THIS REQUEST REACH THE SHIP AT ALL?
 //
-// An ApiError is the ship answering: a refusal, a 404, a bad @p. Anything
-// else out of these calls is fetch rejecting, which means the request
-// never arrived — no poke, no signature, nothing written anywhere. The
+// An ApiError is the ship answering: a refusal, a 404, a bad @p. A
+// GarbledError is the ship answering unintelligibly. Anything else out
+// of these calls is fetch rejecting, which means the request never
+// arrived — no poke, no signature, nothing written anywhere. The
 // distinction is the whole of "no false sent": a send that was refused
 // and a send that never left need different words, and only one of them
 // is worth retrying by pressing the same button again.
-export const unreachable = (e: unknown): boolean => !(e instanceof ApiError)
+//
+// THE THIRD CASE IS WHY THIS IS NOT A BARE `instanceof ApiError` CHECK.
+// `res.json()` throws a plain SyntaxError (or a TypeError, on a body
+// that dies mid-stream) — a non-ApiError, and so "unreachable" under
+// the old test, which told a user nothing had been signed about a send
+// the writer may well have completed. That is a false negative on the
+// one guarantee this client makes about sending.
+export const unreachable = (e: unknown): boolean =>
+  !(e instanceof ApiError) && !(e instanceof GarbledError)
+
+// The middle case: reached the ship, no readable answer. Ask before
+// `unreachable`, or don't — they are exclusive by construction.
+export const garbled = (e: unknown): boolean => e instanceof GarbledError
 
 async function jsonOf(res: Response): Promise<unknown> {
   if (!res.ok) {
@@ -179,12 +202,29 @@ const get = async <T>(path: string, mail = false): Promise<T> => {
   return await jsonOf(res) as T
 }
 
+// A WRITE, AND THE ONLY PLACE THAT KNOWS WHETHER THE REQUEST LANDED.
+// `fetch` resolving is the fact worth recording: at that point the ship
+// has sent response headers, which it cannot have done without having
+// received the poke. Everything that fails after that flag is set —
+// a body that is not JSON, a connection dropped mid-body — is the ship
+// having answered, and gets said as such rather than as "never sent".
 const post = async (path: string, body: unknown): Promise<void> => {
-  await jsonOf(await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  }))
+  let answered = false
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    answered = true
+    await jsonOf(res)
+  } catch (e) {
+    // An ApiError is already the ship's own reason and travels intact.
+    if (answered && !(e instanceof ApiError)) {
+      throw new GarbledError(e instanceof Error ? e.message : 'unreadable response')
+    }
+    throw e
+  }
 }
 
 // Our own @p, with the sig. Needed in the UI so a reply composer can drop

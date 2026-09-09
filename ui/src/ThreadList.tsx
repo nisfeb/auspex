@@ -52,7 +52,16 @@ export default function ThreadList({
               ${selected === e.id ? 'bg-accent-soft' : ''}
               ${e.unread ? 'font-semibold text-ink' : 'text-ink-dim'}`}
           >
-            <VerdictBadge verdict={e.verdict} from={e.from} />
+            {/* A STRAIGHT SCAN COLUMN. Two of the verdicts are a glyph
+                and the third is a stamped word, so an unpadded slot
+                pushed the sender and subject of a forged row sideways
+                — nudging the one row a reader must be able to find by
+                running an eye down a straight edge. `min-w` on the slot
+                and nothing on the mark: the gutter gets wider, `forged`
+                is exactly as loud as it was. */}
+            <span className="flex min-w-14 shrink-0 items-center">
+              <VerdictBadge verdict={e.verdict} from={e.from} />
+            </span>
             <span className="w-24 shrink-0 truncate md:w-32">{e.from}</span>
             {e.count === 0 && e.unreadable > 0 ? (
               /* A thread this ship cannot read a single message of. There

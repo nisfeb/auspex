@@ -5,12 +5,12 @@
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `116668535c4c` is stamped by vite.config.ts at copy time. It is
+// `b4d07b0ce255` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = '116668535c4c'
+const VERSION = 'b4d07b0ce255'
 const SHELL = `urmail-shell-${VERSION}`
 // NOT versioned, unlike the shell. Mail is not part of the build: a
 // deploy that changes one line of CSS has nothing to say about the
@@ -147,10 +147,14 @@ self.addEventListener('fetch', (e) => {
         const hit = await caches.match(req)
         if (!hit) throw err
         // MARKED, so nothing downstream can mistake this for live mail.
-        // The app's offline banner is driven by `navigator.onLine` and
-        // does not need this; the header is here so that a response
-        // served from disk is distinguishable from one served by the
-        // ship at the point where someone is debugging which they got.
+        // THE APP READS THIS HEADER: `onCachedMail` in api.ts watches it
+        // and drives the "showing cached mail" banner off it. That is a
+        // stronger signal than `navigator.onLine`, which is false only
+        // when the machine has no network — a laptop on working wifi
+        // whose ship is down is online by that flag and stale by this
+        // one. So this line is load-bearing, not a debugging aid:
+        // dropping it makes a stale mailbox indistinguishable from a
+        // live one on the surface, not just in devtools.
         const h = new Headers(hit.headers)
         h.set('x-urmail-cached', '1')
         return new Response(await hit.blob(), {

@@ -147,10 +147,14 @@ self.addEventListener('fetch', (e) => {
         const hit = await caches.match(req)
         if (!hit) throw err
         // MARKED, so nothing downstream can mistake this for live mail.
-        // The app's offline banner is driven by `navigator.onLine` and
-        // does not need this; the header is here so that a response
-        // served from disk is distinguishable from one served by the
-        // ship at the point where someone is debugging which they got.
+        // THE APP READS THIS HEADER: `onCachedMail` in api.ts watches it
+        // and drives the "showing cached mail" banner off it. That is a
+        // stronger signal than `navigator.onLine`, which is false only
+        // when the machine has no network — a laptop on working wifi
+        // whose ship is down is online by that flag and stale by this
+        // one. So this line is load-bearing, not a debugging aid:
+        // dropping it makes a stale mailbox indistinguishable from a
+        // live one on the surface, not just in devtools.
         const h = new Headers(hit.headers)
         h.set('x-urmail-cached', '1')
         return new Response(await hit.blob(), {

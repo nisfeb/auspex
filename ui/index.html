@@ -10,8 +10,9 @@
          behind the owner gate — and a manifest is fetched anonymously by
          default, so without this attribute the browser's own fetch of it
          comes back 403 and the install silently degrades to a bookmark. The
-         icon is a data: URI inside the manifest for the same reason: a
-         separate icon fetch is not covered by this attribute everywhere. -->
+         icon the manifest names is served by the nexus from its own root
+         grub (/apps/urmail/icon.svg), which is the same route the launcher
+         tile pulls, so there is one icon and not two copies to drift. -->
     <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>urmail</title>

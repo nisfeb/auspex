@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteThread, isShip, markRead, markUnread, ourShip, send, setArchived, setLabel,
-  thread, toUpload, unreachable, type Message, type Thread,
+  deleteThread, garbled, isShip, markRead, markUnread, ourShip, send, setArchived,
+  setLabel, thread, toUpload, unreachable, type Message, type Thread,
 } from './api'
 import VerdictBadge from './VerdictBadge'
 import { AttachmentRow, FilePicker } from './Attachments'
@@ -372,10 +372,15 @@ export default function ThreadView({
       // never touches a POST, so a reply whose request did not arrive
       // was not signed and did not leave. See Compose.tsx.
       console.error(e)
-      setSendError(unreachable(e)
-        ? 'Offline — not sent. The ship did not answer; nothing was signed and your'
-          + ' reply is still here.'
-        : 'Could not send that reply. Try again.')
+      setSendError(garbled(e)
+        // Reached the ship, no readable answer: it may have gone out.
+        // Sending it again on a "not sent" would be the duplicate.
+        ? 'The ship answered but the reply was unreadable — check Sent before'
+          + ' resending. Your reply is still here.'
+        : unreachable(e)
+          ? 'Offline — not sent. The ship did not answer; nothing was signed and your'
+            + ' reply is still here.'
+          : 'Could not send that reply. Try again.')
       setSending(false)
       return
     }
@@ -467,7 +472,7 @@ export default function ThreadView({
               type="button"
               onClick={() => { void onLabel(l, false) }}
               aria-label={`Remove the label ${l}`}
-              className="shrink-0 px-0.5 hover:text-danger"
+              className="touch shrink-0 px-0.5 hover:text-danger"
             >
               ×
             </button>
@@ -566,7 +571,7 @@ export default function ThreadView({
                 onClick={() => setRecipients(recipients.filter((x) => x !== r))}
                 aria-label={`Remove ${r}`}
                 title={`Remove ${r} from this reply`}
-                className="shrink-0 px-0.5 text-ink-dim hover:text-danger"
+                className="touch shrink-0 px-0.5 text-ink-dim hover:text-danger"
               >
                 ×
               </button>

@@ -60,6 +60,9 @@ export default function App() {
   // the first paint (from localStorage, else prefers-color-scheme), so
   // this reads the decision rather than making it — a second, later
   // decision here would be a flash of the wrong palette on every load.
+  // Nothing below writes storage except the toggle: an unstored theme
+  // is a theme still following the system, and that is a state the app
+  // has to be able to stay in.
   const [theme, setTheme] = useState<'light' | 'dark'>(
     () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
   )
@@ -83,10 +86,32 @@ export default function App() {
   // Below md the three panes are one pane, and the sidebar is a drawer.
   const [navOpen, setNavOpen] = useState(false)
 
+  // THE CLASS, AND ONLY THE CLASS. Persisting here would write a
+  // preference nobody expressed: this effect also runs on mount, so a
+  // first visit stored whatever the system happened to say that day and
+  // the app stopped following the system from then on. The one place a
+  // real choice is made is the sidebar toggle, and that is the only
+  // place that writes storage.
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
-    try { localStorage.setItem(THEME_KEY, theme) } catch { /* private mode */ }
   }, [theme])
+
+  // FOLLOW THE SYSTEM WHILE NOTHING IS STORED. index.html makes this
+  // same decision once, before the first paint; this keeps it true for a
+  // tab that is already open when the system flips at sunset. The stored
+  // value is read when the event fires and not at mount, so the first
+  // toggle silences this listener for good without needing to unbind it.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const follow = (e: MediaQueryListEvent) => {
+      let saved: string | null = null
+      try { saved = localStorage.getItem(THEME_KEY) } catch { /* private mode */ }
+      if (saved === 'light' || saved === 'dark') return
+      setTheme(e.matches ? 'dark' : 'light')
+    }
+    mq.addEventListener('change', follow)
+    return () => { mq.removeEventListener('change', follow) }
+  }, [])
 
   useEffect(() => {
     const offer = (e: Event) => {
@@ -354,7 +379,15 @@ export default function App() {
             }}
             onFilters={() => goto('rules')}
             theme={theme}
-            onTheme={() => { setTheme(theme === 'dark' ? 'light' : 'dark') }}
+            onTheme={() => {
+              // A REAL CHOICE, and the only thing that makes one stick.
+              // Until this runs the app is following the system, which
+              // is what "follows prefers-color-scheme, with a manual
+              // override that persists" means in the two directions.
+              const next = theme === 'dark' ? 'light' : 'dark'
+              setTheme(next)
+              try { localStorage.setItem(THEME_KEY, next) } catch { /* private mode */ }
+            }}
             installable={install !== null}
             onInstall={() => {
               // One shot. The event cannot be prompted twice, so it is

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft, isShip, newId, saveDraft, send, sendDraft, toUpload, unreachable,
+  deleteDraft, garbled, isShip, newId, saveDraft, send, sendDraft, toUpload, unreachable,
   type Draft,
 } from './api'
 import { FilePicker } from './Attachments'
@@ -194,12 +194,22 @@ export default function Compose({
       // cannot make, since a machine with working wifi and a ship that
       // is down is "online". Saying "check the recipient" there would
       // send the user hunting a typo that is not there.
+      //
+      // AND THE THIRD CASE, which is neither: `fetch` resolved and the
+      // body did not parse. The ship answered, so the poke arrived, so
+      // this send may have gone out — see `garbled` in api.ts.
       console.error(e)
       setError(
-        unreachable(e)
-          ? 'Offline — not sent. The ship did not answer, nothing here has been'
-            + ' signed, and every word is still in this panel. Try again when it is back.'
-          : e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.',
+        garbled(e)
+          // THE REQUEST LANDED AND THE ANSWER DID NOT PARSE. The poke
+          // reached the writer, so this may well have been sent — and
+          // "not sent, try again" here is how a message goes out twice.
+          ? 'The ship answered but the reply was unreadable — check Sent before'
+            + ' resending. Every word is still in this panel.'
+          : unreachable(e)
+            ? 'Offline — not sent. The ship did not answer, nothing here has been'
+              + ' signed, and every word is still in this panel. Try again when it is back.'
+            : e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.',
       )
     } finally {
       setSending(false)

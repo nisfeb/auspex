@@ -23,6 +23,13 @@ import type { Verdict } from './api'
 // palettes (see index.css): red on a dark ground is not automatically
 // legible, and the dark values were chosen against the dark forged
 // background rather than inherited from the light ones.
+//
+// `role="img"` ON ALL THREE. A bare <span> has no role, and an
+// `aria-label` on a role-less element is not exposed — so when two of
+// these shrank to a glyph, the glyph carried a name no screen reader
+// read out. `role="img"` is the role for "a graphic whose meaning is
+// its label", which is exactly what a check, a ring and a stamped word
+// each are here.
 export default function VerdictBadge({ verdict, from, className = '' }: {
   verdict: Verdict
   // The sender this verdict is about. The tooltip names the ship,
@@ -36,6 +43,7 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
   if (verdict === 'forged') {
     return (
       <span
+        role="img"
         title={`A key was available for ${who} and the signature failed against it. This message is not from the ship it claims.`}
         aria-label={`Forged: the signature failed against ${who}'s registered key`}
         className={`shrink-0 rounded-sm bg-forged-bg px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-forged-ink ring-1 ring-forged-line ${className}`}
@@ -48,6 +56,7 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
   if (verdict === 'verified') {
     return (
       <span
+        role="img"
         title={`Signed by ${who}, signature verified against their key.`}
         aria-label={`Verified: signed by ${who}, signature verified against their key`}
         className={`shrink-0 text-[13px] leading-none text-ok ${className}`}
@@ -59,6 +68,7 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
 
   return (
     <span
+      role="img"
       title={`No key available for ${who}, so the signature could not be checked. Moons and comets always land here.`}
       aria-label={`Unverified: no key available for ${who}, so the signature could not be checked`}
       className={`shrink-0 text-[13px] leading-none text-ink-faint ${className}`}

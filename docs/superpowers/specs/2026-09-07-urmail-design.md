@@ -962,13 +962,17 @@ answers.** That split is what the per-request fibers are for: a send fans out to
 every recipient with a deadline each, and a render or a round trip placed on the
 writer would queue every other mutation on the ship behind it.
 
-The client is **two grubs**, laid down by `+on-load` and served under the app's
-own route: a shell with its CSS inlined and one script. Assets carried in cords
-wedge every request fiber, which is why lattice ships one document plus one
-script and why this does too — the build refuses to emit a third file. They are
-served `no-cache`: the two grubs are replaced wholesale by a reload, and a cached
-shell pointing at a script that no longer matches it is a blank page with nothing
-in the console.
+The client is **four grubs**, laid down by `+on-load` and served under the app's
+own route: `index.html` (the shell, with its CSS inlined), `app.js` (the whole
+script), `manifest.json` (the install manifest, which points at the
+launcher tile's own `icon.svg` — a nexus-root grub beside these four, not a
+fifth file under `/app`) and `sw.js` (the service worker). Assets carried in cords wedge every
+request fiber, which is why lattice ships one document plus one script and why
+the *running* app is still exactly that — the build refuses to emit a fifth file,
+and the two the browser added are fetched once at install and never again on a
+render. All four are served `no-cache`: they are replaced wholesale by a reload,
+and a cached shell pointing at a script that no longer matches it is a blank page
+with nothing in the console.
 
 `whoami` exists because the reply composer drops us from its own default
 recipient list, and the client is no longer configured with a ship name — it is
