@@ -1778,9 +1778,13 @@
   |=  [ours=(list @ud) theirs=(list @ud)]
   ^-  (unit @ud)
   =/  ts  (~(gas in *(set @ud)) theirs)
-  =/  hits  (skim ours |=(v=@ud (~(has in ts) v)))
+  =/  hits=(list @ud)  (skim ours |=(v=@ud (~(has in ts) v)))
   ?~  hits  ~
-  `(roll hits |=([v=@ud acc=@ud] ?:((gth v acc) v acc)))
+  ::  `(list @ud)`hits, not hits: ?~ has narrowed it to a NON-EMPTY list
+  ::  and +roll is a wet gate that recurses on its own sample, so the
+  ::  recursion hands ~ to a gate whose sample no longer admits it. The
+  ::  same shape +has-sub and +term-ok above already carry a note for.
+  `(roll `(list @ud)`hits |=([v=@ud acc=@ud] ?:((gth v acc) v acc)))
 ::
 ::  +mark-for: the wire mark a peer named for one version.
 ::
