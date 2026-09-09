@@ -20,6 +20,10 @@
 #                         marks a peer pokes have to sit at the top of gub/mar)
 #   mar-clay/**        -> gub/mar/clay/   (cross-desk poke marks)
 #   mar-core/*.hoon    -> mar/            (desk-level marks a DOJO poke resolves)
+#   gen/*.hoon         -> gen/            (desk-level %say generators, run as
+#                         +grubbery!<name>. Desk-level and not gub/, because a
+#                         generator is built by ford with /- and /+ runes and
+#                         imports the SAME lib the tests do)
 #   tests/**           -> tests/          (run via -test /=grubbery=/tests/...)
 #
 # Idempotent, and NEVER --delete: this writes into trees grubbery owns.
@@ -102,10 +106,11 @@ shadow_scan "$OVERLAY/mar"       "$DEST/gub/mar"
 shadow_scan "$OVERLAY/mar-gub"   "$DEST/gub/mar"
 shadow_scan "$OVERLAY/mar-clay"  "$DEST/gub/mar/clay"
 shadow_scan "$OVERLAY/mar-core"  "$DEST/mar"
+shadow_scan "$OVERLAY/gen"       "$DEST/gen"
 shadow_scan "$OVERLAY/tests"     "$DEST/tests"
 [ "$BAD" -eq 0 ] || exit 69
 
-mkdir -p "$DEST/gub/lib" "$DEST/lib" "$DEST/tests/lib" "$DEST/mar"
+mkdir -p "$DEST/gub/lib" "$DEST/lib" "$DEST/tests/lib" "$DEST/mar" "$DEST/gen"
 
 # Pure libs: into gub/lib for the nexus, and into desk-level lib so -test can
 # build them. The SAME file has to compile in both, which is why an overlay lib
@@ -137,6 +142,11 @@ fi
 if [ -d "$OVERLAY/mar-core" ]; then
   rsync -a --exclude 'README.md' "$OVERLAY/mar-core/" "$DEST/mar/"
 fi
+# Generators: desk-level, alongside the tests and for the same reason - both
+# are built by ford against $DEST/lib, not against gub/lib.
+if [ -d "$OVERLAY/gen" ]; then
+  rsync -a "$OVERLAY/gen/" "$DEST/gen/"
+fi
 # Tests: desk-level.
 rsync -a "$OVERLAY/tests/" "$DEST/tests/"
 
@@ -149,7 +159,8 @@ NEX=$(count "$DEST/gub/nex/auspex" -type f)
 UIA=$(count "$DEST/gub/nex/auspex/ui-app" -type f)
 MAR=$(count "$DEST/gub/mar/auspex" -type f)
 WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'auspex-*.hoon')
-echo "synced overlay -> $DEST (auspex libs: $LIB, tests: $TST, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
+GEN=$(count "$DEST/gen" -maxdepth 1 -name 'auspex-*.hoon')
+echo "synced overlay -> $DEST (auspex libs: $LIB, tests: $TST, gen: $GEN, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
 if [ "$UIA" -ne 4 ]; then
   echo "WARNING: ui-app should be exactly index.html, app.js, manifest.json and sw.js;" >&2
   echo "  found $UIA. Run (cd ui && npm run build) and sync again, or /apps/auspex" >&2
@@ -172,7 +183,11 @@ next, in the ~<ship> dojo - one command at a time, verify each echo:
   |suspend %grubbery
   |revive %grubbery
   -test /=grubbery=/tests/lib/auspex-chain ~
+  -test /=grubbery=/tests/lib/auspex-vectors ~
   -test /=grubbery=/tests/lib/auspex-web ~
+
+the conformance vectors (a generator needs no bounce):
+  *%/protocol/vectors/v1/txt +grubbery!auspex-vectors
 NEXT
 
 # ---------------------------------------------------------------------------

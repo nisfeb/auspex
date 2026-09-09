@@ -1228,8 +1228,32 @@ crypto is involved.
 The vectors are produced by a `%say` generator in the overlay,
 `grubbery-overlay/gen/auspex-vectors.hoon`, which imports the library with
 `/+  auspex-chain`. Sync it into a grubbery desk with
-`scripts/sync-overlay.sh <desk-root>` (which maps `gen/` → `gen/`),
-`|commit %grubbery`, then run it in the dojo.
+`scripts/sync-overlay.sh <desk-root>` (which maps `gen/` → `gen/`), then in the
+dojo:
+
+```
+|commit %grubbery                 ::  wait for "build-code: done"
+=dir /~<ship>/grubbery/<rev>      ::  the revision the commit just printed
++auspex-vectors
+```
+
+It answers a `%txt` of 72-character chunks of **one** JSON document. Rejoining
+the printed lines with **no separator** — strip the dojo's two-space indent and
+concatenate — restores the document byte for byte; `*%/protocol/vectors/v1/txt
++auspex-vectors` writes the same lines into clay as a file.
+
+Two dojo facts that will otherwise cost an hour:
+
+- **`+<desk>!<gen>` resolves the generator against the dojo's *current case*,
+  not the desk head.** With `=dir` left at an earlier case, the dojo cheerfully
+  rebuilds an older copy of the generator and reports its errors; with `=dir` at
+  a date before the file existed, clay answers `read-at-tako fail`. Pin `=dir`
+  to the revision number the `|commit` printed.
+- **`|commit` issued while `=dir` points into `%grubbery` at a pinned case
+  hangs**, because the hood generator it builds cannot be found at that case.
+  It produces no output at all — not even the `>=` ack. Move `=dir` back to a
+  live `%base` path before committing. (Backspace cancels a hung dojo command;
+  the trace reads `! cancel /hand/gen/hood/commit`.)
 
 ### 8.3 The conformance test
 
