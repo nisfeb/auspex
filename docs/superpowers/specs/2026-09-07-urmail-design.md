@@ -1216,3 +1216,38 @@ The port itself, and the arguments it settled, are recorded in the slice reports
 under `.superpowers/sdd/2026-09-07-urmail/` — which is **gitignored**, so those
 reports live on this machine and nowhere else. `docs/verification.md` carries
 what they proved.
+
+---
+
+# The client, second pass — compact, dark, responsive, installable
+
+Six changes from the user after using it. All client; none touches the nexus
+except a manifest and service worker served as grubs.
+
+1. **Density.** Too much whitespace. Gmail's density: tight rows, one line per
+   thread in the list, small type, no decorative padding. Compact is the
+   default; there is no "comfortable" toggle.
+2. **Dark mode.** Follows `prefers-color-scheme`, with a manual override that
+   persists in `localStorage`. Every colour is a token; both palettes complete.
+   `forged` must stay alarming in both — red on dark is not automatically
+   legible.
+3. **The verdict badge is too big.** `verified` becomes a small check mark with
+   a tooltip on hover naming what it means ("signed by ~ship, signature
+   verified against their key"). `unverified` a hollow mark, `forged` stays a
+   visible red mark with the word — it is the one that must not shrink into
+   ambiguity. Per message, as before; never per thread.
+4. **Buttons.** Small, square-cornered, text-weight. Gmail's, not a toy's. One
+   primary per surface; the rest are quiet.
+5. **Responsive and installable.** Works on a phone: the three panes collapse
+   to one with navigation between them; touch targets sized for fingers; no
+   horizontal scroll ever. A full PWA: manifest, icons, a service worker that
+   caches the shell so the app opens offline and shows cached mail, with a
+   clear "offline" state and no false "sent". Install prompt on supported
+   browsers. Served from the nexus as grubs like the shell and script.
+6. **"All mail" leaves the sidebar.** The `all` view stays as an API primitive
+   — search uses it to escape the current pane, and label discovery reads it —
+   but it is not a place a user navigates to.
+
+What does not change: per-message verdicts, honest copy counts, editable reply
+recipients, the blast-radius line, and every rule under `## The web surface`
+about what the client may and may not trust.
