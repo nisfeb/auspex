@@ -1,0 +1,186 @@
+name: release
+
+# Build the desktop app for every supported platform and attach the bundles to
+# a GitHub release. Triggered by a version tag (v0.1.0), or by hand.
+#
+# Windows IS in the matrix. Lattice excludes it because its app depends on
+# lattice-fs, which mounts through `fuser`, and fuser is unix-only. Nothing
+# here mounts anything: the app is a webview, a localhost bridge and a thread
+# reading an SSE stream, all of which build on Windows unchanged.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 'create the release as a draft'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write        # needed to create the release and upload assets
+
+jobs:
+  # A tag that disagrees with the version tauri stamps into the bundles would
+  # ship "auspex 0.1.0" from a tag called v0.4.0. Wrong in the filename, the
+  # About box and the .deb metadata, and invisible until someone reports it.
+  # Fail before spending matrix build time.
+  verify:
+    name: version + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag matches tauri.conf.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(node -p "require('./desktop/tauri.conf.json').version")
+          echo "tag=$tag  tauri.conf.json=$conf"
+          if [ "$tag" != "$conf" ]; then
+            echo "::error::tag v$tag does not match desktop/tauri.conf.json version $conf — bump the config, or retag" >&2
+            exit 1
+          fi
+      # Tag pushes do not run ci.yml (it gates on branches), so a release could
+      # otherwise ship code no test ever saw.
+      - name: build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
+            pkg-config
+      - name: cargo test — desktop
+        working-directory: desktop
+        run: cargo test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: the served UI artifact is current
+        run: |
+          (cd ui && npm ci && npm run build)
+          git diff --exit-code grubbery-overlay/nex/auspex/ui-app
+
+  # ONE release, made once. In lattice each build job used to run "find the
+  # draft release for this tag, or create it" concurrently, and one tag came
+  # out as TWO releases with the artifacts split between them. The run still
+  # reported success, and the Linux build (the one most people need) was on
+  # the release nobody was looking at.
+  #
+  # Creating it here and handing the builders an id removes the race instead
+  # of narrowing it.
+  create-release:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.mk.outputs.id }}
+    steps:
+      - name: create the draft release
+        id: mk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('untagged-{0}', github.sha) }}
+          PRE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          set -euo pipefail
+          body=$(cat <<'BODY'
+          The auspex mail client in a desktop window, with native notifications
+          for new mail. Linux (`.deb`, `.AppImage`), macOS (`.dmg`, Apple
+          Silicon and Intel) and Windows (`.msi`, `.exe` installer), all
+          x86_64 unless noted. The client itself is served live from your ship
+          and never bundled here.
+
+          All builds are unsigned; on macOS, right-click → Open the first time.
+          BODY
+          )
+          #  reuse an existing draft for this tag rather than adding another,
+          #  so a re-run does not recreate the duplicate this job exists to stop
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+                 --jq "[.[] | select(.tag_name==\"${TAG}\")] | first | .id // empty")
+          if [ -z "$id" ]; then
+            id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+                   -f tag_name="${TAG}" \
+                   -f name="auspex ${TAG}" \
+                   -F draft=true \
+                   -F prerelease="${PRE}" \
+                   -f body="$body" --jq .id)
+            echo "created release $id for ${TAG}"
+          else
+            echo "reusing existing release $id for ${TAG}"
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [verify, create-release]
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false     # one platform failing should not hide the others
+      matrix:
+        include:
+          # 22.04, not latest: the glibc a bundle is built against is the
+          # OLDEST it runs on, so building on the newest ubuntu quietly drops
+          # support for every still-supported distro below it.
+          - os: ubuntu-22.04
+            label: linux-x86_64 (deb + appimage)
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            label: macos-aarch64 (dmg)
+            target: aarch64-apple-darwin
+          # Cross-compiled on the SAME arm64 runner rather than on macos-13.
+          # GitHub's Intel macOS capacity is scarce enough that a macos-13 job
+          # can sit queued for hours and never start, so depending on it means
+          # never shipping an Intel build. Apple Silicon hosts
+          # x86_64-apple-darwin fine.
+          - os: macos-14
+            label: macos-x86_64 (dmg, cross from arm64)
+            target: x86_64-apple-darwin
+          # Windows needs no extra deps at all: the webview is the system's
+          # own WebView2, and nothing here links a unix-only crate.
+          - os: windows-latest
+            label: windows-x86_64 (msi + nsis)
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop -> target
+
+      - name: linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
+            libxdo-dev libssl-dev pkg-config file
+
+      - name: build and upload
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No APPLE_* vars here on purpose. `${{ secrets.X }}` for a secret
+          # that does not exist renders an EMPTY STRING, which is not the same
+          # as not setting the variable: tauri sees APPLE_CERTIFICATE present,
+          # tries to import it, and the macOS build dies with "failed to run
+          # command security import". Passing nothing produces an unsigned
+          # bundle, which is the intended default here.
+          #
+          # To sign later, add the block below AND the matching repo secrets.
+          # Both, or the same failure returns:
+          #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
+          #   APPLE_SIGNING_IDENTITY / APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+        with:
+          projectPath: desktop
+          args: --target ${{ matrix.target }}
+          # upload into the release create-release already made. No tagName
+          # or releaseName here on purpose: giving the action those is what
+          # makes it go looking for a release to create.
+          #
+          # It stays a DRAFT until a human publishes it: a release is
+          # outward-facing and irreversible once people have the URL.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
