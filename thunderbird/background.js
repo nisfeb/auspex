@@ -185,6 +185,40 @@ async function importOne(api, item, folders, imported, flags) {
   }
 }
 
+//  A STORED THUNDERBIRD ID IS A HINT, NEVER AN ADDRESS.
+//
+//    `MessageHeader.id` is minted by Thunderbird's message tracker as
+//    messages are encountered, and it is NOT stable across restarts.
+//    Proven in a scratch profile: a record whose `tbId` was 16 came back
+//    holding a different message's Message-ID entirely, several restarts
+//    after the import that wrote it.
+//
+//    A flag written through a stale id marks THE WRONG MAIL, silently,
+//    which is worse than not writing it at all — and read state has been
+//    going through the same door since the mirror was written.
+//
+//    So the id is checked against the Message-ID it is supposed to name,
+//    and re-found by that name when it is wrong or gone. The record is
+//    repaired in place, so the cost is one lookup per moved message per
+//    restart and nothing at all afterwards. A message the mirror recorded
+//    with no id at all — the duplicate-Message-ID case below — is found
+//    the same way.
+async function headerFor(auspexId, rec) {
+  if (rec.tbId !== null && rec.tbId !== undefined) {
+    try {
+      const h = await browser.messages.get(rec.tbId)
+      if (h && idFromMessageId(h.headerMessageId) === auspexId) return h
+    } catch { /* gone from under that id: look it up by name */ }
+  }
+  try {
+    const found = await browser.messages.query({ headerMessageId: `${auspexId}@${DOMAIN}` })
+    const h = (found.messages || [])[0]
+    if (!h) return null
+    rec.tbId = h.id
+    return h
+  } catch { return null }
+}
+
 let syncing = false
 
 async function syncNow() {
@@ -258,7 +292,9 @@ async function syncNow() {
     for (const [ids, read] of [[ops.read, true], [ops.unread, false]]) {
       for (const id of ids) {
         const rec = imported[id]
-        if (!rec || rec.tbId === null) continue
+        if (!rec) continue
+        const header = await headerFor(id, rec)
+        if (!header) continue
         //  the record moves FIRST, so the onUpdated this provokes sees a
         //  flag that already matches and posts nothing back.
         rec.read = read
@@ -274,9 +310,9 @@ async function syncNow() {
     for (const wantFlags of want.values()) {
       for (const msgId of wantFlags.ids) {
         const rec = imported[msgId]
-        if (!rec || rec.tbId === null) continue
-        let current
-        try { current = await browser.messages.get(rec.tbId) } catch { continue }
+        if (!rec) continue
+        const current = await headerFor(msgId, rec)
+        if (!current) continue
         const patch = flagUpdate(current, wantFlags)
         //  the record moves FIRST, so the onUpdated this provokes sees
         //  flags that already match and posts nothing back.

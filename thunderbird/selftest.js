@@ -153,17 +153,23 @@ export async function runSelftest(cfg, api) {
   const shipThread = async (id) => (await api.apiFor()).thread(id)
 
   //  Every mirrored message of one thread: the ship's own membership,
-  //  looked up in the mirror's bookkeeping. Asking the ship rather than
-  //  the mirror is what makes "EVERY message of that thread" mean the
-  //  thread's messages and not just the ones the mirror happens to agree
-  //  are in it.
+  //  each looked up in Thunderbird BY MESSAGE-ID.
+  //
+  //    Neither half of this comes from the extension's bookkeeping, and
+  //    that is the point. The ship says which messages are in the thread;
+  //    Thunderbird says which local message carries each id. A test that
+  //    read `imported[id].tbId` would be asking the thing under test
+  //    where to look, and would pass just as happily against a record
+  //    pointing at the wrong mail.
   const mirrored = async (threadId) => {
     const t = await shipThread(threadId)
-    const imported = (await api.getState()).imported
     const out = []
     for (const m of (t.messages || [])) {
-      const rec = imported[m.id]
-      if (rec && rec.tbId !== null) out.push({ id: m.id, tbId: rec.tbId })
+      try {
+        const found = await browser.messages.query({ headerMessageId: `${m.id}@auspex.urbit` })
+        const h = (found.messages || [])[0]
+        if (h) out.push({ id: m.id, tbId: h.id })
+      } catch { /* not mirrored */ }
     }
     return out
   }
@@ -176,42 +182,58 @@ export async function runSelftest(cfg, api) {
     return out
   }
 
+  //  What a flag step reports, pass or fail. A bare "labels []" says the
+  //  ship has no label and nothing about WHY — whether the local flag
+  //  even moved, whether the message under that id is the one meant, and
+  //  what the mirror had recorded about it.
+  const seenOf = async (target, before, after, t) => JSON.stringify({
+    want: target.id,
+    header: after.headerMessageId,
+    wasFlagged: before.flagged, nowFlagged: after.flagged,
+    wasJunk: before.junk, nowJunk: after.junk,
+    record: (await api.getState()).imported[target.id],
+    labels: (t && t.labels) || null,
+    archived: t ? t.archived : null,
+  })
+
+  //  Set one flag on one mirrored message and read the ship back. The
+  //  relay is debounced by two seconds; the local read at 1.5s is before
+  //  that, so it says whether Thunderbird took the write at all
+  //  independently of whether the ship heard about it.
+  const localFlag = async (threadId, patch) => {
+    const ms = await mirrored(threadId)
+    if (!ms.length) throw new Error(`nothing mirrored for ${threadId}`)
+    const target = ms[0]
+    const before = await browser.messages.get(target.tbId)
+    await browser.messages.update(target.tbId, patch)
+    await sleep(1500)
+    const after = await browser.messages.get(target.tbId)
+    await sleep(4000)
+    const t = await shipThread(threadId)
+    return { target, before, after, t, seen: await seenOf(target, before, after, t) }
+  }
+
   await step('flag-star', async () => {
-    const ms = await mirrored(cfg.starThread)
-    if (!ms.length) throw new Error(`nothing mirrored for ${cfg.starThread}`)
-    await browser.messages.update(ms[0].tbId, { flagged: true })
-    //  the relay is debounced by two seconds; five is that plus the round
-    //  trip, and a bare sleep is honest here because the thing waited on
-    //  is a timer this process owns.
-    await sleep(5000)
-    const t = await shipThread(cfg.starThread)
-    const labels = t.labels || []
-    if (!labels.includes('flagged')) throw new Error(`labels ${JSON.stringify(labels)}`)
-    return JSON.stringify({ starred: ms[0].id, labels, archived: t.archived })
+    const r = await localFlag(cfg.starThread, { flagged: true })
+    if (!(r.t.labels || []).includes('flagged')) throw new Error(r.seen)
+    return r.seen
   })
 
   await step('flag-junk', async () => {
-    const ms = await mirrored(cfg.junkThread)
-    if (!ms.length) throw new Error(`nothing mirrored for ${cfg.junkThread}`)
-    await browser.messages.update(ms[0].tbId, { junk: true })
-    await sleep(5000)
-    const t = await shipThread(cfg.junkThread)
-    const labels = t.labels || []
+    const r = await localFlag(cfg.junkThread, { junk: true })
     //  BOTH, and this is the whole point of the flame being two calls.
-    if (!labels.includes('junk')) throw new Error(`labels ${JSON.stringify(labels)}`)
-    if (t.archived !== true) throw new Error(`archived ${t.archived}`)
-    return JSON.stringify({ junked: ms[0].id, labels, archived: t.archived })
+    if (!(r.t.labels || []).includes('junk')) throw new Error(r.seen)
+    if (r.t.archived !== true) throw new Error(r.seen)
+    return r.seen
   })
 
   await step('flag-unjunk', async () => {
-    const ms = await mirrored(cfg.junkThread)
-    await browser.messages.update(ms[0].tbId, { junk: false })
-    await sleep(5000)
-    const t = await shipThread(cfg.junkThread)
-    const labels = t.labels || []
-    if (labels.includes('junk')) throw new Error(`labels ${JSON.stringify(labels)}`)
-    if (t.archived !== false) throw new Error(`archived ${t.archived}`)
-    return JSON.stringify({ unjunked: ms[0].id, labels, archived: t.archived })
+    const r = await localFlag(cfg.junkThread, { junk: false })
+    //  the flag has to have BEEN set, or this proves nothing at all.
+    if (!r.before.junk) throw new Error(`was not junk to begin with: ${r.seen}`)
+    if ((r.t.labels || []).includes('junk')) throw new Error(r.seen)
+    if (r.t.archived !== false) throw new Error(r.seen)
+    return r.seen
   })
 
   //  SHIP → THUNDERBIRD. The label is put on by the harness outside, with
@@ -232,20 +254,24 @@ export async function runSelftest(cfg, api) {
     const others = await mirrored(cfg.untouchedThread)
     const flags = await flagsOf(ours)
     const otherFlags = await flagsOf(others)
-    if (!ours.length) throw new Error('nothing mirrored for the inbound thread')
-    if (!others.length) throw new Error('nothing mirrored for the untouched thread')
-    if (flags.some((f) => !f)) throw new Error(`not every message flagged: ${JSON.stringify(flags)}`)
-    if (otherFlags.some((f) => f)) {
-      throw new Error(`an untouched thread is flagged: ${JSON.stringify(otherFlags)}`)
-    }
-    return JSON.stringify({
+    const missed = ours.filter((m, i) => !flags[i]).map((m) => m.id)
+    const stray = others.filter((m, i) => otherFlags[i]).map((m) => m.id)
+    const seen = JSON.stringify({
       sync: r,
       thread: cfg.inboundThread,
       labels: t.labels,
-      flagged: flags,
+      mirrored: ours.length,
+      flagged: flags.filter(Boolean).length,
+      missed,
       untouched: cfg.untouchedThread,
-      untouchedFlags: otherFlags,
+      untouchedCount: others.length,
+      stray,
     })
+    if (!ours.length) throw new Error(`nothing mirrored for the inbound thread: ${seen}`)
+    if (!others.length) throw new Error(`nothing mirrored for the untouched thread: ${seen}`)
+    if (missed.length) throw new Error(`not every message flagged: ${seen}`)
+    if (stray.length) throw new Error(`an untouched thread is flagged: ${seen}`)
+    return seen
   })
 
   //  ── a fresh send ──────────────────────────────────────────────────
