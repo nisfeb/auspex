@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   deleteThread, garbled, isShip, markRead, markUnread, ourShip, send, setArchived,
-  setLabel, thread, toUpload, unreachable, type Message, type Thread,
+  setLabel, thread, unreachable, uploadAll, type Message, type Thread,
 } from './api'
 import VerdictBadge from './VerdictBadge'
 import { AttachmentRow, FilePicker } from './Attachments'
@@ -68,6 +68,10 @@ export default function ThreadView({
   const [recipients, setRecipients] = useState<string[]>([])
   const [pending, setPending] = useState('')
   const [sending, setSending] = useState(false)
+  // Which file is in flight. See Compose.tsx: uploads are one request
+  // per file, in sequence, and a reply with files attached is several
+  // round trips before the send itself starts.
+  const [upload, setUpload] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   // Files on the reply. Not seeded from the message being replied to:
   // re-sending someone else's attachment would re-sign its metadata
@@ -364,9 +368,25 @@ export default function ThreadView({
     // safe to retry. If it succeeds but the refetch then fails, the reply
     // already went out; clearing the draft and saying so (not "could not
     // send") avoids the user resending a message that already landed.
+    // THE BYTES GO UP FIRST. An upload signs nothing and moves no
+    // message, so a file that will not upload leaves the reply exactly
+    // where it was, with an error naming the file.
+    let refs
     try {
-      const ups = await Promise.all(files.map(toUpload))
-      await send(to, `re: ${last.subject}`, reply, last.id, ups)
+      refs = await uploadAll(files, (i, n) => { setUpload(`uploading ${i} of ${n}`) })
+    } catch (e) {
+      console.error(e)
+      setSendError(
+        `${e instanceof Error ? e.message : 'An attachment could not be uploaded.'}`
+        + ' Nothing has been sent — your reply and its files are still here.',
+      )
+      setUpload(null)
+      setSending(false)
+      return
+    }
+    setUpload(null)
+    try {
+      await send(to, `re: ${last.subject}`, reply, last.id, refs)
     } catch (e) {
       // NO FALSE "SENT" WHEN THE SHIP WAS NEVER REACHED. The worker
       // never touches a POST, so a reply whose request did not arrive
@@ -623,7 +643,7 @@ export default function ThreadView({
           }
           className="btn btn-primary"
         >
-          {sending ? 'Sending…' : 'Send'}
+          {upload ?? (sending ? 'Sending…' : 'Send')}
         </button>
       </div>
       {sendError && <p className="mt-1 text-danger">{sendError}</p>}

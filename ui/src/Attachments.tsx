@@ -20,17 +20,17 @@ export function fileSize(bytes: number): string {
 // The file control, shared by Compose and the reply composer.
 //
 // REFUSES BEFORE IT SENDS. max-blob is 256K and max-attach is 16, and
-// the nexus checks both again on the decoded bytes — but a file refused
-// here is refused at the moment the user picked it, while a file refused
-// there is refused after a quarter-megabyte round trip. Both checks
-// exist; only this one can say which file was the problem while the user
-// still has the dialog in mind.
+// the nexus checks both again — the upload route answers 413 on an
+// oversized body and the send refuses the count — but a file refused
+// here is refused at the moment the user picked it, while a file
+// refused there is refused after a quarter-megabyte round trip. Both
+// checks exist; only this one can say which file was the problem while
+// the user still has the dialog in mind.
 //
-// The bytes are NOT read here. A File handle costs nothing; base64 of
-// one costs 4/3 of the file in a JS string, and holding that from the
-// moment of picking until the moment of sending would mean every open
-// composer carrying its attachments in memory. They are read in the
-// send handler, once.
+// The bytes are NOT read here, and they are never read into memory at
+// all: the send handler hands each File straight to `fetch`, which
+// streams it. What this list holds is File handles, which cost
+// nothing, so an open composer carries no part of its attachments.
 export function FilePicker({
   files, onChange, disabled,
 }: {

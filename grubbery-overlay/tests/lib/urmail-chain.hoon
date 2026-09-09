@@ -525,6 +525,31 @@
     (expect !>(!(file-ok:urmail ['a' (crip (reap 200 'm')) [1 'x']])))
   ==
 ::
+::  +attach-ok is +file-ok WITHOUT THE BYTES, and the send path that
+::  names an already-stored blob is checked by it alone. Everything
+::  +file-ok enforces except the octs measurement is enforced here, so
+::  the two ways into a send cannot drift on the caps.
+++  test-attach-ok-enforces-the-same-caps
+  ;:  weld
+    (expect !>((attach-ok:urmail ['a' 11 'text/plain' 0v1])))
+    ::  size against max-blob, exactly as +file-ok checks p.octs
+    (expect !>((attach-ok:urmail ['a' 262.144 'text/plain' 0v1])))
+    (expect !>(!(attach-ok:urmail ['a' 262.145 'text/plain' 0v1])))
+    ::  name and mime through +text-ok, same caps
+    (expect !>(!(attach-ok:urmail [(crip (reap 300 'n')) 1 'text/plain' 0v1])))
+    (expect !>(!(attach-ok:urmail ['a' 1 (crip (reap 200 'm')) 0v1])))
+  ==
+::
+::  the count cap, and it is max-attach and not a number of its own.
+++  test-attaches-ok-caps-the-count
+  =/  one=attachment:sur  ['a' 1 'text/plain' 0v1]
+  ;:  weld
+    (expect !>((attaches-ok:urmail (reap 16 one))))
+    (expect !>(!(attaches-ok:urmail (reap 17 one))))
+    ::  and one bad member fails the list, however short it is
+    (expect !>(!(attaches-ok:urmail ~[one ['a' 262.145 'text/plain' 0v1]])))
+  ==
+::
 ::  name and mime are attacker-supplied and arrive PRE-SIGNED, so a
 ::  recipient cannot repair one without destroying the signature. mime is
 ::  headed for a Content-Type header, where CR or LF is a header-injection

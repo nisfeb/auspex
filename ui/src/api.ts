@@ -259,63 +259,100 @@ export const thread = async (id: string): Promise<Thread | null> => {
 }
 
 // The caps, mirrored from grubbery-overlay/lib/urmail-chain.hoon. A
-// GUARD RAIL, never the boundary: /api/send checks +files-ok on the
-// decoded bytes and refuses the send again. What these buy is a refusal
-// the user can act on — "this file is too big" at the moment they pick
-// it, rather than after a quarter-megabyte upload comes back 400.
+// GUARD RAIL, never the boundary: POST /api/blob refuses a body over
+// max-blob with a 413 and the send refuses the count again. What these
+// buy is a refusal the user can act on — "this file is too big" at the
+// moment they pick it, rather than after a quarter-megabyte upload
+// comes back 413.
 export const MAX_BLOB = 262144
 export const MAX_ATTACH = 16
 
-// One file on its way UP. `data` is standard base64 (padded, not
-// url-safe) of the file's bytes.
+// One attachment on its way into a send: metadata plus the content
+// address the upload route answered. NO BYTES AND NO SIZE.
 //
-// WHY BASE64 AND NOT MULTIPART: /api/send already takes a JSON body and
-// the nexus's JSON decoder is jetted, so a 32MB body round-trips on a
-// request fiber in about a second — two orders above max-blob even with
-// MAX_ATTACH files in one send. The multipart alternative needed a
-// decoder the nexus cannot import, whose part type carries a bare atom
-// with no length and so drops a file's trailing zero bytes.
-export interface Upload {
+// `size` is deliberately absent. It is read off the stored blob by the
+// nexus and signed from there, so a client cannot make a signature
+// claim a length the bytes do not have — and the hash is not
+// re-derived on send either, because the store only ever accepted a
+// blob that hashed to its own address.
+export interface AttachRef {
   name: string
   mime: string
-  data: string
+  hash: string
 }
 
-// Read a File as base64, without the data: prefix FileReader adds.
+// THE UPLOAD. The body is the File itself — `fetch` streams a File
+// straight off disk, so nothing here ever holds the bytes in memory
+// and there is no encoding between the file and the store.
 //
-// readAsDataURL, not readAsText: text decoding would mangle every byte
-// above ASCII, and the hash the ship signs is taken over the bytes.
-export const toUpload = (f: File): Promise<Upload> =>
-  new Promise((resolve, reject) => {
-    const r = new FileReader()
-    r.onerror = () => reject(new Error(`Could not read ${f.name}`))
-    r.onload = () => {
-      const s = String(r.result)
-      const comma = s.indexOf(',')
-      resolve({
-        name: f.name,
-        // The BROWSER's guess, and it is a guess: it comes off the file
-        // extension. It is sent, signed and shown as the sender's claim,
-        // and the download route never echoes it into a header without
-        // checking it against an allow-list first.
-        mime: f.type || 'application/octet-stream',
-        data: comma < 0 ? '' : s.slice(comma + 1),
-      })
-    }
-    r.readAsDataURL(f)
+// WHY NOT BASE64 IN THE SEND BODY, which is what this replaced: the
+// nexus had to decode it, the decoder was an interpreted per-character
+// loop on the request fiber holding the connection open, and the
+// sixteen-file send the caps allow cost about nineteen seconds with no
+// partial progress to show for it. Raw bytes need no decoder, and one
+// request per file is what makes "uploading 2 of 5" possible at all.
+export const uploadBlob = async (f: File): Promise<AttachRef> => {
+  const res = await fetch(`${BASE}/api/blob`, {
+    method: 'POST',
+    // A File streams as-is. Reading it into a string first would cost
+    // the file's length in memory per attachment, per open composer.
+    body: f,
+    headers: { 'content-type': 'application/octet-stream' },
   })
+  const { hash } = await jsonOf(res) as { hash: string; size: number }
+  return {
+    name: f.name,
+    // The BROWSER's guess, and it is a guess: it comes off the file
+    // extension, and it is empty for a file the browser cannot place.
+    // It is sent, signed and shown as the sender's claim, and the
+    // download route never echoes it into a header without checking it
+    // against an allow-list first.
+    mime: f.type || 'application/octet-stream',
+    hash,
+  }
+}
 
-// `files` is omitted entirely when there are none, so a send with no
-// attachment is byte-for-byte the request every earlier client made.
+// Upload every file, IN SEQUENCE, reporting which one is in flight.
+//
+// Sequence and not Promise.all: sixteen concurrent quarter-megabyte
+// POSTs at a serialized pier is sixteen request fibers competing for
+// one ship, and "uploading 2 of 5" is a true statement only if there
+// is one at a time. The throw NAMES THE FILE — "upload failed" alone
+// tells a user nothing about which one to remove or retry.
+//
+// NOTHING IS SIGNED BY ANY OF THIS. An upload stores bytes under their
+// content address and moves no message and no beacon, so a caller that
+// throws here has a composer to keep open and nothing to undo.
+export const uploadAll = async (
+  files: File[],
+  onProgress: (done: number, total: number) => void,
+): Promise<AttachRef[]> => {
+  const refs: AttachRef[] = []
+  for (let i = 0; i < files.length; i += 1) {
+    onProgress(i + 1, files.length)
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      refs.push(await uploadBlob(files[i]))
+    } catch (e) {
+      throw new Error(
+        `${files[i].name}: ${e instanceof Error ? e.message : 'could not be uploaded'}`,
+      )
+    }
+  }
+  return refs
+}
+
+// `attachments` is omitted entirely when there are none, so a send with
+// no attachment is byte-for-byte the request every earlier client made.
 export const send = (
   to: string[],
   subject: string,
   body: string,
   prev: string | null,
-  files: Upload[] = [],
+  attachments: AttachRef[] = [],
 ) => post('/api/send', {
   to, subj: subject, body, prev,
-  ...(files.length ? { files } : {}),
+  ...(attachments.length ? { attachments } : {}),
 })
 
 // ── attachment bytes ─────────────────────────────────────────────────

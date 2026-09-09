@@ -132,164 +132,94 @@
     (expect-eq !>(`(list @t)`~['work']) !>(?~(got ~ add.u.got)))
   ==
 ::
-::  ── base64, and the byte a bare atom loses ──────────────────────────
+::  ── the attachments a send names ─────────────────────────────────────
 ::
-++  test-de-b64-round-trips-text
-  %+  expect-eq  !>(`(unit octs)`[~ [5 'hello']])
-  !>  (de-b64:web 'aGVsbG8=')
+::  NO BYTES REACH THIS LIB ANY MORE. The file went up on its own
+::  request and was stored under its content address; a send names the
+::  address. So every case below is about a three-scalar record, and the
+::  base64 decoder these tests used to exercise - and the ~1s per file
+::  it cost on a request fiber - is gone with the transport.
 ::
-::  THE WHOLE REASON THIS DECODER RETURNS OCTS AND NOT AN ATOM. A file
-::  whose last byte is 0x00 - every ZIP-family file, whose archive
-::  comment length is two zero bytes - measures SHORT as a bare atom,
-::  and the truncation is silent twice over because the content hash is
-::  then taken over the truncated bytes. `len` comes from the digit
-::  count, never from +met, which is what carries it.
-++  test-de-b64-keeps-a-trailing-zero-byte
-  ::  'A' then one 0x00 byte: two bytes, one of which no atom can hold.
-  %+  expect-eq  !>(`(unit octs)`[~ [2 0x41]])
-  !>  (de-b64:web 'QQA=')
+::  ABSENT IS NOT MALFORMED: a send with nothing attached carries no
+::  `attachments` key at all.
+++  test-de-refs-absent-is-empty
+  %+  expect-eq  !>(`(unit (list up-ref:web))`[~ ~])
+  !>  (de-refs:web (jo '{"to":[],"subj":"s","body":"b","prev":null}') 16)
 ::
-::  and a LEADING zero byte, which the byte swap cannot carry on its own
-::  and which the shift back up is there to restore.
-++  test-de-b64-keeps-a-leading-zero-byte
-  %+  expect-eq  !>(`(unit octs)`[~ [2 0x4100]])
-  !>  (de-b64:web 'AEE=')
-::
-++  test-de-b64-empty-is-an-empty-file
-  (expect-eq !>(`(unit octs)`[~ [0 0]]) !>((de-b64:web '')))
-::
-::  every byte value, so no digit in the table is wrong: 0x00 through
-::  0x02 exercises the padding-free case as well.
-::  a four-digit group with no padding at all, whose middle byte is the
-::  only nonzero one - the case where every step of the reduction has to
-::  agree about where a byte went.
-++  test-de-b64-decodes-an-unpadded-group
-  %+  expect-eq  !>(`(unit octs)`[~ [3 0x1000]])
-  !>  (de-b64:web 'ABAA')
-::
-::  a character outside the alphabet is a refusal, not a silently
-::  dropped byte: a dropped byte moves every later byte and the file
-::  still hashes to something, just not to the address it claims.
-++  test-de-b64-refuses-a-bad-character
-  (expect-eq !>(`(unit octs)`~) !>((de-b64:web 'aGV*bG8=')))
-::
-::  base64url is NOT accepted. It would decode to different bytes for
-::  the same string, and nothing this route talks to emits it.
-++  test-de-b64-refuses-url-alphabet
-  (expect-eq !>(`(unit octs)`~) !>((de-b64:web 'a-_lbG8=')))
-::
-::  padding is required and must be exactly the missing digits.
-++  test-de-b64-refuses-missing-padding
-  (expect-eq !>(`(unit octs)`~) !>((de-b64:web 'aGVsbG8')))
-::
-::  a digit count of 4n+1 cannot be base64 at all: three digits are
-::  missing and no amount of padding matches that.
-++  test-de-b64-refuses-a-4n-plus-1-digit-count
-  (expect-eq !>(`(unit octs)`~) !>((de-b64:web 'aGVsb')))
-::
-::  ── the files array ─────────────────────────────────────────────────
-::
-::  ABSENT IS NOT MALFORMED: every client before this one sends no
-::  `files` key at all, and so does this one on a send with nothing
-::  attached.
-++  test-de-files-absent-is-empty
-  %+  expect-eq  !>(`(unit (list up-file:web))`[~ ~])
-  !>  (de-files:web (jo '{"to":[],"subj":"s","body":"b","prev":null}') 100 4)
-::
-++  test-de-files-decodes-one-file
+++  test-de-refs-decodes-one-ref
   =/  got
-    %^  de-files:web
-      %-  jo
-      '{"files":[{"name":"a.txt","mime":"text/plain","data":"aGk="}]}'
-    100
-    4
+    %+  de-refs:web
+      (jo '{"attachments":[{"name":"a.txt","mime":"text/plain","hash":"0v3"}]}')
+    16
   ;:  weld
     (expect-eq !>(`(unit @ud)`[~ 1]) !>(?~(got ~ `(lent u.got))))
-    %+  expect-eq  !>(`(unit up-file:web)`[~ ['a.txt' 'text/plain' 2 'hi']])
+    %+  expect-eq  !>(`(unit up-ref:web)`[~ ['a.txt' 'text/plain' 0v3]])
     !>  ?~(got ~ `(snag 0 u.got))
   ==
 ::
-::  MEASURED BEFORE DECODED: the cap is applied to the ENCODED length,
-::  so an oversized upload costs a +met and not a decode.
-++  test-de-files-refuses-a-file-over-the-cap
-  %+  expect-eq  !>(`(unit (list up-file:web))`~)
-  !>  %^  de-files:web
-        %-  jo
-        '{"files":[{"name":"a","mime":"text/plain","data":"aGVsbG8="}]}'
-      0
-      4
-::
-::  THE BOUNDARY, EXACTLY. `lim` is four base64 characters per three
-::  bytes ROUNDED UP - which is the encoded length of a cap-sized file,
-::  padding included, because the rounding IS the padding. With cap 3
-::  that is 4 characters, and the arithmetic is the same at 262.144,
-::  where it is 349.528.
-::
-::  The +4 this replaces let one more base64 quantum through the cheap
-::  gate: a payload decoding to cap+5 bytes was fully decoded and then
-::  refused by +files-ok, which is a quarter-megabyte of interpreted
-::  work spent on a file that was never going to be stored.
-++  test-de-files-takes-a-cap-sized-file
+++  test-de-refs-decodes-several
   =/  got
-    %^  de-files:web
-      (jo '{"files":[{"name":"a","mime":"t","data":"YWJj"}]}')
-    3
-    4
-  %+  expect-eq  !>(`(unit up-file:web)`[~ ['a' 't' 3 'abc']])
-  !>  ?~(got ~ `(snag 0 u.got))
+    %+  de-refs:web
+      %-  jo
+      %-  crip
+      ;:  weld
+        (trip '{"attachments":[{"name":"a","mime":"t","hash":"0v1"},')
+        (trip '{"name":"b","mime":"t","hash":"0v2"}]}')
+      ==
+    16
+  (expect-eq !>(`(unit @ud)`[~ 2]) !>(?~(got ~ `(lent u.got))))
 ::
-::  one more quantum, REFUSED BEFORE ANY OF IT IS DECODED.
-++  test-de-files-refuses-one-quantum-past-the-cap
-  %+  expect-eq  !>(`(unit (list up-file:web))`~)
-  !>  %^  de-files:web
-        (jo '{"files":[{"name":"a","mime":"t","data":"YWJjZA=="}]}')
-      3
-      4
-::
-::  and at the real cap, in the numbers the transport was measured on: a
-::  max-blob file is 262.144 bytes and encodes to 349.528 characters, so
-::  349.532 - one quantum past it - is refused on its length. Written
-::  out rather than reasoned about because this is the arithmetic a
-::  request fiber's whole cost hangs on.
-++  test-de-files-refuses-one-quantum-past-max-blob
-  %+  expect-eq  !>(`(unit (list up-file:web))`~)
-  !>  %^  de-files:web
+::  THE COUNT IS REFUSED AT THE BOUNDARY, before the nexus peeks a
+::  single blob. max-attach is passed in because this lib is
+::  import-free and cannot reach the chain lib's caps.
+++  test-de-refs-refuses-too-many
+  %+  expect-eq  !>(`(unit (list up-ref:web))`~)
+  !>  %+  de-refs:web
         %-  jo
         %-  crip
         ;:  weld
-          (trip '{"files":[{"name":"a","mime":"t","data":"')
-          (reap 349.532 'A')
-          (trip '"}]}')
+          (trip '{"attachments":[{"name":"a","mime":"t","hash":"0v1"},')
+          (trip '{"name":"b","mime":"t","hash":"0v2"}]}')
         ==
-      262.144
-      16
-::
-++  test-de-files-refuses-too-many-files
-  %+  expect-eq  !>(`(unit (list up-file:web))`~)
-  !>  %^  de-files:web
-        %-  jo
-        %-  crip
-        ;:  weld
-          (trip '{"files":[{"name":"a","mime":"t","data":"aGk="},')
-          (trip '{"name":"b","mime":"t","data":"aGk="}]}')
-        ==
-      100
       1
 ::
-::  a `files` key that is present and wrong is a refusal, never an empty
-::  list: that is a client that meant to attach something and did not,
-::  and answering ok would destroy the attachment silently.
-++  test-de-files-refuses-a-malformed-entry
-  %+  expect-eq  !>(`(unit (list up-file:web))`~)
-  !>  (de-files:web (jo '{"files":[{"name":"a"}]}') 100 4)
+::  A `attachments` key that is present and wrong is a refusal, never an
+::  empty list: that is a client that meant to attach something and did
+::  not, and answering ok would destroy the attachment silently.
+++  test-de-refs-refuses-a-malformed-entry
+  %+  expect-eq  !>(`(unit (list up-ref:web))`~)
+  !>  (de-refs:web (jo '{"attachments":[{"name":"a","mime":"t"}]}') 16)
 ::
-++  test-de-files-refuses-bad-base64
-  %+  expect-eq  !>(`(unit (list up-file:web))`~)
-  !>  %^  de-files:web
-        %-  jo
-        '{"files":[{"name":"a","mime":"text/plain","data":"a*k="}]}'
-      100
-      4
+::  A HASH THAT IS NOT A @uv IS A REFUSAL. It is the one field a client
+::  does not type but does echo back, and `slaw %uv` is what makes the
+::  echo checkable at the boundary rather than at the store.
+++  test-de-refs-refuses-a-bad-hash
+  %+  expect-eq  !>(`(unit (list up-ref:web))`~)
+  !>  %-  de-refs:web
+      :_  16
+      (jo '{"attachments":[{"name":"a","mime":"t","hash":"not-a-hash"}]}')
+::
+::  NO SIZE FIELD, AND AN EXTRA ONE CHANGES NOTHING. `size` is read off
+::  the stored blob by the nexus, so a client cannot make the signature
+::  claim a length the bytes do not have - and a client that sends one
+::  anyway is not refused for it, because the field is simply not part
+::  of this shape.
+++  test-de-refs-ignores-a-client-supplied-size
+  =/  got
+    %+  de-refs:web
+      %-  jo
+      '{"attachments":[{"name":"a","mime":"t","hash":"0v3","size":99}]}'
+    16
+  %+  expect-eq  !>(`(unit up-ref:web)`[~ ['a' 't' 0v3]])
+  !>  ?~(got ~ `(snag 0 u.got))
+::
+::  a `files` key - the old base64 transport's shape - is not
+::  `attachments` and is not read. A client that still sent one would
+::  send its files nowhere, which is why the client was changed in the
+::  same slice.
+++  test-de-refs-ignores-the-old-files-key
+  %+  expect-eq  !>(`(unit (list up-ref:web))`[~ ~])
+  !>  (de-refs:web (jo '{"files":[{"name":"a","mime":"t","data":"aGk="}]}') 16)
 ::
 ::  ── the header boundary ─────────────────────────────────────────────
 ::

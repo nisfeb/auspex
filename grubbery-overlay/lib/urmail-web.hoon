@@ -215,233 +215,82 @@
 ::
 ::  ── the attachment surface ──────────────────────────────────────────
 ::
-::  Two jobs no other part of this lib has: getting a file's BYTES off a
-::  request body without losing any, and getting a SIGNED, HOSTILE
-::  string into an HTTP header without carrying its author's intent
-::  with it. Both are pure, so both are tested.
+::  Two jobs no other part of this lib has: reading the attachments a
+::  send NAMES, and getting a SIGNED, HOSTILE string into an HTTP header
+::  without carrying its author's intent with it. Both are pure, so both
+::  are tested.
 ::
-::  ── the transport, and why it is base64 in the JSON ─────────────────
+::  ── the transport: raw bytes on a route of their own ────────────────
 ::
-::    /api/send already takes a JSON body, so an attachment rides in it
-::    as a base64 string rather than arriving as a multipart part. The
-::    multipart alternative is out twice over: the desk's /lib/multipart
-::    is not in gub/lib, so a nexus cannot import it; and its $part
-::    carries `body=@t`, a BARE ATOM with no declared length, which
-::    silently drops a file's trailing zero bytes - and the content hash
-::    is then taken over the truncated bytes, so the loss is invisible
-::    twice.
+::    An attachment does NOT ride in this JSON. The bytes go up on their
+::    own request - POST /apps/urmail/api/blob, body = the file, content
+::    type application/octet-stream - which stores them and answers
+::    their content address; the send that follows names those addresses
+::    and carries no bytes at all. So nothing in this lib decodes a file
+::    any more: the only file-shaped thing here is $up-ref, three
+::    scalars.
 ::
-::    One transport, one decoder, no new marc, and the bytes never stop
-::    being an $octs with a declared length.
+::    THIS REPLACED BASE64 IN THE JSON BODY, and the reason is measured
+::    rather than aesthetic. That transport needed a decoder, the
+::    decoder was an interpreted loop over every character of the
+::    encoding (~350K of them per max-blob file) on the request fiber
+::    holding the connection open, and the sixteen-file send it has to
+::    admit cost about nineteen seconds with no partial progress to show
+::    for it. Raw bytes need no decoder: eyre hands the fiber an $octs
+::    with a declared length, which is exactly the shape the store and
+::    the hash want. See the spec under "Bytes across the HTTP surface".
 ::
-::    WHAT IT COSTS, MEASURED ON THIS CODE. The choice was first argued
-::    from a +de:json:html benchmark - a 32MB body round-trips in ~1.3s
-::    - and that number is real and is not this arm's number: +de:json
-::    is jetted and +b64-digits is not. At the live route on ~wex,
-::    warm: 5.5MB of JSON parses in ~0.5s, one max-blob file decodes in
-::    ~1.0s, and the worst send a client can make - 16 files at 256K -
-::    holds the request fiber for ~19s end to end. The parse is not the
-::    cost; the character loop is, and the caps are what bound it. The
-::    full before/after table is in the spec under "Bytes across the
-::    HTTP surface".
+::  $up-ref: one attachment named on a send, decoded off the wire.
 ::
-::  $up-file: one uploaded file, decoded off the wire.
+::    NO BYTES AND NO SIZE. The bytes were uploaded already and the size
+::    that gets signed is read off the stored blob, so there is nothing
+::    here a client could lie about that would survive: a hash naming no
+::    stored blob is a 400, and a hash naming one is measured on the
+::    ship.
 ::
-::    Structurally $file:urmail-chain, spelled out here because this lib
-::    is IMPORT-FREE and may not reach that one. The nexus nests one
-::    into the other; they cannot drift without the build saying so.
+::    Structurally $attach-ref:urmail-chain, spelled out here because
+::    this lib is IMPORT-FREE and may not reach that one. The nexus
+::    nests one into the other; they cannot drift without the build
+::    saying so.
 ::
-+$  up-file  [name=@t mime=@t =octs]
++$  up-ref  [name=@t mime=@t hash=@uv]
 ::
-::  +de-files: the `files` array of a send body, or ~ if it is not one.
+::  +de-refs: the `attachments` array of a send body, or ~ if it is not
+::  one.
 ::
-::    ABSENT IS NOT MALFORMED. Every client before this one sent no
-::    `files` key at all, and a send with no attachments still does, so
-::    a missing key decodes to the empty list. A key that is present and
-::    wrong is a 400, because it is a client that meant to attach
-::    something and did not.
+::    ABSENT IS NOT MALFORMED. A send with nothing attached sends no
+::    `attachments` key at all, and decodes to the empty list. A key that
+::    is present and wrong is a 400, because it is a client that meant to
+::    attach something and did not - answering ok there would destroy the
+::    attachment silently and report success.
 ::
-::    `cap` and `most` are passed in rather than read from the chain
-::    lib's +max-blob and +max-attach, which this lib cannot import.
-::    Both are refused HERE, before any base64 is decoded, so an
-::    oversized upload costs a length comparison rather than a decode -
-::    and the nexus checks +files-ok again on what comes back, because a
-::    check at the boundary is not a substitute for one at the point of
-::    use.
+::    `most` is passed in rather than read from the chain lib's
+::    +max-attach, which this lib cannot import. The nexus checks
+::    +attaches-ok again on what comes back, because a check at the
+::    boundary is not a substitute for one at the point of use.
 ::
-++  de-files
-  |=  [jon=json cap=@ud most=@ud]
-  ^-  (unit (list up-file))
+++  de-refs
+  |=  [jon=json most=@ud]
+  ^-  (unit (list up-ref))
   ?.  ?=([%o *] jon)  ~
-  ?~  (~(get by p.jon) 'files')  `~
+  ?~  (~(get by p.jon) 'attachments')  `~
   =/  res
     %-  mule
     |.
-    ^-  (list [name=@t mime=@t data=@t])
+    ^-  (list up-ref)
     %.  jon
     %-  ot:dejs:format
-    :~  :-  %files
+    :~  :-  %attachments
         %-  ar:dejs:format
         %-  ot:dejs:format
         :~  name+so:dejs:format
             mime+so:dejs:format
-            data+so:dejs:format
+            hash+(se:dejs:format %uv)
         ==
     ==
   ?:  ?=(%| -.res)  ~
   ?:  (gth (lent p.res) most)  ~
-  ::  four base64 characters per three bytes, ROUNDED UP - and the
-  ::  rounding IS the padding, so there is nothing to add for it. A
-  ::  spare +4 admits one more base64 quantum through the cheap gate,
-  ::  which +files-ok then refuses after paying for a full decode of a
-  ::  file it was always going to reject.
-  (de-file-list p.res (mul 4 (div (add cap 2) 3)))
-::
-++  de-file-list
-  |=  [ins=(list [name=@t mime=@t data=@t]) lim=@ud]
-  ^-  (unit (list up-file))
-  ?~  ins  `~
-  ::  MEASURED BEFORE DECODED. A body eyre accepted can be far larger
-  ::  than any file this ship will store, and refusing it by the length
-  ::  of its encoding costs one +met.
-  ?:  (gth (met 3 data.i.ins) lim)  ~
-  =/  o=(unit octs)  (de-b64 data.i.ins)
-  ?~  o  ~
-  ::  recursion by ARM NAME, not $. ?~ narrowed `ins` to a lest, and a
-  ::  %= against that narrowing is the same widening trap +safe-name
-  ::  documents below.
-  =/  rest=(unit (list up-file))  (de-file-list t.ins lim)
-  ?~  rest  ~
-  `[[name.i.ins mime.i.ins u.o] u.rest]
-::
-::  +de-b64: standard base64 (padded, not url-safe) to $octs.
-::
-::    NOT +de:base64:mimes:html, which is `(rush a parse)` - a
-::    parser-combinator sweep that turns the whole payload into a tape
-::    and matches it character by character. That is the same shape the
-::    desk's /lib/multipart was rewritten away from after it OOMed on
-::    large uploads, and a quarter-megabyte attachment is exactly the
-::    size that makes it hurt. This does the same arithmetic over jetted
-::    atom ops: one +rip in, one +rep and one +swp out.
-::
-::    The REDUCTION is zuse's, because it is the part that is easy to
-::    get subtly wrong: base64 is big-endian within each 24-bit group
-::    and an urbit atom is little-endian, so the digits reach +rep in
-::    reverse, the padding bits are shifted off, the bytes swapped, and
-::    the result shifted back up by however many LEADING ZERO BYTES the
-::    swap could not carry. `len` is computed from the digit count and
-::    never from +met, which is the whole reason a file ending - or
-::    beginning - in a zero byte survives.
-::
-::    EVERYTHING AROUND THE REDUCTION IS ARITHMETIC ON THE ATOM, and
-::    that is the fix for a measured cost, not a preference. +de:json
-::    ahead of this is jetted; every arm here is interpreted, so a
-::    traversal of a 350K list is a traversal nobody jets away. The
-::    first shape walked that list six times over - +lent, two +snags,
-::    a +scag, a second +lent and two +flops - around a per-character
-::    ladder. The counts now come from +met and subtraction, the
-::    padding from +cut, the trim from +end, and the one remaining walk
-::    is the character loop itself. See the spec's
-::    "Bytes across the HTTP surface" for what that measured.
-::
-++  de-b64
-  |=  a=@t
-  ^-  (unit octs)
-  ::  the CHARACTER COUNT, from +met and not from +lent. An atom's byte
-  ::  length is one jetted measurement where +lent walks the list, and
-  ::  no base64 character is a zero byte, so nothing is lost to the
-  ::  measurement.
-  =/  n=@ud  (met 3 a)
-  ::  the padding, read off the ATOM with +cut rather than off a list
-  ::  with +snag. +snag walks to its index, and the index here is the
-  ::  end of a ~350K character encoding.
-  =/  lap=@ud
-    ?:  ?&  (gte n 2)
-            =('=' (cut 3 [(sub n 2) 1] a))
-            =('=' (cut 3 [(dec n) 1] a))
-        ==
-      2
-    ?:  &((gte n 1) =('=' (cut 3 [(dec n) 1] a)))  1
-    0
-  ::  the digit count is the character count less the padding, which is
-  ::  arithmetic - the previous shape built the digit list first and
-  ::  then measured it with a second +lent.
-  =/  lat=@ud  (sub n lap)
-  =/  dif=@ud  (~(dif fo 4) 0 lat)
-  ::  padding is REQUIRED and must be exactly the missing digits. A
-  ::  digit count of 4n+1 cannot be base64 at all: dif is 3 and no
-  ::  amount of padding matches it.
-  ?.  =(dif lap)  ~
-  ::  +end trims the padding off the ATOM, so the list +rip builds holds
-  ::  digits and nothing else. +scag built a second list as long as the
-  ::  first to drop at most two characters from its end.
-  =/  got=(unit (list @))  (b64-digits (rip 3 (end [3 lat] a)))
-  ?~  got  ~
-  =/  len=@ud  (sub (mul 3 (div (add lat dif) 4)) dif)
-  ::  NO +flop, IN EITHER DIRECTION. +b64-digits answers LOWEST-ORDER
-  ::  DIGIT FIRST, which is the order +rep consumes - base64 is
-  ::  big-endian within its 24-bit group and an urbit atom is
-  ::  little-endian. The previous shape flopped the accumulator back
-  ::  into reading order and then flopped it again to feed +rep: two
-  ::  full traversals of a 350K list, per file, to rebuild the list the
-  ::  loop had already produced.
-  =/  res=@  (rsh [1 dif] (rep [0 6] u.got))
-  =/  amt=@ud  (met 3 res)
-  =/  trl=@ud  ?:((lth len amt) 0 (sub len amt))
-  ::  TRIMMED TO `len`, which is the declared length and the authority.
-  ::  +file-ok refuses an octs whose atom measures MORE than it declares,
-  ::  and +blob-hash hashes the pair, so a stray high byte is a file the
-  ::  sender and the receiver hash differently. `len` came from the digit
-  ::  count and nothing downstream may widen it.
-  `[len (end [3 len] (lsh [3 trl] (swp 3 res)))]
-::
-::  +b64-table: character to digit, as ONE ATOM indexed by character.
-::
-::    Byte `c` of this atom is the base64 value of character `c` PLUS
-::    ONE, so the zero that +cut answers for a byte outside the alphabet
-::    - and for every index past the end of the table - is "not a
-::    digit". The offset is what lets one +cut do both the lookup and
-::    the validation.
-::
-::    Built from the alphabet rather than written out as a 123-byte
-::    literal: a hand-typed table is a transcription error waiting to
-::    happen, it does not fit on a line, and 64 iterations once per file
-::    is not a cost when the loop it serves runs 350K times.
-::
-++  b64-table
-  ^-  @
-  =/  al=@t
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  =/  i=@ud  0
-  =|  t=@
-  |-  ^-  @
-  ?:  =(i 64)  t
-  $(i +(i), t (con t (lsh [3 (cut 3 [i 1] al)] +(i))))
-::
-::  +b64-digits: every character's digit, LOWEST-ORDER DIGIT FIRST, or ~
-::  if any character is not one.
-::
-::    ONE +cut PER CHARACTER against +b64-table, where this was a ladder
-::    of five range comparisons behind a gate call. THIS LOOP IS THE
-::    TRANSPORT'S COST: it runs once per character of the encoding -
-::    ~350K times for one max-blob file, up to 16 files in a send - on
-::    the request fiber holding the connection open. +de:json:html above
-::    it is jetted; this is not, and the measurement in the spec is of
-::    this arm.
-::
-::    The accumulator is answered as it was built, reversed, because
-::    reversed is what +rep wants. See +de-b64.
-::
-++  b64-digits
-  |=  cs=(list @)
-  ^-  (unit (list @))
-  =/  tbl=@  b64-table
-  =|  acc=(list @)
-  |-  ^-  (unit (list @))
-  ?~  cs  `acc
-  =/  v=@  (cut 3 [i.cs 1] tbl)
-  ?:  =(0 v)  ~
-  $(cs t.cs, acc [(dec v) acc])
+  `p.res
 ::
 ::  ── hostile signed strings, at the header boundary ──────────────────
 ::

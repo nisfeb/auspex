@@ -539,6 +539,25 @@
   =/  st  (read-stored-blob-noun (sang-noun:tarball sang.vw))
   ?~(st (pure:m ~) (pure:m `octs.u.st))
 ::
+::  +blob-size: the DECLARED LENGTH of a blob we hold, ~ when we do not.
+::
+::    The size that ends up inside a signature, and the only thing the
+::    send path wants off a stored blob. It reads the grub the same way
+::    +read-blob does and answers p.octs alone, so the bytes never leave
+::    this arm - a send naming sixteen attachments would otherwise carry
+::    four megabytes of octs through the rest of the send for four
+::    numbers.
+::
+++  blob-size
+  |=  [root=path h=@uv]
+  =/  m  (fiber:fiber:nexus ,(unit @ud))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
+  ?.  ?=([%file *] vw)  (pure:m ~)
+  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
+  =/  st  (read-stored-blob-noun (sang-noun:tarball sang.vw))
+  ?~(st (pure:m ~) (pure:m `p.octs.u.st))
+::
 ++  read-blobvis
   |=  root=path
   =/  m  (fiber:fiber:nexus ,blob-index:uc)
@@ -936,6 +955,13 @@
     ;<  *  bind:m
       (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
     (pure:m |)
+  ::  the same send, naming blobs the store already holds instead of
+  ::  carrying bytes. The web surface's only send path.
+  ::
+      %send-ref
+    ;<  *  bind:m
+      (do-send-refs root to.a subj.a body.a body-mime.a prev.a refs.a bcc.a)
+    (pure:m |)
   ::
     %read           (do-read root ids.a)
     %delete-thread  (do-delete root thread-id.a)
@@ -993,6 +1019,97 @@
       ==
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
+  ?.  (files-ok:uc files)
+    (reject root 'bad attachment')
+  ::  the store bound counts only the files we would actually ADD.
+  ::  +store-blob skips a file we already hold, so counting every
+  ::  attachment against the cap refuses a send that stores nothing -
+  ::  and the commonest attachment in a thread is one already in it.
+  ;<  fresh=(list file:uc)  bind:m  (unheld-files root files)
+  ::  the metadata is derived FROM THE BYTES IN HAND, which is what
+  ::  makes `size` and `hash` agree with what a fetcher re-measures.
+  (do-send-core root to subj body body-mime prev (turn files describe:uc) fresh bcc)
+::
+::  +do-send-refs: the same send, naming blobs the store already holds.
+::
+::    THE WEB SURFACE'S SEND. The browser uploaded each file to
+::    POST /api/blob first, which hashed and stored it and answered the
+::    address; this names those addresses and carries no bytes.
+::
+::    THE SIZE THAT GETS SIGNED IS READ OFF THE STORED BLOB, never off
+::    the request, and the hash is NOT re-derived. The store only ever
+::    accepted a blob that hashed to its own address - +do-web-blob and
+::    +take-blob are the only two writers and both check - so re-hashing
+::    here would pay a quarter-megabyte of +sham for a fact the store
+::    already guarantees, while trusting a client's `size` would let one
+::    sign a length the bytes do not have.
+::
+::    A ref naming no stored blob refuses the WHOLE send: nothing is
+::    signed, nothing is stored, and the route ahead of this one has
+::    already answered 400 with the hash, which is the message a person
+::    can act on. This check is the point-of-use half of that pair.
+::
+++  do-send-refs
+  |=  $:  root=path
+          to=(set ship)
+          subj=@t
+          body=@t
+          body-mime=@t
+          prev=(unit msg-id:uc)
+          refs=(list attach-ref:uc)
+          bcc=(set ship)
+      ==
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  as=(unit (list attachment:uc))  bind:m  (resolve-refs root refs)
+  ?~  as  (reject root 'unknown attachment')
+  ::  nothing to store: the bytes are already in the tree and already
+  ::  published, which is what the upload route did.
+  (do-send-core root to subj body body-mime prev u.as ~ bcc)
+::
+::  +resolve-refs: each named blob's SIGNED metadata, or ~ if any is
+::  missing.
+::
+::    Recursion by ARM NAME, not $: a $ with arguments inside a ;<
+::    continuation cannot find the trap.
+::
+::    +blob-size and not +read-blob: the size is the only thing wanted
+::    here and the octs must not travel any further than the arm that
+::    measures it.
+::
+++  resolve-refs
+  |=  [root=path rs=(list attach-ref:uc)]
+  =/  m  (fiber:fiber:nexus ,(unit (list attachment:uc)))
+  ^-  form:m
+  ?~  rs  (pure:m `~)
+  ;<  sz=(unit @ud)  bind:m  (blob-size root hash.i.rs)
+  ?~  sz  (pure:m ~)
+  ;<  rest=(unit (list attachment:uc))  bind:m  (resolve-refs root t.rs)
+  ?~  rest  (pure:m ~)
+  (pure:m `[[name.i.rs u.sz mime.i.rs hash.i.rs] u.rest])
+::
+::  +do-send-core: everything both send paths do once the signed
+::  attachment list exists.
+::
+::    `as` is the metadata that goes inside `unsigned`; `store` is the
+::    bytes still to be written, which is every file on the dojo path
+::    and nothing at all on the web path. Splitting there is what keeps
+::    ONE signing path: the two entry points differ in where
+::    [name size mime hash] came from and in nothing else.
+::
+++  do-send-core
+  |=  $:  root=path
+          to=(set ship)
+          subj=@t
+          body=@t
+          body-mime=@t
+          prev=(unit msg-id:uc)
+          as=(list attachment:uc)
+          store=(list file:uc)
+          bcc=(set ship)
+      ==
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
   ?.  (lte (met 3 body) max-body:uc)
     (reject root 'body too long')
   ?.  (lte (met 3 subj) max-subj:uc)
@@ -1001,14 +1118,9 @@
     (reject root 'too many recipients')
   ?.  (text-ok:uc body-mime max-mime:uc)
     (reject root 'bad body mime')
-  ?.  (files-ok:uc files)
+  ?.  (attaches-ok:uc as)
     (reject root 'bad attachment')
-  ::  the store bound counts only the files we would actually ADD.
-  ::  +store-blob skips a file we already hold, so counting every
-  ::  attachment against the cap refuses a send that stores nothing -
-  ::  and the commonest attachment in a thread is one already in it.
-  ;<  fresh=(list file:uc)  bind:m  (unheld-files root files)
-  ;<  room=?  bind:m  (room-for root fresh)
+  ;<  room=?  bind:m  (room-for root store)
   ?.  room
     (reject root 'blob store full')
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
@@ -1029,11 +1141,11 @@
   ;<  now=@da   bind:m  bowl-now
   ;<  lyf=@ud   bind:m  (our-life our)
   ;<  rng=ring  bind:m  (our-ring lyf)
-  ::  the metadata goes INSIDE `unsigned`, so it is covered by the
-  ::  signature and by msg-id. Swapping a file breaks the signature.
-  ::  Building it here, from the bytes actually stored, is what makes
-  ::  `size` and `hash` agree with what a fetcher will re-measure.
-  =/  as=(list attachment:uc)  (turn files describe:uc)
+  ::  `as` goes INSIDE `unsigned`, so it is covered by the signature and
+  ::  by msg-id: swapping a file breaks the signature. Every field in it
+  ::  was derived from bytes THIS SHIP HOLDS - measured off the store on
+  ::  the ref path, off the octs in hand on the dojo one - which is what
+  ::  makes `size` and `hash` agree with what a fetcher will re-measure.
   ::  the chain names `to` and NOTHING ELSE. bcc affects delivery only:
   ::  the blind-copied ships get the same canonical bytes, the same
   ::  msg-id and the same thread, and see the visible recipients, which
@@ -1078,7 +1190,7 @@
   ::  blob bound, and a keen at an unbound spur PARKS rather than
   ::  failing, so the ordering is the difference between a fast fetch
   ::  and a fetch that waits out our deadline.
-  ;<  ~  bind:m  (store-files root fresh)
+  ;<  ~  bind:m  (store-files root store)
   ;<  ~  bind:m  (ensure-thread root rid)
   ::  where this message sits in the tree: its own ancestry, root first.
   ::  Derived from `prev` against the WHOLE thread, not against the path
@@ -2615,6 +2727,13 @@
       [%'GET' [%api %drafts ~]]         (serve-drafts src eyre-id)
       [%'GET' [%api %rules ~]]          (serve-rules src eyre-id)
       [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
+    ::  POST /api/blob: THE UPLOAD, and the only route whose REQUEST
+    ::  body is not JSON. The body is the file, byte for byte, and it
+    ::  is handed on as the $octs eyre already built - no decode, no
+    ::  copy, no encoding to undo. It is the pair to the GET above,
+    ::  which is the only route whose RESPONSE body is not JSON.
+      [%'POST' [%api %blob ~]]
+    (do-web-blob src eyre-id body.request.req)
       [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
       [%'POST' [%api %'fetch-blob' ~]]  (do-web-fetch src eyre-id (req-body req))
       [%'POST' [%api %unread ~]]        (do-web-unread src eyre-id (req-body req))
@@ -3301,31 +3420,150 @@
     (send-err eyre-id 400 'subject too long')
   ?.  (fits-recipients:uc one max-to:uc)
     (send-err eyre-id 400 'too many recipients')
-  ::  ATTACHMENTS. Decoded off the SAME json object rather than out of
-  ::  $send-req, so a client that sends no `files` key - which is every
-  ::  client before this one, and this one on a send with nothing
-  ::  attached - decodes exactly as it always did. A key that is present
-  ::  and wrong is a 400: that is a client that meant to attach
-  ::  something and did not, and answering ok would be the same lie the
-  ::  cap checks above exist to stop.
-  ::
-  ::  +de-files refuses the count and the encoded length BEFORE it
-  ::  decodes any base64; +files-ok re-checks the decoded bytes against
-  ::  max-blob, max-attach, max-name and max-mime, from the same lib arm
-  ::  +do-send uses, so the boundary and the point of use cannot drift.
-  =/  fs=(unit (list up-file:uw))
-    (de-files:uw u.jon max-blob:uc max-attach:uc)
-  ?~  fs  (send-err eyre-id 400 'bad attachment')
-  =/  files=(list file:uc)  u.fs
-  ?.  (files-ok:uc files)  (send-err eyre-id 400 'bad attachment')
+  ::  ATTACHMENTS, AND NOT ONE BYTE OF THEM. Each entry names a blob
+  ::  this ship already holds, because the browser uploaded it to
+  ::  POST /api/blob first. Decoded off the SAME json object rather than
+  ::  out of $send-req, so a client that sends no `attachments` key -
+  ::  which is this one on a send with nothing attached - decodes
+  ::  exactly as it always did. A key that is present and wrong is a
+  ::  400: that is a client that meant to attach something and did not,
+  ::  and answering ok would be the same lie the cap checks above exist
+  ::  to stop.
+  =/  rs=(unit (list up-ref:uw))  (de-refs:uw u.jon max-attach:uc)
+  ?~  rs  (send-err eyre-id 400 'bad attachment')
+  =/  refs=(list attach-ref:uc)  u.rs
+  ::  RESOLVED HERE SO THE ANSWER CAN STILL BE NO. This route pokes the
+  ::  writer and answers as soon as the poke is taken, so a ref the
+  ::  writer cannot resolve would be a composed message destroyed
+  ::  silently behind a 200 - the exact failure the cap checks above
+  ::  were added to stop, arriving through a different door. Naming the
+  ::  hash is the point: "unknown attachment" alone tells a person
+  ::  nothing about which file went missing.
+  ;<  root=path  bind:m  nexus-root
+  ;<  as=(unit (list attachment:uc))  bind:m  (resolve-refs root refs)
+  ?~  as
+    ;<  missing=(unit @uv)  bind:m  (first-unheld root refs)
+    %^  send-err  eyre-id  400
+    ?~  missing  'unknown attachment'
+    (rap 3 ~['unknown attachment ' (scot %uv u.missing)])
+  ::  the same caps the writer applies, from the same lib arm, on the
+  ::  metadata the writer will actually sign - the sizes came off the
+  ::  store a line ago, not off the request.
+  ?.  (attaches-ok:uc u.as)  (send-err eyre-id 400 'bad attachment')
   ::  body-mime='' is 'text/plain', which is what this composer produces
   ::  and the only thing the client renders. bcc=~: no BCC field exists
   ::  in the web client yet, and it is absent from $send-req rather than
   ::  defaulted there, so a client cannot set it by accident through a
   ::  route that has no UI behind it.
   ;<  ~  bind:m
-    (poke-writer [%send to.u.req subj.u.req body.u.req '' prev.u.req files ~])
+    (poke-writer [%send-ref to.u.req subj.u.req body.u.req '' prev.u.req refs ~])
   (send-ok eyre-id)
+::
+::  +first-unheld: the first named blob this ship does not hold.
+::
+::    Only ever called once +resolve-refs has already said one of them
+::    is missing, so this is the second pass that finds WHICH - and it
+::    runs on the failure path alone, where a person is about to read
+::    the answer.
+::
+++  first-unheld
+  |=  [root=path rs=(list attach-ref:uc)]
+  =/  m  (fiber:fiber:nexus ,(unit @uv))
+  ^-  form:m
+  ?~  rs  (pure:m ~)
+  ;<  ex=?  bind:m  (peek-exists:io (blob-rail root hash.i.rs))
+  ?.  ex  (pure:m `hash.i.rs)
+  (first-unheld root t.rs)
+::
+::  +do-web-blob: THE UPLOAD. Raw bytes in, a content address out.
+::
+::    The body IS the file. eyre hands a request fiber an $octs with a
+::    declared length, which is exactly the shape +blob-hash and the
+::    store want, so this route has no decoder and cannot have a
+::    decoding bug: there is no encoding between the bytes on the wire
+::    and the bytes in the tree. That is the whole reason it exists -
+::    the base64-in-JSON transport it replaced spent about a second of
+::    an interpreted character loop per quarter-megabyte file, on this
+::    same fiber, holding the connection open.
+::
+::    ON THE REQUEST FIBER, NOT THE WRITER. A blob write is
+::    content-addressed and therefore idempotent: two uploads of the
+::    same bytes compute the same address and write the same grub, so
+::    there is nothing for a serialisation point to protect. +take-blob
+::    is the precedent for a blob written from outside the writer's
+::    poke, and the alternative - poking a quarter-megabyte payload at
+::    the ship's single serialisation point for mail - is exactly the
+::    thing the caps exist to keep off it.
+::
+::    OWNER-GATED LIKE +serve-blob, flag and src both. This is a write
+::    surface; resting it on one flag from one vane is thinner than it
+::    needs to be.
+::
+::    IT DOES NOT BUMP THE BEACON. No message appeared, none changed,
+::    and no listing row reads differently for a blob arriving - the
+::    same argument that keeps a fetched blob and a read-mark off it.
+::    The only tab that cares is the one holding the composer, and it
+::    is reading this response.
+::
+++  do-web-blob
+  |=  [src=@p eyre-id=@ta bod=(unit octs)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  ::  NO BODY AND A ZERO-BYTE BODY ARE THE SAME REFUSAL. An empty file
+  ::  has a content address like any other and the store would hold it
+  ::  quite happily, but there is nothing a user gains by attaching one
+  ::  and the request is indistinguishable from a client that meant to
+  ::  send bytes and sent none. Refused, loudly, at the boundary.
+  ?~  bod  (send-err eyre-id 400 'empty body')
+  =/  bts=octs  u.bod
+  ?:  =(0 p.bts)  (send-err eyre-id 400 'empty body')
+  ::  THE CAP, WITH ITS NUMBER IN THE MESSAGE. A client that guessed
+  ::  wrong should not have to read the source to find out by how much.
+  ?.  (lte p.bts max-blob:uc)
+    %^  send-err  eyre-id  413
+    %+  rap  3
+    :~  'attachment over the '
+        (crip (scow %ud max-blob:uc))
+        ' byte limit for one file'
+    ==
+  ::  a declared length below the measured one is a malformed octs and
+  ::  would make +blob-hash disagree with anything the bytes are later
+  ::  re-measured against. eyre builds this pair itself, so this is belt
+  ::  to its braces and costs one +met.
+  ?.  (gte p.bts (met 3 q.bts))  (send-err eyre-id 400 'malformed body')
+  =/  h=@uv  (blob-hash:uc bts)
+  ;<  root=path  bind:m  nexus-root
+  ::  IDEMPOTENT, AND THAT IS THE ADDRESSING WORKING. The same bytes
+  ::  are the same blob; re-uploading them rewrites nothing, bumps no
+  ::  case in the scry farm (see +store-blob on why that matters) and
+  ::  answers exactly what the first upload answered.
+  ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
+  ?:  ex  (blob-uploaded eyre-id h p.bts)
+  ;<  room=?  bind:m  (make-room root p.bts)
+  ?.  room  (send-err eyre-id 507 'blob store full')
+  ;<  now=@da  bind:m  bowl-now
+  ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%1 bts now])
+  ::  PUBLISHED, exactly as an outbound attachment is: an uploaded blob
+  ::  is OUR file and a recipient must be able to keen it the instant
+  ::  the chain lands. Visibility is %public by absence from
+  ::  /mail/blobvis, which is what +store-files leaves behind too.
+  ;<  ~  bind:m  (publish-blob h bts |)
+  (blob-uploaded eyre-id h p.bts)
+::
+::  +blob-uploaded: the upload's one answer shape, on both paths through
+::  it - the bytes were already here, or they are now.
+::
+++  blob-uploaded
+  |=  [eyre-id=@ta h=@uv size=@ud]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  %+  send-json  eyre-id
+  %-  pairs:enjs:format
+  :~  ['hash' [%s (scot %uv h)]]
+      ['size' (numb:enjs:format size)]
+  ==
 ::
 ++  do-web-read
   |=  [src=@p eyre-id=@ta raw=@t]

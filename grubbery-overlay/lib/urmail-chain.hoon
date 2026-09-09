@@ -169,6 +169,26 @@
     ::  and one full mailbox scan per message - forty messages, forty
     ::  serialised scans, on the ship's single serialisation point for
     ::  mail, to record something no peer will ever see.
+    ::  %send-ref is %send with the bytes ALREADY IN THE STORE. It is
+    ::  the web surface's send: the browser uploads each file to
+    ::  POST /api/blob first, which stores it and answers its content
+    ::  address, and the send then names those addresses. A separate
+    ::  member rather than a tenth field on %send, so a programmatic
+    ::  poke written against %send keeps working unchanged.
+    ::
+    ::  Both end in the same signing path; they differ only in where
+    ::  the signed [name size mime hash] comes from. Here `size` is
+    ::  read off the stored blob and never off the request, so the
+    ::  nexus signs what it stores.
+      $:  %send-ref
+          to=(set ship)
+          subj=@t
+          body=@t
+          body-mime=@t
+          prev=(unit msg-id)
+          refs=(list attach-ref)
+          bcc=(set ship)
+      ==
       [%read ids=(set msg-id)]
       [%delete-thread =thread-id]
       [%fetch-blob hash=@uv from=ship]
@@ -207,7 +227,24 @@
 ::
 ::  $file: one file as handed to %send, before it is hashed and stored.
 ::
+::    The DOJO shape, and only that. Bytes reach the writer this way
+::    from a programmatic %send; the web surface uploads them first and
+::    names the result, which is $attach-ref below.
+::
 +$  file  [name=@t mime=@t =octs]
+::
+::  $attach-ref: a file the ship ALREADY HOLDS, named for a send.
+::
+::    The upload route stored the bytes and answered their content
+::    address; this is the sender naming one. There is no `size` here
+::    and there deliberately cannot be: the size that gets SIGNED is
+::    read off the stored blob, so a client cannot make the signature
+::    say the file is a length it is not. The hash is not re-derived
+::    either - the store only holds blobs that hashed correctly at
+::    ingest, so re-hashing on send would be paying for a fact the
+::    store already guarantees.
+::
++$  attach-ref  [name=@t mime=@t hash=@uv]
 ::
 ::  $blob-vis: whether THIS SHIP serves a blob's bytes.
 ::
@@ -553,20 +590,42 @@
   ^-  attachment
   [name.f p.octs.f mime.f (blob-hash octs.f)]
 ::
+::  +attach-ok: is this attachment's METADATA storable at all?
+::
+::    The whole of +file-ok that does not need the bytes, so the two
+::    paths into a send - files with octs, and refs naming blobs the
+::    store already holds - are checked by ONE arm and cannot drift.
+::    Everything it enforces was enforced before it existed: size
+::    against max-blob, name and mime through +text-ok.
+::
+++  attach-ok
+  |=  a=attachment
+  ^-  ?
+  ?&  (lte size.a max-blob)
+      (text-ok name.a max-name)
+      (text-ok mime.a max-mime)
+  ==
+::
+++  attaches-ok
+  |=  as=(list attachment)
+  ^-  ?
+  ?&  (lte (lent as) max-attach)
+      (levy as attach-ok)
+  ==
+::
 ::  +file-ok: is this file storable at all?
 ::
-::    p.octs is the DECLARED length and q is the atom. An atom cannot
-::    carry more bytes than it measures, so a declared length below the
-::    measured one is a malformed octs and would make +blob-hash disagree
-::    with anything the bytes are later re-measured against.
+::    +attach-ok plus the one check only bytes can carry. p.octs is the
+::    DECLARED length and q is the atom. An atom cannot carry more bytes
+::    than it measures, so a declared length below the measured one is a
+::    malformed octs and would make +blob-hash disagree with anything the
+::    bytes are later re-measured against.
 ::
 ++  file-ok
   |=  f=file
   ^-  ?
-  ?&  (lte p.octs.f max-blob)
-      (gte p.octs.f (met 3 q.octs.f))
-      (text-ok name.f max-name)
-      (text-ok mime.f max-mime)
+  ?&  (gte p.octs.f (met 3 q.octs.f))
+      (attach-ok [name.f p.octs.f mime.f *@uv])
   ==
 ::
 ::  +text-ok: a signed metadata string that is safe to hand onward.
@@ -612,12 +671,7 @@
   |=  x=msg
   =/  as  attachments.unsigned.x
   ?&  (lte (lent as) m)
-      %+  levy  as
-      |=  a=attachment
-      ?&  (lte size.a max-blob)
-          (text-ok name.a max-name)
-          (text-ok mime.a max-mime)
-      ==
+      (levy as attach-ok)
   ==
 ::
 ::  +chain-hashes: every content address a chain refers to.

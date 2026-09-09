@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft, garbled, isShip, newId, saveDraft, send, sendDraft, toUpload, unreachable,
+  deleteDraft, garbled, isShip, newId, saveDraft, send, sendDraft, unreachable, uploadAll,
   type Draft,
 } from './api'
 import { FilePicker } from './Attachments'
@@ -52,6 +52,12 @@ export default function Compose({
   )
   const [body, setBody] = useState(resume ? resume.body : '')
   const [sending, setSending] = useState(false)
+  // WHICH FILE IS IN FLIGHT. Uploads are one request per file and run
+  // in sequence, so a sixteen-file send is sixteen round trips and the
+  // Send button would otherwise say "Sending…" for the whole of it
+  // with nothing moving. null once the bytes are up and the send
+  // itself is the only thing left.
+  const [upload, setUpload] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   // ATTACHMENTS DO NOT SURVIVE A DRAFT. A draft is a local grub with no
@@ -154,8 +160,25 @@ export default function Compose({
       // and report success. The draft, if one was written, is deleted
       // after the send the way discarding one is.
       if (files.length > 0) {
-        const ups = await Promise.all(files.map(toUpload))
-        await send(list, subject, body, forward ? forward.prev : resume ? resume.prev : null, ups)
+        // THE BYTES GO UP FIRST, AND A FAILURE HERE ABORTS BEFORE THE
+        // SEND. An upload stores bytes under their content address and
+        // signs nothing, so a file that will not upload is a composer
+        // that stays open with its files and an error naming the one
+        // that failed — never a half-sent message.
+        let refs
+        try {
+          refs = await uploadAll(files, (i, n) => { setUpload(`uploading ${i} of ${n}`) })
+        } catch (e) {
+          console.error(e)
+          setError(
+            `${e instanceof Error ? e.message : 'An attachment could not be uploaded.'}`
+            + ' Nothing has been sent — every word and every file is still here.',
+          )
+          return
+        } finally {
+          setUpload(null)
+        }
+        await send(list, subject, body, forward ? forward.prev : resume ? resume.prev : null, refs)
         if (written.current) {
           try { await deleteDraft(draftId.current) } catch (e) { console.error(e) }
         }
@@ -319,7 +342,7 @@ export default function Compose({
             disabled={!to.trim() || bad.length > 0 || sending}
             className="btn btn-primary"
           >
-            {sending ? 'Sending…' : forward ? 'Forward' : 'Send'}
+            {upload ?? (sending ? 'Sending…' : forward ? 'Forward' : 'Send')}
           </button>
           <button
             type="button"
