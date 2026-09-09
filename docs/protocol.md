@@ -109,7 +109,7 @@ The nine fields, in order:
 |---|---|---|---|---|
 | 1 | `from` | `@p` (`ship`) | atom | the ship that signed. The key looked up for verification. |
 | 2 | `life` | `@ud` | atom | the key life the signature was made under. |
-| 3 | `to` | `(set ship)` | a `++nl` treap, or `~` when empty | the **visible** recipients. |
+| 3 | `to` | `(set ship)` | an `nlr` treap, or `~` when empty — see [§2.1.1](#211-the-noun-of-to-exactly) | the **visible** recipients. |
 | 4 | `subj` | `@t` | atom (UTF-8 cord) | the subject. |
 | 5 | `body` | `@t` | atom (UTF-8 cord) | the message body. |
 | 6 | `body-mime` | `@t` | atom (UTF-8 cord) | how to read `body`. `''` means `text/plain`. |
@@ -171,6 +171,65 @@ exactly one thread. `prev=~` marks a thread root.
 [§5](#5-attachments). It sits **inside** `unsigned`, so it is covered by the
 signature and by `msg-id`: swapping a file breaks the signature. Capped at **16**
 per message (`max-attach`), each entry checked by `+attach-ok`.
+
+### 2.1.1 The noun of `to`, exactly
+
+`to` is a `(set ship)`, and **`sham` hashes the treap**. A `msg-id` for a
+multi-recipient message is therefore not reproducible from a list of ships: it
+depends on a tree shape, and an implementation that builds that shape any other
+way computes a different id and a signature nobody can verify. This subsection
+is normative.
+
+**The mold.** A `(set ship)` is `nlr` — the null-or-right-recursive treap in
+`hoon.hoon`, not `nl` — which is
+
+```hoon
++$  nlr  $@(~ [n=ship l=nlr r=nlr])
+```
+
+Empty is the atom `~` (0). A node is the right-nested triple `[n [l r]]`: the
+item, the left subtree, the right subtree.
+
+**The two orders.** The tree is a treap, so it has both:
+
+- **Vertically, by `mor`** — a max-heap on a double-`mug`:
+  `(mor a b)` is `(lth (mug (mug a)) (mug (mug b)))` broken by comparing the
+  atoms. Every node's `n` outranks both its children's.
+- **Horizontally, by `gor`** — `(gor a b)` compares `(mug a)` against `(mug b)`
+  and falls back to `dor` (raw atom/cell order) on a tie. Everything in `l`
+  precedes `n`; everything in `r` follows it.
+
+**Construction.** Build it exactly as `+put:in` does — insert each ship,
+rotating to restore the heap — which is what `+sy` and `+gas:in` do. The result
+is **canonical**: a set built from the same ships in any order is the same noun,
+so two ships that typed their recipients in different orders compute the same
+`msg-id`. An implementation MUST reproduce this noun; it MUST NOT substitute a
+sorted list, a map, or a differently-balanced tree.
+
+**Worked example.** `(sy ~[~zod ~nec ~bud])`:
+
+| ship | `@p` | `mug` |
+|---|---|---|
+| `~zod` | 0 | 2.046.756.072 |
+| `~nec` | 1 | 1.901.865.568 |
+| `~bud` | 2 | 1.904.972.904 |
+
+`~zod` has the largest `mug`, so it is the root; `~bud` outranks `~nec`, so it
+is `~zod`'s left child and `~nec` is `~bud`'s. Both right subtrees are empty.
+The noun is
+
+```
+[0 [2 [1 0 0] 0] 0]
+```
+
+— that is, `[n=~zod l=[n=~bud l=[n=~nec l=~ r=~] r=~] r=~]`. Its `jam` is
+`0w5.kUIxp` (`0x1.54e2.c859`); the empty set's `jam` is `0w2`.
+
+The `three-recipients` case in `protocol/vectors/v1.json` pins this: its `to` is
+those three ships, and its `jam`, `msg_id`, `digest` and `sig` are what an
+implementation that builds the treap correctly will produce. Every other signed
+case in the file names **one** recipient and therefore pins nothing about the
+shape.
 
 ### 2.2 Hostile fields
 
@@ -1156,7 +1215,15 @@ ten-tuple of atoms **in the order written above**. A version-1 nexus publishes
   [§4.6](#46-the-caps). A publisher MUST NOT publish a cap it does not enforce:
   a published cap that disagreed with the enforced one is worse than publishing
   nothing, because it makes a sender confident about a send the receiver then
-  drops.
+  drops. A publisher MUST re-publish when the numbers change, and the window in
+  which the two can disagree is therefore **one deploy** — see
+  [§6.3.2](#632-where-a-peer-reads-it).
+- **`versions` and `marks` are each bounded at 64 entries**, and a reader MUST
+  refuse a publication that exceeds it. The bound MUST be checked before the
+  lists are walked whole: this noun is published by a stranger into a namespace
+  anyone may write to, so an unbounded length walk is work an attacker chooses
+  the size of. A protocol that has had sixty-four incompatible versions has a
+  different problem than this bound.
 
 The marc is a noun passthrough (`mar/auspex/proto.hoon`). A typed marc would
 re-validate the stored grub against the live type on every read, so adding a
@@ -1190,19 +1257,50 @@ This is the **same permissionless read** an attachment's bytes get, for the same
 reason: the keen is the only channel that answers an un-granted peer, and there
 is nothing here worth checking a reader for.
 
-**Case.** A spur never grown and never culled binds at **case 1**, and a
-publisher MUST NOT `%grow` a spur it has not first established is unbound —
-`+grow` assigns `las+1` on a non-empty fan, so three unconditional grows push
-`/proto` past the probe ceiling and it becomes unreadable by every peer,
-forever, with no error. A reader SHOULD probe cases 1 through 3, as the blob
-fetch does. The cost of that rule, stated plainly: **a change to `versions`,
-`marks` or the caps does not reach the farm on a redeploy** — the spur must be
-culled first, after which it rebinds at case 2 and the ladder finds it.
+**Case, and republishing.** A spur never grown and never culled binds at
+**case 1**. A publisher MUST NOT `%grow` unconditionally: `+grow` assigns
+`las+1` on a non-empty fan, so a grow per deploy pushes `/proto` past the probe
+ceiling in three deploys and it becomes unreadable by every peer, forever, with
+no error. A reader SHOULD probe cases 1 through 3, as the blob fetch does.
+
+So a publisher **reads back what is bound** — through the same keen a peer uses
+— and acts on the difference:
+
+| bound value | action |
+|---|---|
+| nothing bound | grow. Binds at case 1. |
+| bound, and equal to what we now publish | **nothing.** A redeploy of unchanged content is free, which is what keeps this inside the probe ceiling. |
+| bound, and different | **cull, then grow.** Cull first: a reader takes the FIRST hit walking up from case 1, so an unculled case 1 would answer with the old noun forever and the new one would be unreachable behind it. |
+| bound, and unreadable | **nothing**, and say so. Growing on a read that failed burns a case for no information, which is how the ceiling is reached by accident. |
+
+That is one grow per protocol change rather than per deploy, and it is why the
+publish/enforce window in [§6.3.1](#631-the-published-noun) is one deploy.
+
+**What a reader learns, and why that is accepted.** `/proto` is the first read
+this nexus exposes at a **guessable** path. A blob is content-addressed, so
+asking for one means already knowing its hash; `/proto` sits at a fixed spur, so
+any ship on the network can keen it, unlogged and unanswerable-to, and learn two
+things: **that this ship runs Auspex at all**, and a **capability fingerprint** —
+the version ladder and ten cap numbers, which together identify a build.
+
+That is accepted, and the reason is structural rather than comfortable: a sender
+needs this **before its first poke**, from a ship it has never spoken to, and
+the only channel that answers an un-granted peer is the keen. Gating it would
+mean a grant, a grant means a prior relationship, and a prior relationship is
+exactly what first contact does not have. The alternative is not privacy; it is
+the silent hang this section exists to remove. Nothing here is per-user, nothing
+here is mail, and the same fingerprint is inferable from a peer's behaviour by
+anyone willing to send it a message.
 
 #### 6.3.3 The sender's algorithm
 
-Before poking a recipient, a sender MUST resolve that recipient's `$proto` and
-then:
+**A sender MUST NOT poke a peer it has no answer for.** Sending version 1 while
+the probe is still in flight makes outcome 2 below unreachable on **first
+contact** — which is the send most likely to reach a ship running something
+else, because a ship never asked about is a ship never spoken to. The chain
+waits until the answer arrives.
+
+A sender resolves the recipient's `$proto` and then:
 
 1. **Answer with a common version** → poke the mark for the **highest** common
    version. Highest and not first: a sender that took the first common entry
@@ -1214,8 +1312,6 @@ then:
    no common protocol version: ~ship speaks <their versions>, this ship speaks <ours>
    ```
 
-   Not poking is the point: a mark the peer does not carry parks, and a park is
-   the symptom this whole section exists to remove.
 3. **Answer present, but the send exceeds the peer's published caps** →
    **MUST NOT poke**, and the message names the **peer's** number:
 
@@ -1225,36 +1321,87 @@ then:
 
    and likewise for an attachment's size, chain length, recipients, subject,
    body, body mime, depth and distinct signers. The check MUST read the peer's
-   caps and MUST NOT read the sender's: a sixteen-attachment send is legal on a
-   ship whose own `max-attach` is 16 and is dropped by a peer publishing 8, and
-   finding that out at compose time is the difference between an error a person
-   can act on and a message that vanishes.
-4. **No answer** — a timeout, no such grub, a wrong page mark, or a noun that is
-   not a well-formed `$proto` → **one version-1 attempt**, exactly as a sender
-   with no discovery at all would make. If that attempt is not acked either, the
-   failure is
+   caps and MUST NOT read the sender's.
+4. **The discovery read itself came back empty** — a timeout, no such grub, a
+   wrong page mark, or a noun that is not a well-formed `$proto` → **one
+   version-1 attempt**, because silence is version 1
+   ([§6.3.4](#634-the-compatibility-rule)). Say so before the poke, not after
+   it fails:
 
    ```
-   ~ship did not answer discovery and did not ack the send
+   ~ship has not answered discovery; sent as version 1
    ```
 
-   Both halves are in the sentence deliberately: "timed out" alone reads as a
-   network hiccup, and this is the shape of a ship not running Auspex at all.
+   Present perfect, deliberately: the ship has not answered *yet*. This outcome
+   MUST be reached only from the **probe's own empty result**, never from a
+   cache entry that merely happens to be absent — those are different findings
+   and a sender that conflates them reports a failure it has not observed.
 
-A sender SHOULD cache the answer per ship with a TTL of **one day**
-(`+proto-ttl`, `~d1`), and SHOULD drop a cached record early on **any nack or
-timeout from that ship** — either is evidence the record is wrong or the peer
-moved. A cached **miss** SHOULD be recorded as such rather than left absent, so
-a peer running a build without discovery costs one probe rather than one per
-send.
+**And when the poke itself is not acked**, at either 1 or 4:
 
-**The discovery read MUST NOT run on the writer.** A keen is a network round
-trip and the writer is the ship's single serialisation point for mail; worse, a
-timed-out keen leaves a late response and a stray `%veto` behind, and a
-long-lived fiber that skips those piles them into its skip queue to be
-re-offered on every later take. The reference implementation reads the cache on
-the writer — a peek of its own tree — and spawns one **ephemeral** fiber per
-discovery keen, exactly as `+do-fetch-blob` does for bytes.
+```
+~ship did not ack within 20s; it may still arrive
+```
+
+**Not** "did not ack the send". A deadline bounds how long the sender waits and
+says nothing about what the far end did: measured between two live ships, a
+chain has arrived, verified and been stored while the sender's deadline had
+already fired. A nack is its own line (`~ship nacked the send`), and both drop
+the cached record so the next send re-asks.
+
+**Timeouts, as numbers.** The discovery keen is bounded at **10 seconds per
+case** and probes cases 1 through 3, so a fully unreachable peer costs at most
+**30 seconds** of the probe's own time — never the writer's. The poke's deadline
+is **20 seconds** per recipient.
+
+**Where each step runs.** The discovery read MUST NOT run on the ship's write
+path. A keen is a network round trip, and a timed-out keen leaves a late
+response and a stray `%veto` behind that a long-lived fiber would pile into its
+skip queue to be re-offered on every later take. The reference implementation:
+
+- reads the cache on the writer — a peek of its own tree — and, for a peer with
+  no fresh answer, **queues the chain** and starts one **ephemeral** fiber;
+- that fiber keens, then applies exactly the four outcomes above and pokes (or
+  refuses) from there;
+- two sends to the same unknown peer before the answer arrives are both
+  delivered, **in the order they were written**. A queue that drained backwards
+  would deliver a reply before the message it answers, and every recipient files
+  by `prev` regardless, so nothing would report it.
+
+**Caching.** A sender SHOULD cache the answer per ship. Two TTLs, and the
+asymmetry is deliberate:
+
+| record | TTL | why |
+|---|---|---|
+| lets mail through (a shared version, or a remembered silence) | **1 day** (`+proto-ttl`) | checked by the send itself — a nack or a timeout drops it, so a wrong answer corrects on first use. |
+| **refuses** (no shared version) | **1 hour** (`+proto-refusal-ttl`) | never checked by anything, because the poke is never sent. A self-sealing cache needs a shorter fuse. |
+
+A cached **miss** SHOULD be recorded as such rather than left absent, so a peer
+running a build without discovery costs one probe rather than one per send.
+
+A **cap** refusal is not derivable from the record alone — it depends on the
+message — so it keeps the ordinary TTL, and an implementation SHOULD offer a way
+to drop a record on demand. The reference implementation is the `%forget-peer`
+action and `POST /api/forget-peer {"ship": "~sampel-palnet"}`; it drops the
+cached answer and leaves any queued mail alone, because forgetting what a peer
+said must not throw away what a person wrote.
+
+**Per recipient, never per send.** A refusal MUST apply to the recipient it
+names and MUST NOT block the others. One peer publishing `max-chain 0` inside a
+hundred-recipient `to` would otherwise kill the whole send. `to` itself MUST NOT
+be trimmed — it is a signed field naming the audience the author chose, and
+rewriting it would sign a different message than the one composed. Delivery
+skips the refused recipients; the message does not.
+
+**Two caps a pre-check cannot see.** A sender that screens a send before signing
+it works from a one-message stand-in, so the peer's **`max-chain`** and
+**`max-depth`** — which describe the whole path the message is joining — are
+checkable only at the point of sending. And two of the published caps are not a
+sender's business at all: **`max-threads`** is a receiver-side store bound that
+no chain can be measured against, and **`max-name`** is published for
+completeness but is enforced at the receiver's boundary rather than screened by
+the sender. Both are published because a cap a peer enforces is worth knowing;
+neither changes what a sender may send.
 
 #### 6.3.4 The compatibility rule
 
@@ -1393,7 +1540,15 @@ Each case carries:
 | `signer` | the ship whose ring signed (may differ from `from` — that is a forgery) |
 | `verdict` | the verdict a verifier holding fake keys for the listed `known` ships must produce |
 
-The file also carries a top-level **`proto`** object: the exact noun a version-1
+The file also carries a top-level **`set_noun`** object — the three ships of the
+`three-recipients` case with their `mug`s, the `jam` of the set they form and of
+the empty set — which is what makes [§2.1.1](#211-the-noun-of-to-exactly)
+checkable rather than merely described. Each `cap` case carries the `jam` of the
+offending message's `unsigned` and the offending chain's length, or, where that
+jam would be larger than the fixture it sits in, a `sample_recipe` naming
+exactly how to rebuild the input.
+
+And a top-level **`proto`** object: the exact noun a version-1
 nexus publishes ([§6.3.1](#631-the-published-noun)) as `jam` (`@uw`) and
 `jam_ux`, its spur, its page mark, the keen path at case 1 with the empty
 segment rendered `//`, the caps, the TTL, and the compatibility rule as
@@ -1444,28 +1599,37 @@ Two dojo facts that will otherwise cost an hour:
 
 ### 8.3 The conformance test
 
-`grubbery-overlay/tests/lib/auspex-vectors.hoon` rebuilds the same fixtures with
-the same constructors and asserts the library reproduces every id, digest,
-signature and verdict. Every expected atom in it is **transcribed from
-`protocol/vectors/v1.json`**, mechanically, not recomputed — an assertion that
-recomputed its own expectation would pass against any change to the format it
-exists to pin. `jam` is deliberately not asserted there: it is in the JSON for
-an implementer to byte-compare a noun against, and in Hoon it would only restate
-what the id and digest already cover.
+`grubbery-overlay/tests/lib/auspex-vectors.hoon` **reads
+`protocol/vectors/v1.json` itself**, with a `/*` clay import, and asserts the
+library reproduces what is in it — every `jam`, `msg_id`, `digest`, `sig` and
+verdict, the caps block, the cap cases' refusals, the set noun and the `proto`
+fixture. It also asserts the document's own prose: `version`, `mark`,
+`digest_tag`, `msg_id_rule`, `digest_rule`.
 
-**12 tests.** Run it with `-test`, alongside the main suite:
+That last part is not decoration. The file was previously a dojo transcript
+reassembled by hand, and had lost two characters to a terminal that strips
+trailing whitespace — `(shaf%auspex` for `(shaf %auspex`, `theroot` for
+`the root` — while the suite passed, because it carried its own copies of the
+values and never read the file. **A test that regenerates its own expectations
+proves nothing about the artifact an implementer downloads.** The file is now
+written by the generator straight into clay and copied out of the mount byte for
+byte, and a character lost anywhere in it fails a test on the ship that produced
+it.
+
+**15 tests.** Run it with `-test`, alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  84 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  87 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  48 tests
--test /=grubbery=/tests/lib/auspex-vectors ~   ::  12 tests
+-test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 ```
 
 ### 8.4 Rule → test
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **84 tests** — the last nine are discovery ([§6.3](#63-discovery)).
+be diffed; **87 tests** — the last twelve are discovery
+([§6.3](#63-discovery)).
 
 | rule | test |
 |---|---|
@@ -1553,6 +1717,9 @@ be diffed; **84 tests** — the last nine are discovery ([§6.3](#63-discovery))
 | A cached discovery answer is believed for a day, and a record from the future is not fresh. | `test-a-peer-record-expires` |
 | The two version refusals name the ship first, one line each. | `test-the-discovery-refusals-name-the-ship-first` |
 | The proto spur and its keen path mirror each other, empty segment included. | `test-proto-paths-mirror-each-other` |
+| The pending queue appends, never dedupes, and drains oldest first; the remainder keeps its order. | `test-the-pending-queue-drains-in-order` |
+| A record that refuses expires in an hour, not a day; a remembered silence is not a refusal. | `test-a-refusing-record-expires-sooner` |
+| `+proto-ok` bounds its walk before measuring, and refuses lists that disagree in length. | `test-proto-ok-bounds-the-walk` |
 
 ---
 

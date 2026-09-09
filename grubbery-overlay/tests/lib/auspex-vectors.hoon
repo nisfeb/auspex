@@ -317,12 +317,16 @@
 ::  Every other signed case here names one recipient, so a `to` built in
 ::  any shape at all would reproduce their ids.
 ++  test-vectors-three-recipients
+  =/  u=unsigned:sur  unsigned:m-three
+  =/  fewer=unsigned:sur  u(to (sy ~[~zod ~nec]))
   %+  weld  (msg-case 'three-recipients' m-three ~zod ~[[~zod 1]])
   ;:  weld
-    (expect-eq !>(3) !>(~(wyt in to:unsigned:m-three)))
-    ::  and the id really does depend on the set, not on a count of it.
-    %+  expect-eq  !>(|)
-    !>  =((id:auspex unsigned:m-three) (id:auspex unsigned:m-three(to (sy ~[~zod ~nec]))))
+    (expect-eq !>(3) !>(~(wyt in to.u)))
+    ::  and the id really does depend on the SET, not on a count of it -
+    ::  which is the property no one-recipient case can show.
+    (expect !>(!=((id:auspex u) (id:auspex fewer))))
+    ::  nor on the order the recipients were typed in.
+    (expect !>(=((id:auspex u) (id:auspex u(to (sy ~[~bud ~zod ~nec]))))))
   ==
 ::
 ++  test-vectors-two-attachments
@@ -331,8 +335,8 @@
   ;:  weld
     (expect-eq !>((blob-hash:auspex o-one)) !>((juv (jget (snag 0 b) 'hash'))))
     (expect-eq !>((blob-hash:auspex o-two)) !>((juv (jget (snag 1 b) 'hash'))))
-    (expect-eq !>(p.o-one) !>((jnum (jget (snag 0 b) 'octs_p'))))
-    (expect-eq !>(`@ux`q.o-one) !>((jux (jget (snag 0 b) 'octs_q'))))
+    (expect-eq !>(p:o-one) !>((jnum (jget (snag 0 b) 'octs_p'))))
+    (expect-eq !>(`@ux`q:o-one) !>((jux (jget (snag 0 b) 'octs_q'))))
     (expect-eq !>(a-one) !>(`attachment:sur`['one.txt' 5 'text/plain' (blob-hash:auspex o-one)]))
   ==
 ::
@@ -376,7 +380,7 @@
     ::  copy landed first, the verified one survives.
     %+  expect-eq
       !>  (turn flipped |=(m=msg:sur sig.m))
-      !>  ~[sig:m-root]
+      !>  `(list @ux)`~[sig:m-root]
     %+  expect-eq
       !>  `@t`(scot %ux sig:m-root)
       !>  (jstr (jget (jget k 'prune_kept_is_genuine') 'genuine_sig'))
@@ -409,6 +413,24 @@
     ['big.bin' +(max-blob:auspex) 'application/octet-stream' 0v2]
   =/  c-over-blob=chain:sur
     ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ ~[over-blob]])]
+  =/  c-over-body=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 +(max-body:auspex) 'a') '' ~2026.1.1 ~ ~])]
+  =/  c-at-body=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 max-body:auspex 'a') '' ~2026.1.1 ~ ~])]
+  =/  c-over-subj=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) (fil 3 +(max-subj:auspex) 'a') 'b' '' ~2026.1.1 ~ ~])]
+  =/  c-over-to=chain:sur
+    ~[(bare [~zod 1 (ships +(max-to:auspex)) 's' 'b' '' ~2026.1.1 ~ ~])]
+  =/  c-at-to=chain:sur
+    ~[(bare [~zod 1 (ships max-to:auspex) 's' 'b' '' ~2026.1.1 ~ ~])]
+  =/  c-over-mime=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (fil 3 +(max-mime:auspex) 'a') ~2026.1.1 ~ ~])]
+  =/  c-ctrl-mime=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (cat 3 'text/plain' 0xd) ~2026.1.1 ~ ~])]
+  =/  c-over-attach=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat +(max-attach:auspex))])]
+  =/  c-at-attach=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat max-attach:auspex)])]
   ;:  weld
     %^  cap-case  'cap-max-chain'  '+fits-length'
     :*  max-chain:auspex  +(max-chain:auspex)
@@ -417,57 +439,33 @@
     ==
     %^  cap-case  'cap-max-body'  '+fits-bodies'
     :*  max-body:auspex  +(max-body:auspex)
-        %-  not
-        %+  fits-bodies:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 +(max-body:auspex) 'a') '' ~2026.1.1 ~ ~])]
-        max-body:auspex
-        %+  fits-bodies:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 max-body:auspex 'a') '' ~2026.1.1 ~ ~])]
-        max-body:auspex
+        !(fits-bodies:auspex c-over-body max-body:auspex)
+        (fits-bodies:auspex c-at-body max-body:auspex)
     ==
     %^  cap-case  'cap-max-subj'  '+fits-subjects'
     :*  max-subj:auspex  +(max-subj:auspex)
-        %-  not
-        %+  fits-subjects:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) (fil 3 +(max-subj:auspex) 'a') 'b' '' ~2026.1.1 ~ ~])]
-        max-subj:auspex
+        !(fits-subjects:auspex c-over-subj max-subj:auspex)
         %.y
     ==
     %^  cap-case  'cap-max-to'  '+fits-recipients'
     :*  max-to:auspex  +(max-to:auspex)
-        %-  not
-        %+  fits-recipients:auspex
-          ~[(bare [~zod 1 (ships +(max-to:auspex)) 's' 'b' '' ~2026.1.1 ~ ~])]
-        max-to:auspex
-        %+  fits-recipients:auspex
-          ~[(bare [~zod 1 (ships max-to:auspex) 's' 'b' '' ~2026.1.1 ~ ~])]
-        max-to:auspex
+        !(fits-recipients:auspex c-over-to max-to:auspex)
+        (fits-recipients:auspex c-at-to max-to:auspex)
     ==
     %^  cap-case  'cap-max-mime-length'  '+fits-body-mimes'
     :*  max-mime:auspex  +(max-mime:auspex)
-        %-  not
-        %+  fits-body-mimes:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (fil 3 +(max-mime:auspex) 'a') ~2026.1.1 ~ ~])]
-        max-mime:auspex
+        !(fits-body-mimes:auspex c-over-mime max-mime:auspex)
         %.y
     ==
     %^  cap-case  'cap-mime-control-byte'  '+fits-body-mimes'
     :*  max-mime:auspex  11
-        %-  not
-        %+  fits-body-mimes:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (cat 3 'text/plain' 0xd) ~2026.1.1 ~ ~])]
-        max-mime:auspex
+        !(fits-body-mimes:auspex c-ctrl-mime max-mime:auspex)
         %.y
     ==
     %^  cap-case  'cap-max-attach'  '+fits-attachments'
     :*  max-attach:auspex  +(max-attach:auspex)
-        %-  not
-        %+  fits-attachments:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat +(max-attach:auspex))])]
-        max-attach:auspex
-        %+  fits-attachments:auspex
-          ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat max-attach:auspex)])]
-        max-attach:auspex
+        !(fits-attachments:auspex c-over-attach max-attach:auspex)
+        (fits-attachments:auspex c-at-attach max-attach:auspex)
     ==
     %^  cap-case  'cap-max-blob'  '+attach-ok'
     :*  max-blob:auspex  +(max-blob:auspex)

@@ -1347,6 +1347,47 @@
     (expect !>(!(peer-fresh:auspex r ~2025.1.1)))
   ==
 ::
+::  A RECORD THAT REFUSES EXPIRES IN AN HOUR, NOT A DAY, and the
+::  asymmetry is the whole point. A record that lets mail through is
+::  checked by the send itself - a nack or a timeout drops it - so a
+::  wrong answer corrects on first use. A record that refuses is never
+::  checked by anything, because the poke is never sent: a peer that
+::  once published a ladder we do not share would otherwise lock itself
+::  out for a full day with nothing in the system able to notice.
+++  test-a-refusing-record-expires-sooner
+  =/  none=proto:sur  [%auspex ~[7 9] ~[%a %b] our-caps:auspex]
+  =/  bad=peer-rec:sur   [%0 ~sampel-palnet `none ~2026.1.1]
+  =/  good=peer-rec:sur  [%0 ~sampel-palnet `our-proto:auspex ~2026.1.1]
+  =/  quiet=peer-rec:sur  [%0 ~sampel-palnet ~ ~2026.1.1]
+  ;:  weld
+    ::  the record refuses on its own, without being shown a message.
+    (expect !>((refusing:auspex bad)))
+    (expect !>(!(refusing:auspex good)))
+    ::  a REMEMBERED SILENCE is not a refusal: silence is version 1, so
+    ::  that record lets mail through and keeps the ordinary TTL.
+    (expect !>(!(refusing:auspex quiet)))
+    ::  and the two TTLs.
+    (expect !>((peer-fresh:auspex bad (add ~2026.1.1 ~m59))))
+    (expect !>(!(peer-fresh:auspex bad (add ~2026.1.1 ~h1))))
+    (expect !>((peer-fresh:auspex good (add ~2026.1.1 ~h2))))
+    (expect !>((peer-fresh:auspex quiet (add ~2026.1.1 ~h2))))
+    (expect-eq !>(`@dr`~h1) !>(proto-refusal-ttl:auspex))
+    (expect-eq !>(`@dr`~d1) !>(proto-ttl:auspex))
+  ==
+::
+::  +proto-ok's bound is checked BEFORE the two length walks. This runs
+::  on a noun a stranger published into a namespace anyone may write to,
+::  so an unbounded +lent is work an attacker chooses the size of.
+++  test-proto-ok-bounds-the-walk
+  =/  many=(list @ud)  (gulf 1 65)
+  =/  ok64=(list @ud)  (gulf 1 64)
+  ;:  weld
+    (expect !>(!(proto-ok:auspex [%auspex many (turn many |=(* %a)) our-caps:auspex])))
+    (expect !>((proto-ok:auspex [%auspex ok64 (turn ok64 |=(* %a)) our-caps:auspex])))
+    (expect !>(!(proto-ok:auspex [%auspex ~[1] ~[%a %b] our-caps:auspex])))
+    (expect !>(!(proto-ok:auspex [%auspex ~ ~ our-caps:auspex])))
+  ==
+::
 ::  the two version refusals, as the user reads them. Ship name first,
 ::  one line each: the composer shows one line and the first thing a
 ::  person needs is which recipient it is about.
