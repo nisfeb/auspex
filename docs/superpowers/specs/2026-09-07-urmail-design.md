@@ -573,21 +573,80 @@ truncation, so the loss is invisible twice. Writing a second multipart decoder
 in the import-free lib was the previous attempt at this slice and it is what
 broke the build.
 
-The ceiling was measured before the choice, not after: eyre hands a request
-fiber the whole body and `+de:json:html` is jetted, so a **32MB JSON body
-round-trips in ~1.3s** on `~wex`. `max-blob` is 256K, about 350K encoded, and
-`max-attach` files at that size is 5.5MB — two orders inside the ceiling. The
-JSON body is also already the shape every other write route takes, so this adds
-one decoder and no marc.
+### What the transport actually costs
+
+The first version of this section justified that choice with a JSON benchmark:
+eyre hands a request fiber the whole body, `+de:json:html` is jetted, a **32MB
+JSON body round-trips in ~1.3s** on `~wex`, and `max-attach` files at
+`max-blob` is 5.5MB — two orders inside the ceiling. Every one of those numbers
+is real and **not one of them is this code's number.** `+de:json` is jetted.
+`+b64-digits` is not: it is an interpreted loop that runs once per character of
+the encoding — ~350K times for one `max-blob` file, up to sixteen of those in a
+send — on the request fiber holding the connection open. Benchmarking the
+jetted half and shipping the interpreted half is how a measurement comes to
+justify code nobody ran.
+
+So it was measured on the code that was written, at the live route on `~wex`
+(`POST /apps/urmail/api/send`, `curl -w '%{time_total}'`, warm, one request at
+a time). Two of the rows are diagnostics rather than user paths: a file whose
+encoded length is one quantum over the cap is refused before any base64 is
+decoded, which isolates the JSON parse, and a file with an over-long `name` is
+fully decoded and then refused by `+files-ok`, which isolates the decode. The
+difference between them is the decoder and nothing else.
+
+| at `/api/send`, 256K files | before | after |
+| --- | --- | --- |
+| no attachment, sent | 1.79s | 1.85s |
+| 1 file, refused on length (JSON parse only) | 0.41s | 0.40s |
+| 1 file, decoded then refused (parse + decode) | 3.48s | 1.42s |
+| **1 file, sent — end to end** | **5.13s** | **3.96s** |
+| 16 files, refused on length (parse of a 5.5MB body) | 0.57s | 0.54s |
+| 16 files, decoded then refused | 27.5s | 17.2s |
+| **16 files, sent — end to end** | **32.6s** | **18.7s** |
+
+Reading down: **the JSON parse is not the cost.** 5.5MB of body parses in half
+a second, exactly as the original benchmark said it would. The decode of a
+single `max-blob` file was **~3.0s** and the sixteen-file case held a
+connection open for **over half a minute**.
+
+The decoder was rewritten and re-measured, and the same table carries the
+after: **~1.0s** per file, **18.7s** for the worst case a client can produce.
+What changed is in `+de-b64`, and none of it is the reduction — the arithmetic
+is still zuse's. The per-character `?:` ladder of five range comparisons behind
+a gate call is one `+cut` into `+b64-table`, an atom indexed by the character
+whose stored value is the digit **plus one**, so the zero `+cut` answers for
+anything outside the alphabet is the validation too. Around that loop the first
+shape walked the same 350K list six more times — `+lent` for the character
+count, two `+snag`s for the padding, a `+scag` to drop it, a second `+lent` for
+the digit count, and two `+flop`s that between them rebuilt the list the loop
+had already produced in the order `+rep` wanted. Those are now `+met`,
+subtraction, `+cut` and `+end`, all of them jetted, and the character loop is
+the only walk left.
+
+**18.7s is still not fast, and the honest statement of the limit is this:** the
+sixteen-file case is the largest send urmail accepts, it costs about twenty
+seconds of a request fiber, and there is no partial progress to show for it —
+the browser sees one POST that takes twenty seconds or fails. What remains is
+the loop itself, and shrinking it further means either a jet or a chunked
+upload route, both of which are their own slice. The caps are what bound it:
+`max-blob` at 256K and `max-attach` at 16 are the reason the worst case is
+twenty seconds rather than unbounded, and the client refuses an oversized file
+at the moment it is picked so the common way to hit this limit is deliberate.
+`+de-files` refuses on the **encoded length before decoding anything**, so an
+oversized upload costs a `+met` and not a decode; that gate is exactly
+`4·⌈cap/3⌉`, the encoded length of a cap-sized file, because the rounding is
+the padding and there is nothing to add for it.
 
 **The base64 decoder is urmail's own** (`+de-b64`), not
 `+de:base64:mimes:html`, which is `(rush a parse)` — a parser-combinator sweep
 that turns the payload into a tape and matches it character by character. That
 is precisely the shape grubbery's `lib/multipart` was rewritten away from after
 it OOMed on large uploads. `+de-b64` does the same arithmetic over jetted atom
-ops: one `+rip` in, one `+rep`, one `+swp` out. The reduction is zuse's, line
-for line, because it is the easy part to get subtly wrong — base64 is
-big-endian within each 24-bit group and an urbit atom is little-endian. `len`
+ops: one `+rip` in, one `+rep`, one `+swp` out. The reduction is zuse's,
+because it is the easy part to get subtly wrong — base64 is big-endian within
+each 24-bit group and an urbit atom is little-endian. What is *not* zuse's is
+everything around it; see *What the transport actually costs* for what that is
+and what it measured. `len`
 comes from the **digit count and never from `+met`**, and the result is trimmed
 to `len`, which is what makes a file that begins or ends in a zero byte
 survive and hash the same on both ships.
@@ -646,6 +705,15 @@ peek per retry against a route it was going to call anyway.
 `%save-draft` carries none, so a composer with a file attached takes the direct
 `/api/send` path and never save-then-`%send-draft`. Routing an attached send
 through the draft path would drop every attachment silently and report success.
+
+**And the composer says so, while the files are attached.** The autosave runs
+on a 1.5s debounce and again on close; both write a draft without the files,
+and a resumed draft comes back with none. That is a limit of the draft store
+and it is allowed to be one — what would make it a data-loss bug is a user who
+does not know, so a composer holding files carries one line saying they are not
+saved with drafts. A line and not a confirm dialog: it is true from the moment
+a file is picked, not only on the way out, and the thing to do about it is to
+press Send.
 
 ## The fetch is a keen, not a poke protocol
 
@@ -874,6 +942,7 @@ where there is nothing to mutate, keep the flag alone.
 | GET | `/apps/urmail/api/whoami` | our own `@p` |
 | GET | `/apps/urmail/api/inbox` | the listing |
 | GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
+| GET | `/apps/urmail/icon.svg` | the launcher tile's icon |
 | GET | `/apps/urmail/api/blob/<hash>` | one attachment's bytes |
 | POST | `/apps/urmail/api/send` | compose, reply and forward, with files |
 | POST | `/apps/urmail/api/read` | mark a set of messages read |
@@ -1283,6 +1352,14 @@ without it urmail is installed, running, serving and invisible from the
 grubbery home screen, which reads as "not installed" to everyone but the
 person who types the route by hand. `image` names the app **slug** — the
 name before the first dot in `/apps/urmail.urmail_app` — not the folder.
+
+The icon is a **nexus-root grub with a route of its own**, `GET
+/apps/urmail/icon.svg`, owner-gated like everything else on this surface. It
+needs one because `+serve-ui` otherwise looks under `/app`, where the client's
+four files live and the icon does not — the tiles nexus reads it from the root.
+Until that arm existed the path the `+on-load` comment named answered 404, and
+the web manifest worked around it by carrying the icon inline as a `data:` URI.
+It points at the route now.
 
 ## What none of this does
 

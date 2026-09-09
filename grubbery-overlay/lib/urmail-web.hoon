@@ -224,20 +224,26 @@
 ::
 ::    /api/send already takes a JSON body, so an attachment rides in it
 ::    as a base64 string rather than arriving as a multipart part. The
-::    alternative was measured and rejected twice over:
-::
-::    - eyre hands a request fiber the whole body and +de:json:html is
-::      jetted, so a 32MB JSON body round-trips in ~1.3s on this ship.
-::      The ceiling is nowhere near max-blob (256K, ~350K base64) even
-::      with max-attach files in one send.
-::    - the desk's /lib/multipart is not in gub/lib, so a nexus cannot
-::      import it; and its $part carries `body=@t`, a BARE ATOM with no
-::      declared length, which silently drops a file's trailing zero
-::      bytes - and the content hash is then taken over the truncated
-::      bytes, so the loss is invisible twice.
+::    multipart alternative is out twice over: the desk's /lib/multipart
+::    is not in gub/lib, so a nexus cannot import it; and its $part
+::    carries `body=@t`, a BARE ATOM with no declared length, which
+::    silently drops a file's trailing zero bytes - and the content hash
+::    is then taken over the truncated bytes, so the loss is invisible
+::    twice.
 ::
 ::    One transport, one decoder, no new marc, and the bytes never stop
 ::    being an $octs with a declared length.
+::
+::    WHAT IT COSTS, MEASURED ON THIS CODE. The choice was first argued
+::    from a +de:json:html benchmark - a 32MB body round-trips in ~1.3s
+::    - and that number is real and is not this arm's number: +de:json
+::    is jetted and +b64-digits is not. At the live route on ~wex,
+::    warm: 5.5MB of JSON parses in ~0.5s, one max-blob file decodes in
+::    ~1.0s, and the worst send a client can make - 16 files at 256K -
+::    holds the request fiber for ~19s end to end. The parse is not the
+::    cost; the character loop is, and the caps are what bound it. The
+::    full before/after table is in the spec under "Bytes across the
+::    HTTP surface".
 ::
 ::  $up-file: one uploaded file, decoded off the wire.
 ::
