@@ -5,14 +5,19 @@
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `c4476916581d` is stamped by vite.config.ts at copy time. It is
+// `32a6e26b9392` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = 'c4476916581d'
+const VERSION = '32a6e26b9392'
 const SHELL = `urmail-shell-${VERSION}`
-const DATA = `urmail-data-${VERSION}`
+// NOT versioned, unlike the shell. Mail is not part of the build: a
+// deploy that changes one line of CSS has nothing to say about the
+// listing, and a version-keyed data cache would throw away every cached
+// conversation on every deploy — so the first offline open after an
+// update would show an empty mailbox.
+const DATA = 'urmail-data'
 
 const BASE = '/apps/urmail'
 
@@ -46,8 +51,10 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
+    // Shell caches only. `urmail-data` is deliberately outside this
+    // sweep: it is not keyed by build and must survive one.
     const stale = (await caches.keys())
-      .filter((k) => k.startsWith('urmail-') && k !== SHELL && k !== DATA)
+      .filter((k) => k.startsWith('urmail-shell-') && k !== SHELL)
     for (const k of stale) await caches.delete(k)
     await self.clients.claim()
     // One line to the page, which turns it into a "reload" prompt. The

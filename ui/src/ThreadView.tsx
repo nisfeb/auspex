@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   deleteThread, isShip, markRead, markUnread, ourShip, send, setArchived, setLabel,
-  thread, toUpload, type Message, type Thread,
+  thread, toUpload, unreachable, type Message, type Thread,
 } from './api'
 import VerdictBadge from './VerdictBadge'
 import { AttachmentRow, FilePicker } from './Attachments'
@@ -368,12 +368,14 @@ export default function ThreadView({
       const ups = await Promise.all(files.map(toUpload))
       await send(to, `re: ${last.subject}`, reply, last.id, ups)
     } catch (e) {
-      // NO FALSE "SENT" OFFLINE. The worker never touches a POST, so a
-      // reply written with no network was not signed and did not leave.
+      // NO FALSE "SENT" WHEN THE SHIP WAS NEVER REACHED. The worker
+      // never touches a POST, so a reply whose request did not arrive
+      // was not signed and did not leave. See Compose.tsx.
       console.error(e)
-      setSendError(navigator.onLine
-        ? 'Could not send that reply. Try again.'
-        : 'Offline — not sent. Nothing here has been signed; your reply is still here.')
+      setSendError(unreachable(e)
+        ? 'Offline — not sent. The ship did not answer; nothing was signed and your'
+          + ' reply is still here.'
+        : 'Could not send that reply. Try again.')
       setSending(false)
       return
     }

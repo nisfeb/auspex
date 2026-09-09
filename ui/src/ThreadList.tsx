@@ -83,8 +83,18 @@ export default function ThreadList({
                     {l}
                   </span>
                 ))}
-                <span className="truncate text-ink">{e.subject}</span>
-                <span className="truncate font-normal text-ink-faint">{e.snippet}</span>
+                {/* ONE truncate over the pair, not one each. Two
+                    truncating siblings split the row between them, so a
+                    short snippet stole half the width from a long
+                    subject and both ended in an ellipsis. Gmail's rule:
+                    the subject gets what it needs and the snippet gets
+                    what is left. */}
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="text-ink">{e.subject}</span>
+                  {e.snippet && (
+                    <span className="font-normal text-ink-faint"> — {e.snippet}</span>
+                  )}
+                </span>
               </span>
             )}
             {e.forged && e.verdict !== 'forged' && (

@@ -118,94 +118,102 @@ body {
   overflow-x: hidden;
 }
 
-/* BUTTONS. Small, square-cornered, text-weight — Gmail's, not a toy's.
-   One filled `.btn-primary` per surface; `.btn` alone is the quiet
-   default and `.btn-outline` adds a hairline where a control needs to
-   read as a control. Plain CSS on the same tokens, so there is nothing
-   to keep in sync between a utility string and a palette. */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  background: transparent;
-  padding: 0.25rem 0.625rem;
-  font-size: 13px;
-  line-height: 1.25rem;
-  color: var(--u-ink-dim);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.btn:hover:not(:disabled) {
-  background: var(--u-sunken);
-  color: var(--u-ink);
-}
-.btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.btn-outline {
-  border-color: var(--u-line-strong);
-}
-.btn-primary {
-  background: var(--u-accent);
-  border-color: var(--u-accent);
-  color: var(--u-accent-ink);
-  font-weight: 500;
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--u-accent-hover);
-  border-color: var(--u-accent-hover);
-  color: var(--u-accent-ink);
-}
-.btn-danger:hover:not(:disabled) {
-  color: var(--u-danger);
-  background: var(--u-danger-soft);
-}
+/* IN `components`, NOT UNLAYERED. Tailwind's utilities live in the
+   `utilities` layer, and unlayered CSS beats every layer — so a bare
+   `.btn` would silently win against a `justify-start` or a `py-2` next
+   to it on the same element, which is exactly the kind of override a
+   component class is supposed to lose. */
+@layer components {
 
-/* Text inputs and textareas, on the same tokens. A bare Tailwind input
-   inherits the page background, which on dark reads as an unstyled
-   box, so this is a token rule rather than a per-field utility. */
-.field {
-  width: 100%;
-  background: transparent;
-  color: var(--u-ink);
-  border: 0;
-  border-bottom: 1px solid var(--u-line);
-  padding: 0.375rem 0;
-  font: inherit;
-  font-size: 13px;
-  outline: none;
-}
-.field:focus {
-  border-bottom-color: var(--u-accent);
-}
-.field-bad {
-  border-bottom-color: var(--u-danger);
-}
-.field-box {
-  border: 1px solid var(--u-line);
-  border-radius: 2px;
-  padding: 0.375rem 0.5rem;
-}
-.field-box:focus {
-  border-color: var(--u-accent);
-}
-.field::placeholder {
-  color: var(--u-ink-faint);
-}
-
-/* TOUCH TARGETS ON A PHONE. Above md the density is the point and a
-   28px control row is right; on a finger it is not. One rule, keyed on
-   the same breakpoint the panes collapse at. */
-@media (max-width: 767px) {
-  .btn, .touch {
-    min-height: 40px;
+  /* BUTTONS. Small, square-cornered, text-weight — Gmail's, not a toy's.
+     One filled `.btn-primary` per surface; `.btn` alone is the quiet
+     default and `.btn-outline` adds a hairline where a control needs to
+     read as a control. Plain CSS on the same tokens, so there is nothing
+     to keep in sync between a utility string and a palette. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    padding: 0.25rem 0.625rem;
+    font-size: 13px;
+    line-height: 1.25rem;
+    color: var(--u-ink-dim);
+    cursor: pointer;
+    white-space: nowrap;
   }
-  .field, .field-box {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
+  .btn:hover:not(:disabled) {
+    background: var(--u-sunken);
+    color: var(--u-ink);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .btn-outline {
+    border-color: var(--u-line-strong);
+  }
+  .btn-primary {
+    background: var(--u-accent);
+    border-color: var(--u-accent);
+    color: var(--u-accent-ink);
+    font-weight: 500;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--u-accent-hover);
+    border-color: var(--u-accent-hover);
+    color: var(--u-accent-ink);
+  }
+  .btn-danger:hover:not(:disabled) {
+    color: var(--u-danger);
+    background: var(--u-danger-soft);
+  }
+
+  /* Text inputs and textareas, on the same tokens. A bare Tailwind input
+     inherits the page background, which on dark reads as an unstyled
+     box, so this is a token rule rather than a per-field utility. */
+  .field {
+    width: 100%;
+    background: transparent;
+    color: var(--u-ink);
+    border: 0;
+    border-bottom: 1px solid var(--u-line);
+    padding: 0.375rem 0;
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+  }
+  .field:focus {
+    border-bottom-color: var(--u-accent);
+  }
+  .field-bad {
+    border-bottom-color: var(--u-danger);
+  }
+  .field-box {
+    border: 1px solid var(--u-line);
+    border-radius: 2px;
+    padding: 0.375rem 0.5rem;
+  }
+  .field-box:focus {
+    border-color: var(--u-accent);
+  }
+  .field::placeholder {
+    color: var(--u-ink-faint);
+  }
+
+  /* TOUCH TARGETS ON A PHONE. Above md the density is the point and a
+     28px control row is right; on a finger it is not. One rule, keyed on
+     the same breakpoint the panes collapse at. */
+  @media (max-width: 767px) {
+    .btn, .touch {
+      min-height: 40px;
+    }
+    .field, .field-box {
+      padding-top: 0.5rem;
+      padding-bottom: 0.5rem;
+    }
   }
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft as apiDeleteDraft, deleteRule, drafts as apiDrafts, pageOf,
-  rules as apiRules, saveRule, subscribeChanges,
+  deleteDraft as apiDeleteDraft, deleteRule, drafts as apiDrafts, onCachedMail,
+  pageOf, rules as apiRules, saveRule, subscribeChanges,
   type Draft, type InboxEntry, type Rule, type View,
 } from './api'
 import ThreadList from './ThreadList'
@@ -72,6 +72,11 @@ export default function App() {
   // request will succeed, and the app should say so rather than
   // rendering cached mail as though it were current.
   const [online, setOnline] = useState(() => navigator.onLine)
+  // The listing on screen was served by the service worker out of its
+  // cache, because the ship did not answer. Stronger than `online`: it
+  // is true whenever what is displayed is stale, including on a machine
+  // whose network is fine and whose ship is not.
+  const [stale, setStale] = useState(false)
   // The service worker replaced a shell it had already cached, so the
   // script this tab is running is not the script on the ship any more.
   const [updated, setUpdated] = useState(false)
@@ -111,6 +116,8 @@ export default function App() {
       window.removeEventListener('offline', down)
     }
   }, [])
+
+  useEffect(() => onCachedMail(setStale), [])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -208,6 +215,19 @@ export default function App() {
     wasOnline.current = online
   }, [online, onChange])
 
+  // A NEWLY INSTALLED WORKER MISSED THIS PAGE'S FIRST FETCHES. It
+  // registers after mount and only starts controlling the page once it
+  // has installed and claimed, by which time the listing has already
+  // been fetched around it and so is not in its cache. One refetch when
+  // it takes over is the difference between "opens offline with mail"
+  // working from the second visit and working from the first.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const claimed = () => { onChange() }
+    navigator.serviceWorker.addEventListener('controllerchange', claimed)
+    return () => { navigator.serviceWorker.removeEventListener('controllerchange', claimed) }
+  }, [onChange])
+
   useEffect(() => {
     // subscribeChanges is synchronous and hands back its own teardown, so
     // there is no window in which an unmount (or StrictMode's dev-only
@@ -247,11 +267,22 @@ export default function App() {
     // whoever poked the chain, so "the content is reasonable" is not an
     // assumption this layout is allowed to make.
     <div className="flex h-screen w-full flex-col overflow-hidden bg-surface text-ink">
-      {!online && (
+      {(!online || stale) && (
         <div className="shrink-0 bg-warn-soft px-3 py-1 text-warn-ink ring-1 ring-warn-line">
-          <strong>Offline.</strong> This is mail cached on this device, not
-          {' '}what is on the ship now. Nothing can be sent until the connection
-          {' '}is back — a message you write is kept here and is not signed.
+          {!online ? (
+            <>
+              <strong>Offline.</strong> What is shown is mail cached on this
+              {' '}device, not what is on the ship now. Nothing can be sent until
+              {' '}the connection is back — a message you write is kept here, and
+              {' '}nothing is signed until it is actually sent.
+            </>
+          ) : (
+            <>
+              <strong>Showing cached mail.</strong> The ship did not answer, so
+              {' '}this is the last listing this device stored. A send will fail
+              {' '}rather than sit in a queue, and will say so.
+            </>
+          )}
         </div>
       )}
       {updated && (

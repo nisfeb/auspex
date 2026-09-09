@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft, isShip, newId, saveDraft, send, sendDraft, toUpload, type Draft,
+  deleteDraft, isShip, newId, saveDraft, send, sendDraft, toUpload, unreachable,
+  type Draft,
 } from './api'
 import { FilePicker } from './Attachments'
 
@@ -185,18 +186,20 @@ export default function Compose({
       // unreachable ship, a malformed @p the route's parser rejects)
       // should not look identical to a successful one.
       //
-      // AND NO FALSE "SENT" OFFLINE. A send is a poke to the writer and
-      // the service worker never touches a POST, so a message written
-      // with no network did not go anywhere and did not get signed.
-      // Saying "could not send, check the recipient" would send the
-      // user hunting a typo that is not there; the panel says what
-      // actually happened and keeps every word of it.
+      // AND NO FALSE "SENT" WHEN THE SHIP WAS NEVER REACHED. A send is a
+      // poke to the writer and the service worker never touches a POST,
+      // so a request that did not arrive signed nothing and delivered
+      // nothing. `unreachable` is the fetch having rejected rather than
+      // the ship having refused — a distinction `navigator.onLine`
+      // cannot make, since a machine with working wifi and a ship that
+      // is down is "online". Saying "check the recipient" there would
+      // send the user hunting a typo that is not there.
       console.error(e)
       setError(
-        navigator.onLine
-          ? e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.'
-          : 'Offline — not sent. Nothing here has been signed. It is still here;'
-            + ' send it when the connection is back.',
+        unreachable(e)
+          ? 'Offline — not sent. The ship did not answer, nothing here has been'
+            + ' signed, and every word is still in this panel. Try again when it is back.'
+          : e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.',
       )
     } finally {
       setSending(false)

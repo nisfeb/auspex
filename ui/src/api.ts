@@ -113,6 +113,16 @@ class ApiError extends Error {
   }
 }
 
+// DID THIS REQUEST REACH THE SHIP AT ALL?
+//
+// An ApiError is the ship answering: a refusal, a 404, a bad @p. Anything
+// else out of these calls is fetch rejecting, which means the request
+// never arrived — no poke, no signature, nothing written anywhere. The
+// distinction is the whole of "no false sent": a send that was refused
+// and a send that never left need different words, and only one of them
+// is worth retrying by pressing the same button again.
+export const unreachable = (e: unknown): boolean => !(e instanceof ApiError)
+
 async function jsonOf(res: Response): Promise<unknown> {
   if (!res.ok) {
     // The nexus answers every route with JSON, errors included
@@ -129,10 +139,45 @@ async function jsonOf(res: Response): Promise<unknown> {
   return res.json()
 }
 
-const get = async <T>(path: string): Promise<T> =>
-  await jsonOf(await fetch(`${BASE}${path}`, {
+// WAS THIS MAIL SERVED FROM DISK RATHER THAN BY THE SHIP?
+//
+// The service worker answers /api/inbox and /api/thread from its cache
+// when the network fails, and stamps `x-urmail-cached` on what it hands
+// back (see ui/sw.js). Without that, a mailbox served from a cache and
+// a mailbox served by the ship are the same pixels — which is a client
+// quietly showing yesterday's mail as though it were today's.
+//
+// `navigator.onLine` is not a substitute. It is false only when the
+// machine has no network at all; a laptop on a working wifi whose ship
+// is down is online by that flag and stale by this one.
+let fromCache = false
+const cacheWatchers = new Set<(c: boolean) => void>()
+
+// Subscribe to it. Called immediately with the current value, and hands
+// back its own teardown.
+export const onCachedMail = (fn: (c: boolean) => void): (() => void) => {
+  cacheWatchers.add(fn)
+  fn(fromCache)
+  return () => { cacheWatchers.delete(fn) }
+}
+
+const setFromCache = (c: boolean) => {
+  if (c === fromCache) return
+  fromCache = c
+  for (const fn of cacheWatchers) fn(c)
+}
+
+// `mail` marks the two routes the worker caches. Every other route
+// (whoami, drafts, rules) is never cached and must not clear the flag:
+// a drafts fetch succeeding says nothing about whether the listing on
+// screen came from the ship.
+const get = async <T>(path: string, mail = false): Promise<T> => {
+  const res = await fetch(`${BASE}${path}`, {
     headers: { accept: 'application/json' },
-  })) as T
+  })
+  if (mail) setFromCache(res.headers.get('x-urmail-cached') === '1')
+  return await jsonOf(res) as T
+}
 
 const post = async (path: string, body: unknown): Promise<void> => {
   await jsonOf(await fetch(`${BASE}${path}`, {
@@ -166,7 +211,7 @@ export const whoami = async () => {
 // an exception so it reads as an error rather than as an empty thread.
 export const thread = async (id: string): Promise<Thread | null> => {
   try {
-    return await get<Thread>(`/api/thread/${id}`)
+    return await get<Thread>(`/api/thread/${id}`, true)
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null
     throw e
@@ -448,7 +493,7 @@ export const pageOf = (
   if (opts.q) p.set('q', opts.q)
   if (opts.offset) p.set('offset', String(opts.offset))
   if (opts.limit) p.set('limit', String(opts.limit))
-  return get<Page>(`/api/inbox?${p.toString()}`)
+  return get<Page>(`/api/inbox?${p.toString()}`, true)
 }
 
 // Local state, so none of these move the change beacon: they alter a
