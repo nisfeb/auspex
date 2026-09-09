@@ -168,6 +168,12 @@ export default function ThreadView({
       // One request for the whole batch, not one per message: the
       // writer serialises every mutation and each poke costs it a full
       // mailbox scan.
+      // The ship marks a thread read as it SERVES it, so by the time this
+      // response is in hand the row is no longer unread on the ship — and
+      // nothing else will tell the listing (a read mark does not move the
+      // beacon, deliberately). Un-bold it now; the explicit mark below is
+      // for whatever the serve left unread.
+      onRead(th.id)
       const unread = th.messages.filter((m) => !m.read).map((m) => m.id)
       if (unread.length > 0) {
         markRead(unread).then(() => {
