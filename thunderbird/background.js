@@ -272,14 +272,23 @@ async function syncNow() {
           importedIds.add(item.msg.id)
           added += 1
         } catch (e) {
-          //  Thunderbird throws on a duplicate Message-ID in a folder,
+          //  Thunderbird refuses a duplicate Message-ID in a folder,
           //  which is a mirror that lost its bookkeeping and not a
-          //  failure: record it as imported so the next sync moves on.
-          if (/Message-ID/i.test(String(e && e.message))) {
-            imported[item.msg.id] = {
+          //  failure. Both wordings, because Thunderbird 147 says
+          //  "Destination folder already contains a message with id"
+          //  and does not use the word Message-ID at all — a sync that
+          //  did not know that aborted on the first duplicate and left
+          //  the flags of every later thread unapplied.
+          const why = String(e && e.message)
+          if (/Message-ID|already contains a message/i.test(why)) {
+            //  the message IS in the folder — that is what the refusal
+            //  says — so find it by name rather than recording a hole.
+            const rec = {
               tbId: null, folder: item.folder,
               read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
             }
+            await headerFor(item.msg.id, rec)
+            imported[item.msg.id] = rec
             importedIds.add(item.msg.id)
           } else throw e
         }

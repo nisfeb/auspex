@@ -96,6 +96,20 @@ export async function runSelftest(cfg, api) {
 
   //  ── connect and mirror ────────────────────────────────────────────
 
+  //  A CLEAN MIRROR, when the config asks for one. Only the derived
+  //  state — everything below is rebuilt from the ship on the next sync —
+  //  and it is here because a run that starts from mail an earlier run
+  //  left behind cannot tell a flag it just set from one that was already
+  //  there. The mail itself is deleted from the profile by the harness.
+  if (cfg.reset) {
+    await step('reset', async () => {
+      await api.setState({
+        imported: {}, snapshot: {}, folders: {}, counts: { messages: 0, threads: 0 },
+      })
+      return 'imported, snapshot, folders cleared'
+    })
+  }
+
   await step('connect', async () => {
     const res = await api.connect(cfg.origin, cfg.code)
     if (!res.ok) throw new Error(res.error)
@@ -204,6 +218,17 @@ export async function runSelftest(cfg, api) {
     const ms = await mirrored(threadId)
     if (!ms.length) throw new Error(`nothing mirrored for ${threadId}`)
     const target = ms[0]
+    //  A FLAG ALREADY WHERE THIS STEP MEANS TO PUT IT PROVES NOTHING:
+    //  `messages.update` fires no onUpdated for a value that did not
+    //  move, so the relay never runs and the step would be measuring
+    //  whatever an earlier run left on the ship. Put it back first, and
+    //  give that relay its own two seconds to land.
+    const [key] = Object.keys(patch)
+    const initial = await browser.messages.get(target.tbId)
+    if (!!initial[key] === !!patch[key]) {
+      await browser.messages.update(target.tbId, { [key]: !patch[key] })
+      await sleep(4000)
+    }
     const before = await browser.messages.get(target.tbId)
     await browser.messages.update(target.tbId, patch)
     await sleep(1500)
