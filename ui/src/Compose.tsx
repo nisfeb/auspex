@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft, garbled, isShip, newId, saveDraft, send, sendDraft, unreachable, uploadAll,
+  deleteDraft, garbled, isShip, newId, refusalLine, saveDraft, send, sendDraft,
+  unreachable, uploadAll,
   type Draft, type MailList,
 } from './api'
 import { FilePicker } from './Attachments'
@@ -38,7 +39,7 @@ export default function Compose({
   onClose, onSent, onDraftsChanged, forward, resume, lists,
 }: {
   onClose: () => void
-  onSent: () => void
+  onSent: (notice?: string | null) => void
   // Drafts are their own view, so the panel tells the app when it has
   // written one rather than leaving the sidebar count stale.
   onDraftsChanged: () => void
@@ -69,6 +70,11 @@ export default function Compose({
   // itself is the only thing left.
   const [upload, setUpload] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Who the ship would not carry this to, carried out through onSent.
+  // A ref and not state: it is written once, on the way out of a
+  // component that is about to unmount, and a setState there would be
+  // a render nobody sees.
+  const refused = useRef<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   // ATTACHMENTS DO NOT SURVIVE A DRAFT. A draft is a local grub with no
   // files field, and the writer's %save-draft carries none — so a
@@ -200,7 +206,10 @@ export default function Compose({
         } finally {
           setUpload(null)
         }
-        await send(list, subject, body, forward ? forward.prev : resume ? resume.prev : null, refs)
+        const res = await send(
+          list, subject, body, forward ? forward.prev : resume ? resume.prev : null, refs,
+        )
+        refused.current = refusalLine(list, res.refused)
         if (written.current) {
           try { await deleteDraft(draftId.current) } catch (e) { console.error(e) }
         }
@@ -222,10 +231,19 @@ export default function Compose({
         // a compose. The nexus resolves it to its containing thread and
         // ships the path leading to it; there is no separate forward
         // action.
-        await send(list, subject, body, forward ? forward.prev : null)
+        const res = await send(list, subject, body, forward ? forward.prev : null)
+        refused.current = refusalLine(list, res.refused)
       }
       onDraftsChanged()
-      onSent()
+      // A SEND WITH REFUSALS IS A SEND. The panel closes and the draft
+      // is gone, because the message was signed and did go out to
+      // everyone the ship would carry it to; the line names the ones it
+      // would not, in their own words, where the send is confirmed.
+      //
+      // The all-refused case never reaches here: the route answers 400,
+      // which arrives as an ApiError and lands in the catch below with
+      // the panel open and every word still in it.
+      onSent(refused.current)
     } catch (e) {
       // Leave the panel open with the draft intact — a failed send (an
       // unreachable ship, a malformed @p the route's parser rejects)

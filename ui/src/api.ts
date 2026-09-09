@@ -208,7 +208,7 @@ const get = async <T>(path: string, mail = false): Promise<T> => {
 // received the poke. Everything that fails after that flag is set —
 // a body that is not JSON, a connection dropped mid-body — is the ship
 // having answered, and gets said as such rather than as "never sent".
-const post = async (path: string, body: unknown): Promise<void> => {
+const post = async (path: string, body: unknown): Promise<unknown> => {
   let answered = false
   try {
     const res = await fetch(`${BASE}${path}`, {
@@ -217,7 +217,7 @@ const post = async (path: string, body: unknown): Promise<void> => {
       body: JSON.stringify(body),
     })
     answered = true
-    await jsonOf(res)
+    return await jsonOf(res)
   } catch (e) {
     // An ApiError is already the ship's own reason and travels intact.
     if (answered && !(e instanceof ApiError)) {
@@ -342,18 +342,66 @@ export const uploadAll = async (
   return refs
 }
 
+// WHO THE SHIP WOULD NOT CARRY IT TO, and why, in that ship's own words.
+//
+// The nexus screens each recipient against what that peer published
+// about itself before the message is signed, and answers 200 with the
+// ones it will skip rather than refusing the whole send: one peer
+// publishing a zero cap inside a hundred-recipient `to` must not kill
+// the other ninety-nine. When EVERY recipient is refused the route
+// answers 400 instead, which arrives here as an ApiError and leaves the
+// composer open — a composed message must not vanish behind a success.
+export type Refusal = { ship: string; why: string }
+
+// A 200 from /api/send. `refused` is always present, empty list
+// included, so a caller can read it without asking whether the field
+// exists — but it is decoded defensively anyway, because this is the
+// one place where trusting a shape would turn a successful send into a
+// thrown error.
+export type SendResult = { refused: Refusal[] }
+
+const asRefusals = (v: unknown): Refusal[] => {
+  if (!v || typeof v !== 'object') return []
+  const r = (v as { refused?: unknown }).refused
+  if (!Array.isArray(r)) return []
+  return r.flatMap((x) => (
+    x && typeof x === 'object'
+      && typeof (x as Refusal).ship === 'string'
+      && typeof (x as Refusal).why === 'string'
+      ? [{ ship: (x as Refusal).ship, why: (x as Refusal).why }]
+      : []
+  ))
+}
+
 // `attachments` is omitted entirely when there are none, so a send with
 // no attachment is byte-for-byte the request every earlier client made.
-export const send = (
+export const send = async (
   to: string[],
   subject: string,
   body: string,
   prev: string | null,
   attachments: AttachRef[] = [],
-) => post('/api/send', {
-  to, subj: subject, body, prev,
-  ...(attachments.length ? { attachments } : {}),
-})
+): Promise<SendResult> => {
+  const res = await post('/api/send', {
+    to, subj: subject, body, prev,
+    ...(attachments.length ? { attachments } : {}),
+  })
+  return { refused: asRefusals(res) }
+}
+
+// One line, for where a send is confirmed. Ship first on both halves:
+// the recipients that got it, then the ones that did not and the reason
+// each of them gave. `null` when nobody was refused, which is the
+// ordinary case and wants no line at all.
+export const refusalLine = (to: string[], refused: Refusal[]): string | null => {
+  if (refused.length === 0) return null
+  const bad = new Set(refused.map((r) => r.ship))
+  const sent = to.filter((s) => !bad.has(s))
+  const missed = refused.map((r) => `${r.ship}: ${r.why}`).join('; ')
+  return sent.length > 0
+    ? `Sent to ${sent.join(', ')} — not to ${missed}`
+    : `Not sent to ${missed}`
+}
 
 // ── attachment bytes ─────────────────────────────────────────────────
 

@@ -43,6 +43,15 @@ export default function App() {
   const [entries, setEntries] = useState<InboxEntry[]>([])
   const [total, setTotal] = useState(0)
   const [inboxError, setInboxError] = useState<string | null>(null)
+  // WHO A SEND WAS NOT CARRIED TO, after the composer has closed.
+  //
+  // The composer unmounts on a successful send, so a refusal that is
+  // not an error has nowhere of its own to be said. It lives up here,
+  // beside the offline banner, because it is the same kind of thing:
+  // one line about what the ship did with the last thing asked of it,
+  // dismissible, and never sticky enough to be mistaken for the state
+  // of the mailbox.
+  const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   const [resume, setResume] = useState<Draft | null>(null)
@@ -300,6 +309,28 @@ export default function App() {
     // whoever poked the chain, so "the content is reasonable" is not an
     // assumption this layout is allowed to make.
     <div className="flex h-screen w-full flex-col overflow-hidden bg-surface text-ink">
+      {notice && (
+        // A SEND, NOT A FAILURE. The message was signed and did go out
+        // to every recipient the ship would carry it to; these are the
+        // ones it would not, in each peer's own published words. When
+        // NOBODY could be sent to, the route answers 400 instead and
+        // the composer stays open with every word in it - so this line
+        // never means "nothing was sent".
+        <div
+          role="status"
+          className="flex shrink-0 items-start gap-2 bg-warn-soft px-3 py-1 text-warn-ink ring-1 ring-warn-line"
+        >
+          <p className="min-w-0 flex-1 break-words" data-test="send-notice">{notice}</p>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss"
+            className="shrink-0 px-1"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {(!online || stale) && (
         <div className="shrink-0 bg-warn-soft px-3 py-1 text-warn-ink ring-1 ring-warn-line">
           {!online ? (
@@ -515,7 +546,7 @@ export default function App() {
                 ? (
                   <ThreadView
                     id={selected}
-                    onSent={refresh}
+                    onSent={(n) => { setNotice(n ?? null); refresh() }}
                     onDeleted={() => { setSelected(null); refresh() }}
                     onForward={(f) => { setComposing(false); setResume(null); setForwarding(f) }}
                     onFiled={() => { refresh(); refreshSidebar() }}
@@ -543,8 +574,9 @@ export default function App() {
           lists={lists}
           onDraftsChanged={refreshSidebar}
           onClose={() => { setComposing(false); setForwarding(null); setResume(null) }}
-          onSent={() => {
+          onSent={(n) => {
             setComposing(false); setForwarding(null); setResume(null)
+            setNotice(n ?? null)
             refresh(); refreshSidebar()
           }}
         />

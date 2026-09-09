@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteThread, garbled, isShip, markRead, markUnread, ourShip, send, setArchived,
-  setLabel, thread, unreachable, uploadAll,
+  deleteThread, garbled, isShip, markRead, markUnread, ourShip, refusalLine, send,
+  setArchived, setLabel, thread, unreachable, uploadAll,
   type MailList, type Message, type Thread,
 } from './api'
 import { FilePicker } from './Attachments'
@@ -41,7 +41,7 @@ export default function ThreadView({
   id, onSent, onDeleted, onForward, onFiled, updatedAt, lists, onSaveList,
 }: {
   id: string
-  onSent: () => void
+  onSent: (notice?: string | null) => void
   onDeleted: () => void
   // Opens the composer as a forward: `prev` set to this thread's newest
   // message and NO recipients. See ForwardIntent in Compose.tsx for why
@@ -205,7 +205,12 @@ export default function ThreadView({
   // do not move the change beacon either, which is why each one calls
   // onFiled to refresh what this tab is showing rather than waiting for
   // a push that will never come.
-  const file = async (go: Promise<void>) => {
+  // `Promise<unknown>` and not `Promise<void>`: the shared POST helper
+  // answers the ship's parsed body now, because /api/send has something
+  // to say. Nothing here reads it - filing a conversation is local
+  // state and the ship has no more to report than ok - so the value is
+  // taken and ignored.
+  const file = async (go: Promise<unknown>) => {
     try {
       await go
       const th = await thread(id)
@@ -448,8 +453,15 @@ export default function ThreadView({
       return
     }
     setUpload(null)
+    let notice: string | null = null
     try {
-      await send(to, `re: ${target.subject}`, reply, target.id, refs)
+      const res = await send(to, `re: ${target.subject}`, reply, target.id, refs)
+      // WHO THE SHIP WOULD NOT CARRY IT TO. The reply went out to
+      // everyone else and is gone from this box, so this is a line
+      // beside a successful send and not an error - see Compose.tsx.
+      // The all-refused case is a 400 and lands in the catch below,
+      // where the reply stays in the box.
+      notice = refusalLine(to, res.refused)
     } catch (e) {
       // NO FALSE "SENT" WHEN THE SHIP WAS NEVER REACHED. The worker
       // never touches a POST, so a reply whose request did not arrive
@@ -469,7 +481,7 @@ export default function ThreadView({
     }
     setReply('')
     setFiles([])
-    onSent()
+    onSent(notice)
     try {
       const th = await thread(forId)
       if (idRef.current === forId && th !== null) setT(th)
