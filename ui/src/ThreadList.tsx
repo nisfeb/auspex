@@ -58,8 +58,11 @@ export default function ThreadList({
                 — nudging the one row a reader must be able to find by
                 running an eye down a straight edge. `min-w` on the slot
                 and nothing on the mark: the gutter gets wider, `forged`
-                is exactly as loud as it was. */}
-            <span className="flex min-w-14 shrink-0 items-center">
+                is exactly as loud as it was. 4rem, against a stamp that
+                measures 58px in the default stack — `min-w` and not `w`
+                so that a system font wide enough to overflow it still
+                gets a whole FORGED rather than a clipped one. */}
+            <span className="flex min-w-16 shrink-0 items-center">
               <VerdictBadge verdict={e.verdict} from={e.from} />
             </span>
             <span className="w-24 shrink-0 truncate md:w-32">{e.from}</span>
