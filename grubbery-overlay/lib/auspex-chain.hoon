@@ -1651,4 +1651,287 @@
   =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c)))
   :-  (~(gas in *(set @tas)) (zing (turn hits |=(r=rule ~(tap in add.r)))))
   (lien hits |=(r=rule archive.r))
+
+::  ── protocol discovery ──────────────────────────────────────────────
+::
+::  A poke of a mark the far end does not carry PARKS. A blot with no
+::  marc never acks, so the sender's fiber sits on its deadline and the
+::  user is told "timed out" - which is what a ship that is merely
+::  offline looks like, and what a ship running a different Auspex looks
+::  like, and what a ship running no Auspex at all looks like. Three
+::  different facts, one indistinguishable symptom, none of them
+::  actionable.
+::
+::  So a nexus PUBLISHES what it speaks and a sender ASKS before it
+::  pokes. The published noun is $proto; it is bound in the permissionless
+::  scry farm exactly as an attachment's bytes are, because the same
+::  property is wanted: any ship may read it, and nothing about the
+::  reader is checked.
+::
+::  Everything here is PURE and takes the peer's answer as an argument.
+::  The keen belongs to a fiber; the choosing does not, and the choosing
+::  is the part with rules in it.
+::
+::  $proto-caps: the receiver's limits, published so a sender can refuse
+::  a message the receiver would refuse.
+::
+::    Every field is one of the cap arms above, NEVER a retyped number.
+::    A published cap that disagreed with the enforced one would be worse
+::    than publishing nothing: it would make a sender confident about a
+::    send the receiver then drops.
+::
++$  proto-caps
+  $:  max-blob=@ud
+      max-attach=@ud
+      max-chain=@ud
+      max-body=@ud
+      max-subj=@ud
+      max-to=@ud
+      max-depth=@ud
+      max-signers=@ud
+      max-mime=@ud
+      max-name=@ud
+  ==
+::
+::  $proto: what one nexus speaks, as published at /proto.
+::
+::    `versions` and `marks` are PARALLEL: the mark for version N is the
+::    entry at N's index. Two lists rather than a (map @ud @tas) because
+::    this noun is jammed into a scry farm and read by an implementation
+::    that may not be this one - a list is a shape anything can walk, a
+::    treap is a shape you have to know.
+::
+::    The head is %auspex and not a version number. Versioning lives in
+::    `versions`; the head is what tells a reader that the noun it just
+::    keened from a shared namespace is ours at all.
+::
++$  proto  [%auspex versions=(list @ud) marks=(list @tas) caps=proto-caps]
+::
+::  $peer-rec: one cached discovery answer, at /mail/peer/<ship>.
+::
+::    LOCAL STATE. It never travels, no verdict depends on it, and two
+::    ships may hold different records for the same third ship without
+::    either being wrong - it is a snapshot of what that ship published
+::    at `asked`.
+::
+::    `proto=~` is a REMEMBERED SILENCE and not an absent record: the
+::    peer was asked and did not answer, so it is treated as version 1
+::    until the record expires. Without that distinction every send to a
+::    ship that does not publish /proto would pay a fresh timeout.
+::
+::    `who` rides INSIDE the record so that the same shape is both the
+::    stored grub and the wire poke a request fiber hands the writer.
+::    One marc, one ladder, and a record that names its own subject
+::    rather than depending on the road it was read from.
+::
++$  peer-rec  [%0 who=ship proto=(unit proto) asked=@da]
+::
+::  the published values. Built from the cap arms above, so a change to a
+::  limit changes what this ship publishes in the same edit.
+::
+++  our-versions  ^-((list @ud) ~[1])
+++  our-marks     ^-((list @tas) ~[%auspex-chain])
+++  our-caps
+  ^-  proto-caps
+  :*  max-blob  max-attach  max-chain  max-body  max-subj
+      max-to  max-depth  max-signers  max-mime  max-name
+  ==
+++  our-proto  ^-(proto [%auspex our-versions our-marks our-caps])
+::
+::  +proto-ttl: how long a discovery answer is believed.
+::
+::    A day. What it caches is a peer's DEPLOYED CODE, which changes on
+::    the timescale of a release and not of a conversation, and the cost
+::    of being a day stale is one send that fails with a wrong reason
+::    rather than a right one. The correction path is shorter than the
+::    TTL anyway: a nack or a timeout from a ship invalidates its record
+::    immediately, so the only way to hold a stale answer for a day is
+::    for the stale answer to keep working.
+::
+++  proto-ttl  ^-(@dr ~d1)
+::
+::  +proto-ok: is a keened noun a $proto we can act on?
+::
+::    Clamming answers "is it this shape", never "does it make sense".
+::    The two lists are parallel by contract, so lengths that disagree
+::    make +mark-for's index meaningless; an empty `versions` claims a
+::    ship that speaks nothing, which is not a statement a running nexus
+::    can truthfully make. Both are refused here and the peer is treated
+::    as silent - which is the safe direction, since silence means
+::    version 1 and version 1 is what every Auspex speaks.
+::
+++  proto-ok
+  |=  p=proto
+  ^-  ?
+  ?&  ?=(^ versions.p)
+      =((lent versions.p) (lent marks.p))
+      (lte (lent versions.p) 64)
+  ==
+::
+::  +common-version: the HIGHEST version both ships speak, ~ for none.
+::
+::    Highest and not first: a sender that picked the first common entry
+::    would be pinned to whatever order the peer happened to publish, and
+::    the peer chooses that order.
+::
+++  common-version
+  |=  [ours=(list @ud) theirs=(list @ud)]
+  ^-  (unit @ud)
+  =/  ts  (~(gas in *(set @ud)) theirs)
+  =/  hits  (skim ours |=(v=@ud (~(has in ts) v)))
+  ?~  hits  ~
+  `(roll hits |=([v=@ud acc=@ud] ?:((gth v acc) v acc)))
+::
+::  +mark-for: the wire mark a peer named for one version.
+::
+::    The parallel-list rule, applied. A version present in `versions`
+::    with no mark at its index is a malformed publication and answers ~
+::    rather than guessing - guessing would poke a mark we invented at a
+::    ship that never claimed it.
+::
+++  mark-for
+  |=  [p=proto v=@ud]
+  ^-  (unit @tas)
+  =/  i  (find ~[v] versions.p)
+  ?~  i  ~
+  ?:  (gte u.i (lent marks.p))  ~
+  `(snag u.i marks.p)
+::
+::  +peer-proto: what to believe about a peer, given its record.
+::
+::    THE COMPATIBILITY RULE, in one arm: a peer that publishes no /proto
+::    is version 1. Auspex shipped before discovery did, so silence is
+::    not "unknown", it is the only thing it can be.
+::
+++  peer-proto
+  |=  p=(unit proto)
+  ^-  proto
+  ?~(p [%auspex ~[1] ~[%auspex-chain] our-caps] u.p)
+::
+::  +peer-mark: the mark to poke this peer with, ~ for no common version.
+::
+++  peer-mark
+  |=  p=(unit proto)
+  ^-  (unit @tas)
+  =/  q  (peer-proto p)
+  =/  v  (common-version our-versions versions.q)
+  ?~  v  ~
+  (mark-for q u.v)
+::
+::  +peer-caps: the limits to check a send against. A silent peer is
+::  version 1, and version 1's limits are the ones this file enforces.
+::
+++  peer-caps
+  |=  p=(unit proto)
+  ^-  proto-caps
+  caps:(peer-proto p)
+::
+::  +peer-fresh: is this record still believed?
+::
+++  peer-fresh
+  |=  [r=peer-rec now=@da]
+  ^-  ?
+  &((gte now asked.r) (lth (sub now asked.r) proto-ttl))
+::
+::  ── the three refusals, as text ─────────────────────────────────────
+::
+::  Written here rather than at the two call sites, because a request
+::  fiber and the writer both produce them and a message the user reads
+::  must not depend on which one got there first. Ship name first: the
+::  composer shows one line and the first thing a person needs is which
+::  recipient it is about.
+::
+++  num-list
+  |=  l=(list @ud)
+  ^-  @t
+  ?~  l  'nothing'
+  =/  acc=@t  (scot %ud i.l)
+  =/  r=(list @ud)  t.l
+  |-  ^-  @t
+  ?~  r  acc
+  $(acc (rap 3 ~[acc ', ' (scot %ud i.r)]), r t.r)
+::
+::  +no-version-error: the peer answered, and nothing it speaks is
+::  anything we speak. This is a REFUSAL and not a failed attempt: the
+::  poke is never sent, because a mark the peer does not carry parks.
+::
+++  no-version-error
+  |=  [who=ship p=proto]
+  ^-  @t
+  %+  rap  3
+  :~  'no common protocol version: '  (scot %p who)  ' speaks '
+      (num-list versions.p)  ', this ship speaks '  (num-list our-versions)
+  ==
+::
+::  +no-answer-error: discovery timed out AND the version-1 attempt was
+::  never acked. Both halves are in the sentence on purpose - "timed
+::  out" alone reads as a network hiccup, and this is the shape of a
+::  ship that is not running Auspex at all.
+::
+++  no-answer-error
+  |=  who=ship
+  ^-  @t
+  %+  rap  3
+  ~[(scot %p who) ' did not answer discovery and did not ack the send']
+::
+::  +peer-cap-error: does this chain exceed what the PEER published?
+::
+::    ~ when the send is within the peer's limits. Every bound here is
+::    read off the peer's record and never off this ship's arms, which
+::    is the whole point: a sixteen-attachment send is legal here and
+::    refused by a peer that publishes eight, and finding that out at
+::    compose time is the difference between an error a person can act
+::    on and a message that vanishes.
+::
+::    The order is cheapest-first and the FIRST failure is the message.
+::    A list of every violated cap would be more complete and less
+::    useful: the composer shows one line.
+::
+++  peer-cap-error
+  |=  [who=ship c=chain p=(unit proto)]
+  ^-  (unit @t)
+  =/  k  (peer-caps p)
+  =/  w  `@t`(scot %p who)
+  ?.  (levy c |=(x=msg (lte (lent attachments.unsigned.x) max-attach.k)))
+    `(rap 3 ~[w ' accepts at most ' (scot %ud max-attach.k) ' attachments'])
+  ?.  %+  levy  c
+      |=  x=msg
+      (levy attachments.unsigned.x |=(a=attachment (lte size.a max-blob.k)))
+    `(rap 3 ~[w ' accepts an attachment of at most ' (scot %ud max-blob.k) ' bytes'])
+  ?.  (fits-length c max-chain.k)
+    `(rap 3 ~[w ' accepts at most ' (scot %ud max-chain.k) ' messages in a chain'])
+  ?.  (fits-recipients c max-to.k)
+    `(rap 3 ~[w ' accepts at most ' (scot %ud max-to.k) ' recipients'])
+  ?.  (fits-subjects c max-subj.k)
+    `(rap 3 ~[w ' accepts a subject of at most ' (scot %ud max-subj.k) ' bytes'])
+  ?.  (fits-bodies c max-body.k)
+    `(rap 3 ~[w ' accepts a body of at most ' (scot %ud max-body.k) ' bytes'])
+  ?.  (fits-body-mimes c max-mime.k)
+    `(rap 3 ~[w ' accepts a body mime of at most ' (scot %ud max-mime.k) ' bytes'])
+  ?.  (fits-depth c max-depth.k)
+    `(rap 3 ~[w ' accepts a thread at most ' (scot %ud max-depth.k) ' deep'])
+  ?.  (fits-signers c max-signers.k)
+    `(rap 3 ~[w ' accepts at most ' (scot %ud max-signers.k) ' distinct signers'])
+  ~
+::
+::  ── where the published noun lives in the farm ──────────────────────
+::
+::  +proto-spur mirrors +blob-spur: one prefix this nexus owns inside the
+::  yoke's FLAT farm namespace. No revision segment and no hash, because
+::  there is exactly one /proto per ship and its address must be
+::  constructible by a peer that knows nothing but the ship.
+::
+++  proto-spur  ^-(path /auspex/proto)
+::
+::  +proto-keen-path: the ames spar path of a PEER's /proto. MUST mirror
+::  +proto-spur, and carries the same empty segment +blob-keen-path
+::  carries and for the same reason - see that arm.
+::
+++  proto-keen-path
+  |=  [agent=@ta case=@ud]
+  ^-  path
+  %+  weld  `path`[%g %x (scot %ud case) agent %$ %'1' ~]
+  proto-spur
+::
+++  proto-page-mark  ^-(@tas %auspex-proto)
 --

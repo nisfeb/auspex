@@ -1214,4 +1214,173 @@
     (expect-eq !>(2) !>((lent c)))
     (expect !>((chain-matches:auspex 'pay here' c)))
   ==
+
+::  ── protocol discovery ──────────────────────────────────────────────
+::
+::  The chooser and the cap pre-check are PURE and live in the lib
+::  precisely so they can be asserted here. The fiber code only peeks,
+::  caches and calls them; if a rule about which mark to poke lived in a
+::  fiber it would be reachable by nothing but a cross-ship send.
+::
+::  the highest common version, not the first. A sender that took the
+::  first common entry would be pinned to whatever order the PEER
+::  published, and the peer chooses that order.
+++  test-common-version-picks-the-highest
+  ;:  weld
+    (expect-eq !>(`(unit @ud)`[~ 3]) !>((common-version:auspex ~[1 2 3] ~[3 1 2])))
+    (expect-eq !>(`(unit @ud)`[~ 2]) !>((common-version:auspex ~[1 2 3] ~[2 1])))
+    (expect-eq !>(`(unit @ud)`[~ 1]) !>((common-version:auspex ~[1] ~[1 2 3])))
+  ==
+::
+::  nothing in common is ~, and ~ is a REFUSAL rather than a fallback:
+::  the poke is never sent, because a mark the peer does not carry parks
+::  and a park is indistinguishable from a ship that is merely offline.
+++  test-common-version-answers-none
+  ;:  weld
+    (expect-eq !>(`(unit @ud)`~) !>((common-version:auspex ~[1] ~[2 3])))
+    (expect-eq !>(`(unit @ud)`~) !>((common-version:auspex ~[1] ~)))
+    (expect-eq !>(`(unit @ud)`~) !>((common-version:auspex ~ ~[1])))
+  ==
+::
+::  THE COMPATIBILITY RULE. Auspex shipped before discovery did, so a
+::  peer that publishes no /proto is version 1 - not "unknown", which is
+::  the only other thing silence could mean and would refuse every peer
+::  running the build before this one.
+++  test-a-peer-with-no-proto-is-version-1
+  =/  q  (peer-proto:auspex ~)
+  ;:  weld
+    (expect-eq !>(~[1]) !>(versions.q))
+    (expect-eq !>(~[%auspex-chain]) !>(marks.q))
+    (expect-eq !>(`(unit @tas)`[~ %auspex-chain]) !>((peer-mark:auspex ~)))
+    ::  and its caps are version 1's caps, which are the ones this file
+    ::  enforces - so a send to a silent peer is checked, not waved past.
+    (expect-eq !>(our-caps:auspex) !>((peer-caps:auspex ~)))
+  ==
+::
+::  `versions` and `marks` are parallel: version N's mark is the entry at
+::  N's index. A version with no mark at its index answers ~ rather than
+::  guessing, because guessing pokes a mark we invented at a ship that
+::  never claimed it.
+++  test-mark-for-follows-the-parallel-lists
+  =/  p=proto:sur  [%auspex ~[1 2] ~[%auspex-chain %auspex-chain-2] our-caps:auspex]
+  ;:  weld
+    (expect-eq !>(`(unit @tas)`[~ %auspex-chain]) !>((mark-for:auspex p 1)))
+    (expect-eq !>(`(unit @tas)`[~ %auspex-chain-2]) !>((mark-for:auspex p 2)))
+    (expect-eq !>(`(unit @tas)`~) !>((mark-for:auspex p 3)))
+    ::  a publication whose lists disagree in length is refused whole
+    ::  rather than read up to the shorter one.
+    (expect !>((proto-ok:auspex p)))
+    (expect !>(!(proto-ok:auspex [%auspex ~[1 2] ~[%auspex-chain] our-caps:auspex])))
+    (expect !>(!(proto-ok:auspex [%auspex ~ ~ our-caps:auspex])))
+  ==
+::
+::  THE PRE-CHECK READS THE PEER'S CAPS AND NEVER OURS. A three-attachment
+::  send is legal on this ship - max-attach is sixteen - and is refused by
+::  a peer publishing two, and the refusal has to happen HERE, at compose
+::  time, because at the far end it is a message that vanishes.
+++  test-peer-cap-check-uses-the-peers-caps-not-ours
+  =/  as=(list attachment:sur)
+    ~[['a' 1 'text/plain' 0v1] ['b' 1 'text/plain' 0v2] ['c' 1 'text/plain' 0v3]]
+  =/  m  (forge-with ~sampel-palnet (sy ~[~palnet-sampel]) 's' 'b' ~2026.1.1 ~ as)
+  =/  c=chain:sur  ~[m]
+  =/  base   our-caps:auspex
+  =/  tight  base(max-attach 2)
+  =/  small  base(max-blob 0)
+  ;:  weld
+    ::  our own cap admits it.
+    (expect !>((attaches-ok:auspex as)))
+    ::  the peer's does not, and the message names the PEER'S number.
+    %+  expect-eq
+      !>  `(unit @t)`[~ '~sampel-palnet accepts at most 2 attachments']
+      !>  (peer-cap-error:auspex ~sampel-palnet c `[%auspex ~[1] ~[%auspex-chain] tight])
+    ::  a peer publishing our own caps accepts it.
+    %+  expect-eq
+      !>  `(unit @t)`~
+      !>  (peer-cap-error:auspex ~sampel-palnet c `our-proto:auspex)
+    ::  and so does a silent peer, which is version 1 and therefore us.
+    (expect-eq !>(`(unit @t)`~) !>((peer-cap-error:auspex ~sampel-palnet c ~)))
+    ::  the SIZE bound is the peer's too, not only the count.
+    %+  expect-eq
+      !>  `(unit @t)`[~ '~sampel-palnet accepts an attachment of at most 0 bytes']
+      !>  (peer-cap-error:auspex ~sampel-palnet c `[%auspex ~[1] ~[%auspex-chain] small])
+  ==
+::
+::  what a nexus PUBLISHES is what it ENFORCES. A published cap that
+::  disagreed with the enforced one would be worse than publishing
+::  nothing: it would make a sender confident about a send the receiver
+::  then drops, which is the exact failure discovery exists to remove.
+++  test-published-caps-are-the-enforced-caps
+  =/  k  our-caps:auspex
+  =/  q  our-proto:auspex
+  ;:  weld
+    (expect-eq !>(max-blob:auspex) !>(max-blob.k))
+    (expect-eq !>(max-attach:auspex) !>(max-attach.k))
+    (expect-eq !>(max-chain:auspex) !>(max-chain.k))
+    (expect-eq !>(max-body:auspex) !>(max-body.k))
+    (expect-eq !>(max-subj:auspex) !>(max-subj.k))
+    (expect-eq !>(max-to:auspex) !>(max-to.k))
+    (expect-eq !>(max-depth:auspex) !>(max-depth.k))
+    (expect-eq !>(max-signers:auspex) !>(max-signers.k))
+    (expect-eq !>(max-mime:auspex) !>(max-mime.k))
+    (expect-eq !>(max-name:auspex) !>(max-name.k))
+    ::  and the published head names us, so a noun keened out of a farm
+    ::  shared with every other nexus is identifiable before it is trusted.
+    (expect !>(?=(%auspex -.q)))
+    (expect-eq !>(~[1]) !>(our-versions:auspex))
+    (expect-eq !>(~[%auspex-chain]) !>(our-marks:auspex))
+  ==
+::
+::  a cached answer is believed for a day and then it is not. The TTL
+::  caches a peer's DEPLOYED CODE, which moves on the timescale of a
+::  release; the short correction path is a nack, which drops the record
+::  outright rather than waiting this out.
+++  test-a-peer-record-expires
+  =/  r=peer-rec:sur  [%0 ~sampel-palnet ~ ~2026.1.1]
+  ;:  weld
+    (expect !>((peer-fresh:auspex r ~2026.1.1)))
+    (expect !>((peer-fresh:auspex r (add ~2026.1.1 ~h23))))
+    (expect !>(!(peer-fresh:auspex r (add ~2026.1.1 ~d1))))
+    (expect !>(!(peer-fresh:auspex r (add ~2026.1.1 ~d2))))
+    ::  a record from the future is not fresh either. `asked` is written
+    ::  by this ship, so that is a clock that moved, and believing it
+    ::  would pin the record forever.
+    (expect !>(!(peer-fresh:auspex r ~2025.1.1)))
+  ==
+::
+::  the two version refusals, as the user reads them. Ship name first,
+::  one line each: the composer shows one line and the first thing a
+::  person needs is which recipient it is about.
+++  test-the-discovery-refusals-name-the-ship-first
+  =/  p=proto:sur  [%auspex ~[7 9] ~[%a %b] our-caps:auspex]
+  ;:  weld
+    %+  expect-eq
+      !>  ^-  @t
+          'no common protocol version: ~sampel-palnet speaks 7, 9, this ship speaks 1'
+      !>  (no-version-error:auspex ~sampel-palnet p)
+    %+  expect-eq
+      !>  ^-  @t
+          '~sampel-palnet did not answer discovery and did not ack the send'
+      !>  (no-answer-error:auspex ~sampel-palnet)
+    ::  and there is no common version with that peer, which is what
+    ::  produces the first message rather than a poke.
+    (expect-eq !>(`(unit @tas)`~) !>((peer-mark:auspex `p)))
+  ==
+::
+::  the keen path a sender builds for a peer's /proto mirrors the spur
+::  the publisher grows at, and carries the EMPTY SEGMENT that a path
+::  literal cannot spell - the same segment +blob-keen-path carries, and
+::  the one nobody notices is missing until every read misses forever.
+++  test-proto-paths-mirror-each-other
+  =/  k=path  (proto-keen-path:auspex %grubbery 1)
+  ;:  weld
+    (expect-eq !>(`path`/auspex/proto) !>(proto-spur:auspex))
+    (expect-eq !>(8) !>((lent k)))
+    ::  the empty knot is really there, and it is the one segment a path
+    ::  literal cannot spell - which is why this list is written by cons.
+    (expect-eq !>(`path`~[%g %x '1' %grubbery '' '1' %auspex %proto]) !>(k))
+    (expect-eq !>(`@ta`'') !>((snag 4 k)))
+    ::  and the tail of the keen path IS the spur, so a change to one
+    ::  that is not made to the other fails here rather than in the field.
+    (expect-eq !>(proto-spur:auspex) !>((slag 6 k)))
+  ==
 --
