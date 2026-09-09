@@ -1726,6 +1726,48 @@
 ::
 +$  peer-rec  [%0 who=ship proto=(unit proto) asked=@da]
 ::
+::  $probe-req: one discovery in flight, and THE CHAINS WAITING ON IT.
+::
+::    A send to a peer we have never asked about cannot go out as
+::    version 1 on the strength of not having asked: that is the
+::    question the refusal exists to answer, and answering it by
+::    guessing means the "no common version" rule can never fire on
+::    first contact - which is exactly the send most likely to reach a
+::    ship running something else.
+::
+::    So the chain WAITS, here, and the ephemeral probe fiber sends it
+::    once it knows what to send. `pending` is a LIST and not one chain
+::    because two sends to the same unknown ship can arrive before the
+::    keen answers, and both must be delivered, in the order they were
+::    written - a set or an overwrite would silently drop the second
+::    message a person composed.
+::
+::    Persisted, with a %fall row, so a crash mid-probe loses no mail:
+::    the fiber respawns and drains the queue it finds.
+::
+::    ONE SHAPE, THREE JOBS, like $peer-rec above and for the same
+::    reason - one `;;` ladder rather than three that must be kept in
+::    step:
+::
+::      the grub at /probe/<ship>   the queue. answer=~, drained=0.
+::      the fiber's own state       read back mid-run to pick up
+::                                  anything appended during the keen.
+::      the done poke               pending=~, `answer` is what the keen
+::                                  found and `drained` is how many of
+::                                  the queue the fiber actually sent,
+::                                  so the writer culls exactly those
+::                                  and re-sends anything that arrived
+::                                  behind them.
+::
++$  probe-req
+  $:  %0
+      who=ship
+      asked=@da
+      pending=(list chain)
+      answer=(unit proto)
+      drained=@ud
+  ==
+::
 ::  the published values. Built from the cap arms above, so a change to a
 ::  limit changes what this ship publishes in the same edit.
 ::
@@ -1867,16 +1909,75 @@
       (num-list versions.p)  ', this ship speaks '  (num-list our-versions)
   ==
 ::
-::  +no-answer-error: discovery timed out AND the version-1 attempt was
-::  never acked. Both halves are in the sentence on purpose - "timed
-::  out" alone reads as a network hiccup, and this is the shape of a
-::  ship that is not running Auspex at all.
+::  +unanswered-note: the probe ITSELF timed out, so there is nothing to
+::  choose from and the compatibility rule decides: silence is version 1.
 ::
-++  no-answer-error
+::    Said only when the PROBE's own result is empty, never when a cache
+::    entry merely happens to be absent - the writer no longer sends on
+::    an absent record at all, it queues, so "has not answered" here is a
+::    finding and not an assumption.
+::
+::    Present perfect, deliberately: the ship has not answered YET. A
+::    later send re-asks when the record expires.
+::
+++  unanswered-note
   |=  who=ship
   ^-  @t
+  (rap 3 ~[(scot %p who) ' has not answered discovery; sent as version 1'])
+::
+::  +late-ack-note: the poke went out and no ack came back inside the
+::  deadline.
+::
+::    NOT "did not ack the send", which asserts a fact this ship cannot
+::    know. A poke that is applied late is applied: measured between two
+::    live ships, a chain arrived, verified and stored while the sender's
+::    own deadline had already fired. The deadline bounds how long we
+::    WAIT, and says nothing about what the far end did.
+::
+::    The number is passed in rather than written here, so the sentence
+::    and the deadline it describes cannot drift apart.
+::
+++  late-ack-note
+  |=  [who=ship secs=@ud]
+  ^-  @t
   %+  rap  3
-  ~[(scot %p who) ' did not answer discovery and did not ack the send']
+  :~  (scot %p who)  ' did not ack within '  (scot %ud secs)
+      's; it may still arrive'
+  ==
+::
+++  nacked-note
+  |=  who=ship
+  ^-  @t
+  (rap 3 ~[(scot %p who) ' nacked the send'])
+::
+::  ── the pending queue ───────────────────────────────────────────────
+::
+::  Two arms, pure, because the ORDER is the property worth asserting
+::  and it is not observable from a fiber: a queue that drained
+::  backwards would deliver a reply before the message it answers, and
+::  every recipient would file the pair by `prev` anyway - so the bug
+::  would show up as nothing at all until someone read a thread.
+::
+::  +queue-chain: append. Never prepend, never dedupe. Two identical
+::  sends are two messages a person wrote twice.
+::
+++  queue-chain
+  |=  [q=(list chain) c=chain]
+  ^-  (list chain)
+  (snoc q c)
+::
+::  +drain-queue: the first `n` to send, and what is left behind.
+::
+::    The remainder matters as much as the head. A chain appended while
+::    the fiber was draining is BEHIND the count it reports, so the
+::    writer culls exactly what was sent and re-sends the rest - which
+::    is what makes the hand-off between the fiber and the writer lose
+::    nothing without either of them locking anything.
+::
+++  drain-queue
+  |=  [q=(list chain) n=@ud]
+  ^-  [sent=(list chain) rest=(list chain)]
+  [(scag n q) (slag n q)]
 ::
 ::  +peer-cap-error: does this chain exceed what the PEER published?
 ::

@@ -1357,13 +1357,57 @@
       !>  ^-  @t
           'no common protocol version: ~sampel-palnet speaks 7, 9, this ship speaks 1'
       !>  (no-version-error:auspex ~sampel-palnet p)
+    ::  the PROBE's own empty result, not a cache miss. Present perfect:
+    ::  the ship has not answered yet, and a later send re-asks.
     %+  expect-eq
       !>  ^-  @t
-          '~sampel-palnet did not answer discovery and did not ack the send'
-      !>  (no-answer-error:auspex ~sampel-palnet)
+          '~sampel-palnet has not answered discovery; sent as version 1'
+      !>  (unanswered-note:auspex ~sampel-palnet)
+    ::  A DEADLINE BOUNDS HOW LONG WE WAIT AND SAYS NOTHING ABOUT WHAT
+    ::  THE FAR END DID. Measured between two live ships, a chain
+    ::  arrived, verified and stored while the sender's own deadline had
+    ::  already fired, so the old wording asserted a false fact on every
+    ::  slow-but-successful send.
+    %+  expect-eq
+      !>  `@t`'~sampel-palnet did not ack within 20s; it may still arrive'
+      !>  (late-ack-note:auspex ~sampel-palnet 20)
+    (expect-eq !>(`@t`'~sampel-palnet nacked the send') !>((nacked-note:auspex ~sampel-palnet)))
     ::  and there is no common version with that peer, which is what
     ::  produces the first message rather than a poke.
     (expect-eq !>(`(unit @tas)`~) !>((peer-mark:auspex `p)))
+  ==
+::
+::  THE QUEUE DRAINS IN THE ORDER IT WAS WRITTEN. Two sends to the same
+::  unknown ship can both land before the keen answers, and a queue that
+::  drained backwards would deliver a reply before the message it
+::  answers - which no recipient would report, because every recipient
+::  files by `prev` regardless. The bug would be invisible until someone
+::  read the thread.
+++  test-the-pending-queue-drains-in-order
+  =/  a=chain:sur  ~[(forge ~sampel-palnet (sy ~[~palnet-sampel]) 'a' 'one' ~2026.1.1 ~)]
+  =/  b=chain:sur  ~[(forge ~sampel-palnet (sy ~[~palnet-sampel]) 'b' 'two' ~2026.1.2 ~)]
+  =/  c=chain:sur  ~[(forge ~sampel-palnet (sy ~[~palnet-sampel]) 'c' 'three' ~2026.1.3 ~)]
+  =/  q  (queue-chain:auspex (queue-chain:auspex (queue-chain:auspex ~ a) b) c)
+  =/  two  (drain-queue:auspex q 2)
+  ;:  weld
+    ::  appended, never prepended.
+    (expect-eq !>(~[a b c]) !>(q))
+    (expect-eq !>(3) !>((lent q)))
+    ::  the head goes first, and what is left keeps its order - a chain
+    ::  appended while the fiber was draining sits BEHIND the count the
+    ::  fiber reports, which is what lets the writer cull exactly what
+    ::  was sent and re-send the rest without either side locking.
+    (expect-eq !>(~[a b]) !>(sent.two))
+    (expect-eq !>(~[c]) !>(rest.two))
+    ::  draining nothing and draining everything are both no-ops on the
+    ::  order, and a count past the end does not crash.
+    (expect-eq !>(q) !>(rest:(drain-queue:auspex q 0)))
+    (expect-eq !>(q) !>(sent:(drain-queue:auspex q 3)))
+    (expect-eq !>(q) !>(sent:(drain-queue:auspex q 9)))
+    (expect-eq !>(`(list chain:sur)`~) !>(rest:(drain-queue:auspex q 9)))
+    ::  a duplicate send is two messages a person wrote twice, and the
+    ::  queue keeps both: deduping here would drop mail.
+    (expect-eq !>(~[a a]) !>((queue-chain:auspex (queue-chain:auspex ~ a) a)))
   ==
 ::
 ::  the keen path a sender builds for a peer's /proto mirrors the spur
