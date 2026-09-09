@@ -66,6 +66,13 @@ export default function Compose({
   // keystroke before a close is exactly the one that would be lost.
   const latest = useRef({ to, subject, body })
   latest.current = { to, subject, body }
+  // HAS A HUMAN TOUCHED THIS? The save effect runs on mount like every
+  // effect, and a Forward composer opens with its subject already
+  // filled in, so "is anything in the fields" was true before the user
+  // did anything: opening Forward and closing it again left a draft
+  // nobody wrote. Autosave is for work that would otherwise be lost,
+  // and nothing typed is nothing lost.
+  const touched = useRef(false)
 
   const ships = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean)
   // RECIPIENT VALIDATION, IN THE CLIENT, BEFORE THE POKE. The nexus keeps
@@ -75,6 +82,7 @@ export default function Compose({
   const bad = ships(to).filter((s) => !isShip(s))
 
   const store = async () => {
+    if (!touched.current) return
     const { to: t, subject: s, body: b } = latest.current
     if (!t.trim() && !s.trim() && !b.trim()) return
     try {
@@ -200,7 +208,7 @@ export default function Compose({
           </p>
         )}
         <input
-          value={to} onChange={(e) => setTo(e.target.value)}
+          value={to} onChange={(e) => { touched.current = true; setTo(e.target.value) }}
           placeholder="~sampel-palnet, ~palnet-sampel"
           aria-label={forward ? 'Forward to' : 'To'}
           className={`mb-1 w-full border-b py-2 text-sm outline-none
@@ -213,7 +221,7 @@ export default function Compose({
           </p>
         )}
         <input
-          value={subject} onChange={(e) => setSubject(e.target.value)}
+          value={subject} onChange={(e) => { touched.current = true; setSubject(e.target.value) }}
           maxLength={1000}
           placeholder="Subject"
           className="mb-2 w-full border-b border-neutral-200 py-2 text-sm outline-none"
@@ -225,7 +233,7 @@ export default function Compose({
             UTF-16 units rather than bytes, so they are a guard rail, not
             the authority - the nexus stays the authority. */}
         <textarea
-          value={body} onChange={(e) => setBody(e.target.value)}
+          value={body} onChange={(e) => { touched.current = true; setBody(e.target.value) }}
           maxLength={100000}
           placeholder={forward ? 'Add a note (optional)' : undefined}
           className="h-56 w-full resize-none py-2 text-sm outline-none"

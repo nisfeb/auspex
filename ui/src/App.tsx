@@ -59,17 +59,33 @@ export default function App() {
   const [threadUpdate, setThreadUpdate] = useState<number | null>(null)
 
   const isThreadPane = pane !== 'drafts' && pane !== 'rules'
+  // A SEARCH LEAVES THE PANE. The nexus ANDs the query with the view
+  // predicate, which is right as a primitive and wrong as the only
+  // behaviour a user can get: searching from the Inbox would then be
+  // searching everything EXCEPT archived mail, and a rule can archive a
+  // thread - including one holding a forgery, aimed by a sender who
+  // knows your rules. The nexus is honest that archived mail stays
+  // searchable and that no rule can hide a failed signature; both were
+  // true of the nexus and false of the box the user types into.
+  const searching = applied.trim() !== ''
 
   const refresh = useCallback(() => {
     if (!isThreadPane) return
-    pageOf(pane as View, { label, q: applied, offset, limit: PER_PAGE })
+    pageOf(searching ? 'all' : pane as View, {
+      // The label narrows a view, so it goes with the view and not with
+      // the search: a query is a question about the whole mailbox.
+      label: searching ? undefined : label,
+      q: applied,
+      offset,
+      limit: PER_PAGE,
+    })
       .then((p) => {
         setInboxError(null)
         setEntries(p.threads)
         setTotal(p.total)
       })
       .catch((e) => { console.error(e); setInboxError('Could not reach the ship.') })
-  }, [pane, label, applied, offset, isThreadPane])
+  }, [pane, label, applied, offset, isThreadPane, searching])
 
   // The label list and the draft count are sidebar state, not list
   // state: they have to be right whatever pane is open, so they are
@@ -154,15 +170,20 @@ export default function App() {
                   aria-label="Search"
                   className="w-full rounded-full bg-neutral-100 px-4 py-2 text-sm outline-none"
                 />
-                {applied && (
+                {searching && (
                   // Search covers forged messages deliberately, and a
                   // result row is drawn from the message that matched —
                   // so a hit on a forgery says FORGED rather than
-                  // borrowing a verified copy's sender line.
+                  // borrowing a verified copy's sender line. It also
+                  // covers archived mail, and saying so is the point:
+                  // the guarantee is that nothing can hide a message,
+                  // and a search silently scoped to one folder would
+                  // quietly not be that.
                   <p className="mt-2 text-xs text-neutral-500">
-                    {total} {total === 1 ? 'conversation' : 'conversations'} matching
-                    {' '}“{applied}”. Messages whose signature failed are included and
-                    are shown as forged.
+                    {total} {total === 1 ? 'conversation' : 'conversations'} in
+                    {' '}<strong>all mail</strong> matching “{applied}” — archived
+                    conversations included, and messages whose signature failed are
+                    included and shown as forged.
                   </p>
                 )}
               </div>

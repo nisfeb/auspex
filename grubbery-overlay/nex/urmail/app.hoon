@@ -2549,7 +2549,7 @@
       [%'POST' [%api %'draft-delete' ~]]
     (do-web-id src eyre-id (req-body req) %delete-draft)
       [%'POST' [%api %'draft-send' ~]]
-    (do-web-id src eyre-id (req-body req) %send-draft)
+    (do-web-draft-send src eyre-id (req-body req))
       [%'POST' [%api %rule ~]]          (do-web-rule src eyre-id (req-body req))
       [%'POST' [%api %'rule-delete' ~]]
     (do-web-id src eyre-id (req-body req) %delete-rule)
@@ -3285,14 +3285,64 @@
   ;<  ~  bind:m  (poke-writer [%save-rule rl])
   (send-ok eyre-id)
 ::
-::  +do-web-id: the three routes that carry only an id.
+::  +do-web-id: the two routes that carry only an id and nothing to check.
 ::
-::    delete-draft, send-draft and delete-rule differ in nothing but the
-::    action tag, so they share one arm rather than three copies of the
-::    same owner gate and the same decoder.
+::    delete-draft and delete-rule differ in nothing but the action tag,
+::    so they share one arm rather than two copies of the same owner
+::    gate and the same decoder. draft-send used to be here and is not
+::    any more: it has caps to check, and answering ok to a send the
+::    writer will refuse is what its own arm exists to stop.
+::
+::  +do-web-draft-send: sign a draft and send it.
+::
+::    THE CAPS ARE CHECKED HERE, WHERE THE ANSWER CAN STILL BE NO, for
+::    the same reason /api/send checks them: this route answers as soon
+::    as the writer takes the poke, so a draft the writer then refuses
+::    was answered `ok` and the composer closed on it. The draft
+::    survives on disk - +do-send-draft deletes only on a send that
+::    happened - so nothing is lost, but the user was told a message
+::    went out that did not, which is the one thing "no delivery
+::    receipts" was never meant to cover.
+::
+::    The same three predicates +do-web-send uses, from the same lib
+::    arms, so the two boundaries cannot drift. What stays writer-side
+::    is what only the writer can answer: an unknown `prev` and a blob
+::    store with no room. Those still refuse cleanly and still leave the
+::    draft where it was; the trace says which.
+::
+++  do-web-draft-send
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  i=(unit @uv)  (de-id:uw u.jon)
+  ?~  i  (send-err eyre-id 400 'bad id')
+  ;<  root=path  bind:m  nexus-root
+  ;<  d=(unit draft:uc)  bind:m  (read-draft root u.i)
+  ::  a draft that is not there is a 404 and not an ok. The composer
+  ::  turns it into "this draft no longer exists", which is what a draft
+  ::  deleted in another tab actually is.
+  ?~  d  (send-err eyre-id 404 'no such draft')
+  ::  `from`, `life`, `sent` and the signature are bunted: not one of
+  ::  the three predicates below reads them, and inventing values the
+  ::  writer will overwrite would be the drift this shares arms to
+  ::  avoid.
+  =/  one=chain:uc
+    ~[[[*@p 0 to.u.d subj.u.d body.u.d '' *@da prev.u.d ~] 0x0]]
+  ?.  (fits-bodies:uc one max-body:uc)
+    (send-err eyre-id 400 'body too long')
+  ?.  (fits-subjects:uc one max-subj:uc)
+    (send-err eyre-id 400 'subject too long')
+  ?.  (fits-recipients:uc one max-to:uc)
+    (send-err eyre-id 400 'too many recipients')
+  ;<  ~  bind:m  (poke-writer [%send-draft u.i])
+  (send-ok eyre-id)
 ::
 ++  do-web-id
-  |=  [src=@p eyre-id=@ta raw=@t tag=?(%delete-draft %send-draft %delete-rule)]
+  |=  [src=@p eyre-id=@ta raw=@t tag=?(%delete-draft %delete-rule)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
@@ -3305,7 +3355,6 @@
     %-  poke-writer
     ?-  tag
       %delete-draft  [%delete-draft u.i]
-      %send-draft    [%send-draft u.i]
       %delete-rule   [%delete-rule u.i]
     ==
   (send-ok eyre-id)

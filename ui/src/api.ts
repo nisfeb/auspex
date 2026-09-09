@@ -308,15 +308,21 @@ export interface Rule {
 const SYL = '(?:[a-z]{6}|[a-z]{3})'
 const SHIP_RE = new RegExp(`^~(?:${SYL}(?:-${SYL})*)$`)
 
+// The four ship classes, by how many hyphen-separated groups they
+// render as: galaxy and star are one, planet two, moon four, comet
+// eight. Nothing else is a ship, and "even" is not the rule — six, ten
+// and twelve are even and none of them names anything.
+const GROUPS = new Set([1, 2, 4, 8])
+
 export const isShip = (s: string): boolean => {
   if (!SHIP_RE.test(s)) return false
   const parts = s.slice(1).split('-')
-  // A galaxy or star is one syllable pair or one syllable; everything
-  // longer is planet, moon or comet, and those come in PAIRS of pairs.
-  // ~sampel-palnet is two, ~sampel-palnet-sampel-palnet is four; three
-  // is not a ship name.
-  if (parts.length === 1) return true
-  return parts.length % 2 === 0
+  if (!GROUPS.has(parts.length)) return false
+  // A three-letter group is a galaxy, and a galaxy is the WHOLE name.
+  // Without this ~zod-zod passes: two groups is a valid count, and the
+  // pattern allows three letters per group, so the two rules apart admit
+  // a name that @p never renders.
+  return parts.length === 1 || parts.every((p) => p.length === 6)
 }
 
 export const pageOf = (
