@@ -1,0 +1,11 @@
+{
+  "name": "auspex-thunderbird",
+  "version": "0.1.0",
+  "description": "Auspex mail in Thunderbird: a MailExtension that mirrors the ship's mail into local folders and sends through the ship's API.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "build": "node build.js"
+  }
+}
