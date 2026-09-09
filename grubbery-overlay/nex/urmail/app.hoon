@@ -1047,7 +1047,9 @@
 ::    A ref naming no stored blob refuses the WHOLE send: nothing is
 ::    signed, nothing is stored, and the route ahead of this one has
 ::    already answered 400 with the hash, which is the message a person
-::    can act on. This check is the point-of-use half of that pair.
+::    can act on. This is the point-of-use half of that pair, and it is
+::    not redundant: this route is not the only caller, and a blob can
+::    be evicted between the route's check and the writer's.
 ::
 ++  do-send-refs
   |=  $:  root=path
@@ -3432,24 +3434,26 @@
   =/  rs=(unit (list up-ref:uw))  (de-refs:uw u.jon max-attach:uc)
   ?~  rs  (send-err eyre-id 400 'bad attachment')
   =/  refs=(list attach-ref:uc)  u.rs
-  ::  RESOLVED HERE SO THE ANSWER CAN STILL BE NO. This route pokes the
-  ::  writer and answers as soon as the poke is taken, so a ref the
-  ::  writer cannot resolve would be a composed message destroyed
-  ::  silently behind a 200 - the exact failure the cap checks above
-  ::  were added to stop, arriving through a different door. Naming the
-  ::  hash is the point: "unknown attachment" alone tells a person
-  ::  nothing about which file went missing.
+  ::  the count and the two hostile strings, from the same lib arm the
+  ::  writer's +attaches-ok shares. `size` is NOT checked here: a ref
+  ::  does not carry one, reading it off the store costs a peek of the
+  ::  bytes per file, and the upload route already refused anything
+  ::  over max-blob with a 413 before it stored a thing.
+  ?.  (refs-ok:uc refs)  (send-err eyre-id 400 'bad attachment')
+  ::  EVERY REF NAMES A BLOB WE HOLD, CHECKED HERE SO THE ANSWER CAN
+  ::  STILL BE NO. This route pokes the writer and answers as soon as
+  ::  the poke is taken, so a ref the writer cannot resolve would be a
+  ::  composed message destroyed silently behind a 200 - the exact
+  ::  failure the cap checks above were added to stop, arriving through
+  ::  a different door. Naming the hash is the point: "unknown
+  ::  attachment" alone tells a person nothing about which file went
+  ::  missing. +peek-exists and not +blob-size, because existence is
+  ::  all this needs and the writer has to read the blob anyway.
   ;<  root=path  bind:m  nexus-root
-  ;<  as=(unit (list attachment:uc))  bind:m  (resolve-refs root refs)
-  ?~  as
-    ;<  missing=(unit @uv)  bind:m  (first-unheld root refs)
+  ;<  missing=(unit @uv)  bind:m  (first-unheld root refs)
+  ?^  missing
     %^  send-err  eyre-id  400
-    ?~  missing  'unknown attachment'
     (rap 3 ~['unknown attachment ' (scot %uv u.missing)])
-  ::  the same caps the writer applies, from the same lib arm, on the
-  ::  metadata the writer will actually sign - the sizes came off the
-  ::  store a line ago, not off the request.
-  ?.  (attaches-ok:uc u.as)  (send-err eyre-id 400 'bad attachment')
   ::  body-mime='' is 'text/plain', which is what this composer produces
   ::  and the only thing the client renders. bcc=~: no BCC field exists
   ::  in the web client yet, and it is absent from $send-req rather than
@@ -3459,12 +3463,16 @@
     (poke-writer [%send-ref to.u.req subj.u.req body.u.req '' prev.u.req refs ~])
   (send-ok eyre-id)
 ::
-::  +first-unheld: the first named blob this ship does not hold.
+::  +first-unheld: the first named blob this ship does not hold, ~ when
+::  it holds them all.
 ::
-::    Only ever called once +resolve-refs has already said one of them
-::    is missing, so this is the second pass that finds WHICH - and it
-::    runs on the failure path alone, where a person is about to read
-::    the answer.
+::    ONE +peek-exists PER REF AND NOT ONE BYTE READ. The route needs
+::    two things from the store - that every ref resolves, and which one
+::    does not when the answer is no - and neither of them is the size.
+::    Reading the size here would peek sixteen quarter-megabyte grubs on
+::    a request fiber for a send that has not been signed yet, and the
+::    writer, which does have to read them to sign them, would read them
+::    all again a moment later.
 ::
 ++  first-unheld
   |=  [root=path rs=(list attach-ref:uc)]
@@ -3498,6 +3506,17 @@
 ::    OWNER-GATED LIKE +serve-blob, flag and src both. This is a write
 ::    surface; resting it on one flag from one vane is thinner than it
 ::    needs to be.
+::
+::    IT DOES NOT EVICT, and that is a stated gap rather than an
+::    oversight. +make-room reads every blob in the store and every
+::    message on the ship to decide what is unreferenced - the exact
+::    O(mailbox) work this slice exists to keep off a request fiber -
+::    and a cull racing the writer's own is not idempotent the way the
+::    put is. So max-blobs and max-blob-bytes bound the tree store at
+::    the two places that still evict, %send's dojo path and a blob
+::    fetch, and an upload can carry the store past them. The fix is
+::    the same sweep of unreferenced blobs that collects abandoned
+::    uploads, on the writer, and it is not in this slice.
 ::
 ::    IT DOES NOT BUMP THE BEACON. No message appeared, none changed,
 ::    and no listing row reads differently for a blob arriving - the
@@ -3541,8 +3560,6 @@
   ::  answers exactly what the first upload answered.
   ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
   ?:  ex  (blob-uploaded eyre-id h p.bts)
-  ;<  room=?  bind:m  (make-room root p.bts)
-  ?.  room  (send-err eyre-id 507 'blob store full')
   ;<  now=@da  bind:m  bowl-now
   ;<  ~  bind:m  (put-file (blob-rail root h) [/urmail %blob] [%1 bts now])
   ::  PUBLISHED, exactly as an outbound attachment is: an uploaded blob

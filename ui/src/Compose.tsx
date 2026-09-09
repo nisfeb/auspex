@@ -170,8 +170,12 @@ export default function Compose({
           refs = await uploadAll(files, (i, n) => { setUpload(`uploading ${i} of ${n}`) })
         } catch (e) {
           console.error(e)
+          // The ship's own reason, PUNCTUATED. It arrives as a bare
+          // clause ("blocked by the test") and runs straight into the
+          // sentence after it otherwise.
+          const why = e instanceof Error ? e.message : 'An attachment could not be uploaded'
           setError(
-            `${e instanceof Error ? e.message : 'An attachment could not be uploaded.'}`
+            `${why.replace(/[.!?]?$/, '.')}`
             + ' Nothing has been sent — every word and every file is still here.',
           )
           return

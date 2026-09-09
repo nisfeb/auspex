@@ -376,8 +376,10 @@ export default function ThreadView({
       refs = await uploadAll(files, (i, n) => { setUpload(`uploading ${i} of ${n}`) })
     } catch (e) {
       console.error(e)
+      // punctuated, for the reason Compose.tsx gives.
+      const why = e instanceof Error ? e.message : 'An attachment could not be uploaded'
       setSendError(
-        `${e instanceof Error ? e.message : 'An attachment could not be uploaded.'}`
+        `${why.replace(/[.!?]?$/, '.')}`
         + ' Nothing has been sent — your reply and its files are still here.',
       )
       setUpload(null)

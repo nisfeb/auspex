@@ -116,9 +116,12 @@ This gate covers the five things a client cannot work without — listing, threa
 send, mark-read, delete — and those are live and driven from a browser against
 both ships.
 
-**The attachment gap is closed.** `POST /api/send` carries files as base64
-inside the JSON it already took (a 256K file decodes in ~1s on the nexus;
-the sixteen-file worst case is ~19s end to end, stated in the spec), and
+**The attachment gap is closed.** `POST /api/blob` takes a file as its raw
+request body, stores it and answers its content address; `POST /api/send` then
+names those addresses and carries no bytes (a 256K upload costs ~0.8s, of which
+~0.4s is the platform's floor for any request; the sixteen-file worst case is
+~15.6s end to end with per-file progress, stated in the spec). The base64
+transport this replaced, and its hand-written decoder, are deleted.
 `GET /api/blob/<hash>` serves bytes owner-gated, `409 not fetched` until the
 existing `/fetch/<id>` path brings them over, with the mime allow-listed, the
 name sanitised and `Content-Disposition: attachment` always. Verified

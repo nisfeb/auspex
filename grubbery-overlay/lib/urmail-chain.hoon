@@ -613,6 +613,33 @@
       (levy as attach-ok)
   ==
 ::
+::  +refs-ok: everything about a named attachment that can be checked
+::  WITHOUT READING THE BLOB.
+::
+::    The boundary's half of +attaches-ok. A ref carries no size, and
+::    reading one off the store costs a peek of the bytes per file - on
+::    the request fiber, sixteen times, for a send that has not been
+::    signed yet. So the route checks the count and the two hostile
+::    strings here and leaves `size` to the writer, which has to read
+::    the blob anyway to sign it. Nothing is skipped: size against
+::    max-blob is enforced by the upload route, which refuses an
+::    oversized body with a 413 before it stores anything, and again by
+::    +attaches-ok at the point of use.
+::
+++  ref-ok
+  |=  r=attach-ref
+  ^-  ?
+  ?&  (text-ok name.r max-name)
+      (text-ok mime.r max-mime)
+  ==
+::
+++  refs-ok
+  |=  rs=(list attach-ref)
+  ^-  ?
+  ?&  (lte (lent rs) max-attach)
+      (levy rs ref-ok)
+  ==
+::
 ::  +file-ok: is this file storable at all?
 ::
 ::    +attach-ok plus the one check only bytes can carry. p.octs is the

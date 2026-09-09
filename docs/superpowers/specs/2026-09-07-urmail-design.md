@@ -564,92 +564,106 @@ reachable: a message could carry a signed `[name size mime hash]`, the bytes
 could sit at `/mail/blob/<hash>`, and no route moved a single byte between the
 browser and the ship.
 
-**Upload rides base64 inside the JSON `/api/send` already takes.** The
-alternative was multipart and it is out twice over. The desk's `lib/multipart`
-is not in `gub/lib`, so a nexus cannot import it; and its `$part` carries
-`body=@t`, a bare atom with **no declared length**, which silently drops a
-file's trailing zero bytes — and the content hash is then taken over the
-truncation, so the loss is invisible twice. Writing a second multipart decoder
-in the import-free lib was the previous attempt at this slice and it is what
-broke the build.
+**The bytes go up on a route of their own.** `POST /apps/urmail/api/blob` takes
+the file as its request body, `application/octet-stream`, nothing wrapped
+around it — the browser passes the `File` handle to `fetch`, which streams it,
+so the client never holds a byte of it in memory. The route hashes what it was
+given, writes `/mail/blob/<hash>`, publishes it into the scry farm exactly as
+an outbound attachment is published, and answers `{"hash": "0v…", "size": N}`.
+`POST /api/send` then carries `attachments: [{name, mime, hash}]` — no bytes,
+and **no size**, because the size that gets signed is read off the stored blob
+by the nexus. Owner-gated like every other data route, flag and `src` both, and
+it does not move the beacon: no message appeared and no listing row reads
+differently for a blob arriving.
+
+**The nexus signs what it stores.** A ref is the sender naming a blob this ship
+already holds, so `size` comes from `p.octs` of the stored grub and the hash is
+*not* re-derived on send — the store only ever accepted a blob that hashed to
+its own address (`+do-web-blob` and `+take-blob` are the only two writers and
+both check), so re-hashing would pay a quarter-megabyte of `+sham` for a fact
+the store already guarantees, while trusting a client's `size` would let one
+sign a length the bytes do not have. A ref naming no stored blob refuses the
+**whole** send with `400 unknown attachment <hash>` and nothing is signed;
+that check runs on the request fiber, where the answer can still be no, and
+again on the writer, where the send actually happens.
+
+`%send` keeps its bytes-carrying shape for a programmatic or dojo poke;
+`%send-ref` is the web path. Both meet in `+do-send-core` the moment the signed
+`[name size mime hash]` list exists, so there is one signing path and the caps
+cannot drift between them.
+
+**The refusals, in order.** No body, or a zero-length one, is `400 empty body`
+— an empty file has a content address like any other and the store would hold
+it happily, but the request is indistinguishable from a client that meant to
+send bytes and sent none. A body over `max-blob` is `413` **with the number in
+the message**. Everything else is checked at the send: the count against
+`max-attach`, `name` and `mime` through `+text-ok`, and `size` against
+`max-blob` once more at the point of use.
+
+**Idempotence is the addressing working.** The same bytes are the same blob:
+a re-upload finds the grub present, writes nothing, does not bump the spur's
+case in the scry farm (see `+store-blob` on why that matters) and answers
+exactly what the first upload answered.
 
 ### What the transport actually costs
 
-The first version of this section justified that choice with a JSON benchmark:
-eyre hands a request fiber the whole body, `+de:json:html` is jetted, a **32MB
-JSON body round-trips in ~1.3s** on `~wex`, and `max-attach` files at
-`max-blob` is 5.5MB — two orders inside the ceiling. Every one of those numbers
-is real and **not one of them is this code's number.** `+de:json` is jetted.
-`+b64-digits` is not: it is an interpreted loop that runs once per character of
-the encoding — ~350K times for one `max-blob` file, up to sixteen of those in a
-send — on the request fiber holding the connection open. Benchmarking the
-jetted half and shipping the interpreted half is how a measurement comes to
-justify code nobody ran.
+The transport this replaced was **base64 inside the JSON `/api/send` body**,
+and it was argued for from a `+de:json:html` benchmark — a 32MB body
+round-trips in ~1.3s — which was real and was not that code's number. `+de:json`
+is jetted; the base64 decoder was urmail's own, an interpreted loop running once
+per character of the encoding (~350K times for one `max-blob` file, sixteen of
+those in a send) on the request fiber holding the connection open. Rewritten
+around a table lookup it still cost **~1.0s per file and 18.7s for the
+sixteen-file worst case**, as one POST, with no partial progress to show for it.
 
-So it was measured on the code that was written, at the live route on `~wex`
-(`POST /apps/urmail/api/send`, `curl -w '%{time_total}'`, warm, one request at
-a time). Two of the rows are diagnostics rather than user paths: a file whose
-encoded length is one quantum over the cap is refused before any base64 is
-decoded, which isolates the JSON parse, and a file with an over-long `name` is
-fully decoded and then refused by `+files-ok`, which isolates the decode. The
-difference between them is the decoder and nothing else.
+Raw bytes need no decoder at all. Eyre hands the request fiber an `$octs` with a
+declared length, which is exactly the shape `+blob-hash` and the store want, so
+there is no encoding between the bytes on the wire and the bytes in the tree and
+no place for a decoding bug to live. Measured at the live route on `~wex`,
+warm, one request at a time (`curl -w '%{time_total}'`):
 
-| at `/api/send`, 256K files | before | after |
+| | base64 in `/api/send` | raw `POST /api/blob` |
 | --- | --- | --- |
-| no attachment, sent | 1.79s | 1.85s |
-| 1 file, refused on length (JSON parse only) | 0.41s | 0.40s |
-| 1 file, decoded then refused (parse + decode) | 3.48s | 1.42s |
-| **1 file, sent — end to end** | **5.13s** | **3.96s** |
-| 16 files, refused on length (parse of a 5.5MB body) | 0.57s | 0.54s |
-| 16 files, decoded then refused | 27.5s | 17.2s |
-| **16 files, sent — end to end** | **32.6s** | **18.7s** |
+| 1 × 256K, upload only | — | **0.75–0.92s** |
+| 1 × 256K, re-upload of bytes already held | — | 0.47s |
+| **1 × 256K, sent — end to end** | **3.96s** | **2.6s** |
+| **16 × 256K, sent — end to end** | **18.7s** | **15.6s** (12.4s of uploads + 3.2s send) |
+| no attachment, sent | 1.85s | 1.82s |
 
-Reading down: **the JSON parse is not the cost.** 5.5MB of body parses in half
-a second, exactly as the original benchmark said it would. The decode of a
-single `max-blob` file was **~3.0s** and the sixteen-file case held a
-connection open for **over half a minute**.
+**The honest reading of that table is that the decode is gone and the round
+trips are what is left.** A 256K upload costs 0.75s, of which **~0.4s is this
+platform's floor for any request at all** — the static shell answers in 0.39s
+on the same ship — and the re-upload row isolates it: 0.47s to hash a
+quarter-megabyte, peek, and answer, with no write. Nothing in the upload scales
+with the file: a 4K upload costs the same 0.85s a 256K one does. So the
+sixteen-file case is now seventeen requests against a serialized pier rather
+than one twenty-second request, which buys three seconds and, more to the point,
+buys **per-file progress**: the composer says *uploading 2 of 5*, each unit is
+under a second, and a failure names the file that failed instead of losing the
+whole POST. The remaining cost is the pier's per-request overhead multiplied by
+`max-attach`, and shrinking it means fewer requests, not a faster decoder.
 
-The decoder was rewritten and re-measured, and the same table carries the
-after: **~1.0s** per file, **18.7s** for the worst case a client can produce.
-What changed is in `+de-b64`, and none of it is the reduction — the arithmetic
-is still zuse's. The per-character `?:` ladder of five range comparisons behind
-a gate call is one `+cut` into `+b64-table`, an atom indexed by the character
-whose stored value is the digit **plus one**, so the zero `+cut` answers for
-anything outside the alphabet is the validation too. Around that loop the first
-shape walked the same 350K list six more times — `+lent` for the character
-count, two `+snag`s for the padding, a `+scag` to drop it, a second `+lent` for
-the digit count, and two `+flop`s that between them rebuilt the list the loop
-had already produced in the order `+rep` wanted. Those are now `+met`,
-subtraction, `+cut` and `+end`, all of them jetted, and the character loop is
-the only walk left.
+**An upload does not evict, and that is a stated gap.** `+make-room` reads every
+blob in the store and every message on the ship to decide what is unreferenced —
+the exact `O(mailbox)` work this route exists to keep off a request fiber — and a
+cull racing the writer's own is not idempotent the way a content-addressed put
+is. So `max-blobs` and `max-blob-bytes` bound the tree store at the two places
+that still evict, `%send`'s dojo path and a blob fetch, and a run of uploads can
+carry it past them.
 
-**18.7s is still not fast, and the honest statement of the limit is this:** the
-sixteen-file case is the largest send urmail accepts, it costs about twenty
-seconds of a request fiber, and there is no partial progress to show for it —
-the browser sees one POST that takes twenty seconds or fails. What remains is
-the loop itself, and shrinking it further means either a jet or a chunked
-upload route, both of which are their own slice. The caps are what bound it:
-`max-blob` at 256K and `max-attach` at 16 are the reason the worst case is
-twenty seconds rather than unbounded, and the client refuses an oversized file
-at the moment it is picked so the common way to hit this limit is deliberate.
-`+de-files` refuses on the **encoded length before decoding anything**, so an
-oversized upload costs a `+met` and not a decode; that gate is exactly
-`4·⌈cap/3⌉`, the encoded length of a cap-sized file, because the rounding is
-the padding and there is nothing to add for it.
+**An upload whose compose is abandoned stays in the blob store.** Nothing
+references it, nothing shows it, and nothing collects it. That is the accepted
+ceiling for now, and the fix is the same one the paragraph above wants: a sweep
+of unreferenced blobs, on the writer, which would collect abandoned uploads and
+enforce both store bounds in one pass. It is not in this slice.
 
-**The base64 decoder is urmail's own** (`+de-b64`), not
-`+de:base64:mimes:html`, which is `(rush a parse)` — a parser-combinator sweep
-that turns the payload into a tape and matches it character by character. That
-is precisely the shape grubbery's `lib/multipart` was rewritten away from after
-it OOMed on large uploads. `+de-b64` does the same arithmetic over jetted atom
-ops: one `+rip` in, one `+rep`, one `+swp` out. The reduction is zuse's,
-because it is the easy part to get subtly wrong — base64 is big-endian within
-each 24-bit group and an urbit atom is little-endian. What is *not* zuse's is
-everything around it; see *What the transport actually costs* for what that is
-and what it measured. `len`
-comes from the **digit count and never from `+met`**, and the result is trimmed
-to `len`, which is what makes a file that begins or ends in a zero byte
-survive and hash the same on both ships.
+**Multipart was never the alternative.** The desk's `lib/multipart` is not in
+`gub/lib`, so a nexus cannot import it; and its `$part` carries `body=@t`, a
+bare atom with **no declared length**, which silently drops a file's trailing
+zero bytes — and the content hash is then taken over the truncation, so the loss
+is invisible twice. Writing a second multipart decoder in the import-free lib
+was an earlier attempt at this slice and it is what broke the build. A raw body
+has neither problem: it is one `$octs`, length included, and nobody parses it.
 
 **Download is `GET /api/blob/<hash>`**, owner-gated, and it answers **409 `not
 fetched`** rather than 404 for a blob this ship does not hold — see the route
@@ -944,7 +958,8 @@ where there is nothing to mutate, keep the flag alone.
 | GET | `/apps/urmail/api/thread/<id>` | one thread, every copy with its verdict |
 | GET | `/apps/urmail/icon.svg` | the launcher tile's icon |
 | GET | `/apps/urmail/api/blob/<hash>` | one attachment's bytes |
-| POST | `/apps/urmail/api/send` | compose, reply and forward, with files |
+| POST | `/apps/urmail/api/blob` | one attachment's bytes, up — the body IS the file |
+| POST | `/apps/urmail/api/send` | compose, reply and forward, naming uploaded files |
 | POST | `/apps/urmail/api/read` | mark a set of messages read |
 | POST | `/apps/urmail/api/fetch-blob` | pull an attachment's bytes from a peer |
 | POST | `/apps/urmail/api/delete-thread` | remove a thread from this ship |
@@ -1007,8 +1022,9 @@ will ever see. Ids naming nothing are skipped rather than refused: a set is a
 client reporting what it just rendered, and a thread deleted in another tab
 between render and poke would otherwise fail the whole batch.
 
-**`/api/blob/<hash>` is the only route that answers anything but JSON**, and
-the only one whose body is not something this nexus wrote. It is owner-gated
+**`GET /api/blob/<hash>` is the only route that answers anything but JSON**,
+and the only one whose response body is not something this nexus wrote — the
+pair to `POST /api/blob`, the only route whose *request* body is not JSON. It is owner-gated
 like every other data read, it re-derives the hash from the bytes before
 answering, and it answers **409 `not fetched`** — never 404 — for a blob this
 ship does not hold. Bytes are never pushed, so *unfetched* is the ordinary
