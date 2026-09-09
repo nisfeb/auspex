@@ -135,9 +135,20 @@ export async function runSelftest(cfg, api) {
   //  extension made itself over HTTP, and letting Thunderbird also try to
   //  deliver it by SMTP is the failure the cancel exists to stop. So the
   //  rejection is expected and what proves the send is the ship's copy.
+  //  sendMessage's promise settles when Thunderbird's own send finishes —
+  //  and when onBeforeSend cancels it (which is the whole point here) it
+  //  never settles at all. Proven live: the first end-to-end run delivered
+  //  the message to the other ship and then sat on this await forever. So
+  //  the await is raced against a clock, and "still pending" is the
+  //  expected answer for a send the extension took over.
   const sendVia = async (tab) => {
-    try { await browser.compose.sendMessage(tab.id) } catch (e) { return String(e && e.message) }
-    return 'sendMessage resolved'
+    const timeout = new Promise((r) => setTimeout(() => r('sendMessage still pending after 15s (expected: the extension cancelled the SMTP send)'), 15000))
+    try {
+      return await Promise.race([
+        browser.compose.sendMessage(tab.id).then(() => 'sendMessage resolved'),
+        timeout,
+      ])
+    } catch (e) { return String(e && e.message) }
   }
 
   await step('send-new', async () => {

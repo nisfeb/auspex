@@ -497,6 +497,10 @@ async function connect(rawOrigin, code) {
   }
 }
 
+//  One line on the terminal that started Thunderbird, when dump is enabled
+//  there: the cheapest possible proof that this script ran at all.
+try { dump('AUSPEX background: start\n') } catch { /* no dump outside the shell */ }
+
 //  ── the clock ───────────────────────────────────────────────────────
 
 browser.alarms.create('auspex-sync', { periodInMinutes: SYNC_MINUTES })

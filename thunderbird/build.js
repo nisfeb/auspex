@@ -55,7 +55,12 @@ if (selftest) {
   //  user gesture, and the whole point of this build is that there is no
   //  user. `cookies` is for the signed-out case, which has to be able to
   //  take the session away.
-  m.permissions.push('cookies', patternFor(cfg.origin), patternFor(cfg.sink))
+  m.permissions.push('cookies', ...new Set([patternFor(cfg.origin), patternFor(cfg.sink)]))
+  //  A distinct version per selftest build. Thunderbird treats an xpi with
+  //  the id and version it already knows as the same add-on, keeps the
+  //  permissions it recorded for it, and never re-reads the manifest — so a
+  //  rebuilt selftest with a changed origin silently ran on the old grant.
+  m.version = `${m.version}.${Math.floor(Date.now() / 60000) % 1000000}`
   writeFileSync(join(stage, 'manifest.json'), JSON.stringify(m, null, 2))
 }
 
