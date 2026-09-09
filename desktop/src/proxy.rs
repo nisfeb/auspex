@@ -252,10 +252,13 @@ pub fn store_cookie(path: &std::path::Path, cookie: &str) -> Result<(), String> 
         {
             //  DirBuilder's mode applies only to a directory it creates. A
             //  directory a pre-fix build made is 0755 and stays so unless
-            //  it is set every time, so it is set every time.
+            //  it is set every time, so it is set every time. Best effort:
+            //  in production the parent is the app's own config dir, but a
+            //  parent we do not own (the tests write under /tmp) refuses
+            //  with EPERM, and that must not fail the login. The FILE mode
+            //  below is the guarantee; the directory mode is defence in depth.
             use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-                .map_err(|e| e.to_string())?;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
     }
     let mut o = std::fs::OpenOptions::new();
