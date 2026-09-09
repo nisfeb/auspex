@@ -102,8 +102,21 @@ export async function runSelftest(cfg, api) {
     return res.ship
   })
 
+  //  A SYNC THAT ACTUALLY RAN. `connect` starts one in the background, so
+  //  the first explicit `syncNow` answers `{skipped: true}` and everything
+  //  below it would be reading the state from BEFORE the mirror was
+  //  brought up to date. A skipped sync proves nothing: ask again.
+  const syncForReal = async () => {
+    let r = await api.syncNow()
+    for (let i = 0; i < 25 && r && r.skipped && !r.why; i += 1) {
+      await sleep(2000)
+      r = await api.syncNow()
+    }
+    return r
+  }
+
   await step('sync', async () => {
-    const r = await api.syncNow()
+    const r = await syncForReal()
     const s = await api.getState()
     return JSON.stringify({ r, counts: s.counts, folders: s.folders, status: s.status })
   })
@@ -208,13 +221,7 @@ export async function runSelftest(cfg, api) {
     if (!((t && t.labels) || []).includes('flagged')) {
       throw new Error(`${cfg.inboundThread} never gained the label from outside`)
     }
-    //  a sync already in flight answers `skipped`, and a skipped sync
-    //  proves nothing: ask again until one actually runs.
-    let r = await api.syncNow()
-    for (let i = 0; i < 15 && r && r.skipped; i += 1) {
-      await sleep(2000)
-      r = await api.syncNow()
-    }
+    const r = await syncForReal()
     const ours = await mirrored(cfg.inboundThread)
     const others = await mirrored(cfg.untouchedThread)
     const flags = await flagsOf(ours)
