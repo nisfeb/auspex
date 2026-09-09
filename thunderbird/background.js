@@ -403,7 +403,7 @@ async function handleSend(tab, details) {
         return refuse(`${a.name} is ${bytes.length} bytes; the limit for one `
           + `file is ${MAX_BLOB}.`)
       }
-      const hash = await api.uploadBlob(bytes, file.type)
+      const hash = await api.uploadBlob(bytes)
       refs.push({ name: a.name, mime: file.type || 'application/octet-stream', hash })
     }
   } catch (e) {

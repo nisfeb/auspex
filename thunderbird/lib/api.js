@@ -72,7 +72,10 @@ class Api {
   async raw(path, init = {}) {
     let res
     try {
-      res = await fetch(this.url(path), { credentials: 'include', ...init })
+      //  `credentials` LAST, so no caller can drop it by accident: every
+      //  route on this surface is owner-gated behind the session cookie,
+      //  and a request without it is a 403 with a confusing story.
+      res = await fetch(this.url(path), { ...init, credentials: 'include' })
     } catch (e) {
       throw new UnreachableError(e && e.message ? e.message : 'no answer')
     }
@@ -181,7 +184,7 @@ class Api {
   //  The upload. The body IS the file, byte for byte — no base64, no
   //  decoder on the request fiber. Refused here before a byte goes out,
   //  with the cap in the message.
-  async uploadBlob(bytes, mime) {
+  async uploadBlob(bytes) {
     if (bytes.length > MAX_BLOB) {
       throw new Error(`over the ${MAX_BLOB} byte limit for one file`)
     }
