@@ -218,11 +218,20 @@
               refused=?
               at-limit=?
               over=chain:ac
+              recipe=@t
           ==
       ^-  json
+      ::  the jam is omitted when it is bigger than the fixture it sits
+      ::  in. A hundred-kilobyte body jams to about a hundred and thirty,
+      ::  and a fixture file nine tenths one test case is a file nobody
+      ::  reads - while "a body of 100.001 'a' bytes" reconstructs the
+      ::  input exactly and fits on a line. Structural cases keep the
+      ::  jam; size cases carry the recipe.
       =/  sj=json
         ?~  over  ~
-        [%s (scot %uw (jam unsigned.i.over))]
+        =/  jm=@  (jam unsigned.i.over)
+        ?:  (gth (met 3 jm) 2.048)  ~
+        [%s (scot %uw jm)]
       %-  pairs:enjs:format
       :~  name+s+name
           kind+s+'cap'
@@ -235,6 +244,7 @@
           'at_limit_accepted'^b+at-limit
           'sample_len'^(numb:enjs:format (lent over))
           'sample_jam'^sj
+          'sample_recipe'^s+recipe
       ==
     ::  ── builders for the cap cases ────────────────────────────────
     ::
@@ -553,6 +563,7 @@
               !(fits-length:ac c-over-chain max-chain:ac)
               (fits-length:ac c-at-chain max-chain:ac)
               c-over-chain
+              'a chain of 1.001 copies of the `root` case above'
           ==
           %^    case-cap
               'cap-max-body'
@@ -561,6 +572,7 @@
               !(fits-bodies:ac c-over-body max-body:ac)
               (fits-bodies:ac c-at-body max-body:ac)
               c-over-body
+              'the `root` unsigned with body = (fil 3 100.001 \'a\')'
           ==
           %^    case-cap
               'cap-max-subj'
@@ -569,6 +581,7 @@
               !(fits-subjects:ac c-over-subj max-subj:ac)
               %.y
               c-over-subj
+              'the `root` unsigned with subj = (fil 3 1.001 \'a\')'
           ==
           %^    case-cap
               'cap-max-to'
@@ -577,6 +590,7 @@
               !(fits-recipients:ac c-over-to max-to:ac)
               (fits-recipients:ac c-at-to max-to:ac)
               c-over-to
+              'the `root` unsigned with to = (sy (turn (gulf 1 101) |=(k=@ `@p`k)))'
           ==
           %^    case-cap
               'cap-max-mime-length'
@@ -585,6 +599,7 @@
               !(fits-body-mimes:ac c-over-mime max-mime:ac)
               %.y
               c-over-mime
+              'the `root` unsigned with body-mime = (fil 3 129 \'a\')'
           ==
           %^    case-cap
               'cap-mime-control-byte'
@@ -593,6 +608,7 @@
               !(fits-body-mimes:ac c-ctrl-mime max-mime:ac)
               %.y
               c-ctrl-mime
+              'the `root` unsigned with body-mime = (cat 3 \'text/plain\' 0xd)'
           ==
           %^    case-cap
               'cap-max-attach'
@@ -601,6 +617,7 @@
               !(fits-attachments:ac c-over-attach max-attach:ac)
               (fits-attachments:ac c-at-attach max-attach:ac)
               c-over-attach
+              'the `root` unsigned with 17 attachments, each [\'f\' 1 \'text/plain\' 0v<n>]'
           ==
           %^    case-cap
               'cap-max-blob'
@@ -609,6 +626,7 @@
               !(fits-attachments:ac c-over-blob max-attach:ac)
               (attach-ok:ac ['ok.bin' max-blob:ac 'application/octet-stream' 0v2])
               c-over-blob
+              'the `root` unsigned with one attachment of size 262.145'
           ==
           %^    case-cap
               'cap-max-depth'
@@ -617,6 +635,7 @@
               !(fits-depth:ac c-over-depth max-depth:ac)
               (fits-depth:ac c-at-depth max-depth:ac)
               c-over-depth
+              'a linear chain 65 deep, each message prev-pointing at the one before'
           ==
           %^    case-cap
               'cap-max-signers'
@@ -625,6 +644,7 @@
               !(fits-signers:ac c-over-signers max-signers:ac)
               (fits-signers:ac c-at-signers max-signers:ac)
               c-over-signers
+              '129 messages, each from a distinct ship 1..129 at life 1'
           ==
       ==
   ==

@@ -246,6 +246,13 @@
           ::  a reload, which is the case where you most want to read it.
           [%fall %| /tr empty-dir:loader]
           [%fall %& [/tr %last] [[/ %json] ~]]
+          ::  /tr/discovery: what discovery last learned, kept OFF
+          ::  /tr/last. A probe answers on its own schedule - it is a
+          ::  network round trip on a fiber nobody is watching - so
+          ::  writing it to /tr/last would overwrite the outcome of the
+          ::  send a person is actually looking at, seconds after they
+          ::  looked. Two traces, two grubs.
+          [%fall %& [/tr %discovery] [[/ %json] ~]]
           ::  /app: the client, %over so a redeploy actually replaces it.
           ::  A %fall would leave every ship running the build it first
           ::  loaded, with no error and no way to tell from outside.
@@ -958,10 +965,17 @@
 ::
 ++  note
   |=  [root=path stage=@t ok=? why=@t]
+  (note-at root %last stage ok why)
+::
+::  +note-at: the same, at a named trace grub. Discovery writes its own
+::  rather than sharing /tr/last - see the /tr/discovery row.
+::
+++  note-at
+  |=  [root=path name=@ta stage=@t ok=? why=@t]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  now=@da  bind:m  bowl-now
-  %^  put-file  [%& %& (weld root /tr) %last]  [/ %json]
+  %^  put-file  [%& %& (weld root /tr) name]  [/ %json]
   %-  pairs:enjs:format
   :~  ['stage' [%s stage]]
       ['ok' [%b ok]]
@@ -1120,6 +1134,10 @@
     %read           (do-read root ids.a)
     %delete-thread  (do-delete root thread-id.a)
     %fetch-blob     (do-fetch-blob root hash.a from.a)
+  ::  %forget-peer drops one discovery record so the next send re-probes.
+  ::  %.n like every other local-state action: no message appeared, none
+  ::  changed, and the tab that asked for it is the only one waiting.
+    %forget-peer    (do-forget-peer root who.a)
     %restrict-blob  (do-restrict root hash.a ships.a)
     %publish-blob   (do-publish root hash.a)
   ::  the mail-client layer. EVERY ONE OF THESE ANSWERS %.n, and that is
@@ -2391,13 +2409,35 @@
       (rap 3 ~[(scot %p who.r) ' published no /proto'])
     (rap 3 ~[(scot %p who.r) ' speaks ' (num-list:uc versions.u.answer.r)])
   ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip spoke)}"])
-  ;<  ~  bind:m  (note root 'discovery' & spoke)
+  ;<  ~  bind:m  (note-at root %discovery 'discovery' & spoke)
   ;<  held=(unit probe-req:uc)  bind:m  (read-probe root who.r)
   =/  rest=(list chain:uc)
     ?~  held  ~
     rest:(drain-queue:uc pending.u.held drained.r)
   ;<  ~  bind:m  (cull-if-there (probe-rail root who.r))
   ;<  ~  bind:m  (drain-probe root who.r answer.r rest &)
+  (pure:m |)
+::
+::  +do-forget-peer: drop one discovery record.
+::
+::    THE ESCAPE HATCH FOR A SELF-SEALING REFUSAL. A record that lets
+::    mail through is checked by the send itself - a nack or a timeout
+::    drops it - but a record that REFUSES is never checked by anything,
+::    because the poke is never sent. +proto-refusal-ttl shortens that to
+::    an hour for the case derivable from the record alone; a CAP refusal
+::    depends on the message and is not derivable, so this is its remedy
+::    and the only one.
+::
+::    THE PROBE GRUB IS NOT CULLED. Mail waits in it. Forgetting what a
+::    peer said must not throw away what a person wrote.
+::
+++  do-forget-peer
+  |=  [root=path who=ship]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  ~  bind:m  (cull-if-there (peer-rail root who))
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: forgot what {<who>} speaks"])
+  ;<  ~  bind:m  (note-at root %discovery 'forget-peer' & (scot %p who))
   (pure:m |)
 ::
 ::  +do-fetch-blob: fetch one attachment's bytes on demand.
@@ -3264,6 +3304,12 @@
     (do-web-blob src eyre-id body.request.req)
       [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
       [%'POST' [%api %'fetch-blob' ~]]  (do-web-fetch src eyre-id (req-body req))
+    ::  forget one discovery record, so the next send re-probes. The
+    ::  user-facing half of +proto-refusal-ttl: a cap refusal is not
+    ::  derivable from the record alone, so it keeps the ordinary TTL
+    ::  and this is the way out of it.
+      [%'POST' [%api %'forget-peer' ~]]
+    (do-web-forget src eyre-id (req-body req))
       [%'POST' [%api %unread ~]]        (do-web-unread src eyre-id (req-body req))
       [%'POST' [%api %label ~]]         (do-web-label src eyre-id (req-body req))
       [%'POST' [%api %archive ~]]       (do-web-archive src eyre-id (req-body req))
@@ -4048,17 +4094,52 @@
             ==
         0x0
     ==
-  ;<  derr=(unit @t)  bind:m
-    (peer-refusal root now probe ~(tap in to.u.req))
-  ?^  derr  (send-err eyre-id 400 u.derr)
+  ;<  bad=(list [who=ship why=@t])  bind:m
+    (peer-refusals root now probe ~(tap in to.u.req) ~)
+  ::  ONE HOSTILE RECIPIENT MUST NOT BLOCK THE OTHER NINETY-NINE. This
+  ::  used to answer 400 on the FIRST refusal and poke nothing, so a
+  ::  single peer publishing max-chain 0 in a hundred-recipient `to`
+  ::  killed the whole send - for a day, silently, with a message about
+  ::  one ship. The refusals are now reported per recipient and the send
+  ::  goes out; +send-one refuses each of them individually on the
+  ::  writer, which is the real gate and always was.
+  ::
+  ::  `to` IS NOT TRIMMED. It is a signed field and it names the audience
+  ::  the author chose; rewriting it here would sign a different message
+  ::  than the one that was composed, and every other recipient would see
+  ::  an audience that quietly lost people. Delivery skips them; the
+  ::  message does not.
+  ?:  =((lent bad) ~(wyt in to.u.req))
+    ::  every recipient refused. A 400, because a composed message must
+    ::  not vanish behind a 200 with nobody to carry it to.
+    (send-err eyre-id 400 (refusal-line bad))
   ;<  ~  bind:m
     (poke-writer [%send-ref to.u.req subj.u.req body.u.req '' prev.u.req refs ~])
-  (send-ok eyre-id)
+  (send-refused eyre-id bad)
 ::
-::  +peer-refusal: the first recipient this send cannot reach, and why.
+::  +refusal-line: the whole refusal, on one line, for the case where
+::  there is no one left to send to. The composer shows one line.
 ::
-::    ~ when every recipient we hold an answer for accepts it. One peek
-::    per recipient and no round trip: the record is in our own tree.
+++  refusal-line
+  |=  bad=(list [who=ship why=@t])
+  ^-  @t
+  ?~  bad  'no recipients'
+  ?~  t.bad  why.i.bad
+  %+  rap  3
+  :~  why.i.bad  ' (and '  (scot %ud (lent t.bad))
+      ' other recipient'  ?:(=(1 (lent t.bad)) '' 's')  ' refused)'
+  ==
+::
+::  +peer-refusals: EVERY recipient this send cannot reach, and why.
+::
+::    One peek per recipient and no round trip: the record is in our own
+::    tree. A recipient we have never asked about, or whose answer
+::    expired, is silent - and silence is version 1, so it is not
+::    refused here and the writer will queue it for a probe.
+::
+::    Answers a LIST and not the first hit, because the caller sends to
+::    everyone else. Returning the first refusal was how one peer
+::    publishing a zero cap blocked ninety-nine others.
 ::
 ::    `size` in the probe chain is 0 and deliberately so. A ref carries
 ::    no size and reading one off the store costs a peek of the bytes per
@@ -4069,22 +4150,31 @@
 ::    The count, the recipients, the subject, the body and the body mime
 ::    are all checked here, against the peer's numbers.
 ::
-++  peer-refusal
-  |=  [root=path now=@da c=chain:uc ws=(list ship)]
-  =/  m  (fiber:fiber:nexus ,(unit @t))
+::    Two the route CANNOT check, and they are named rather than hidden:
+::    the peer's max-chain and max-depth, because the probe chain is one
+::    message and the real chain is the path this reply is joining. The
+::    writer checks both on the real chain.
+::
+++  peer-refusals
+  |=  $:  root=path
+          now=@da
+          c=chain:uc
+          ws=(list ship)
+          acc=(list [ship @t])
+      ==
+  =/  m  (fiber:fiber:nexus ,(list [ship @t]))
   ^-  form:m
-  ?~  ws  (pure:m ~)
+  ?~  ws  (pure:m (flop acc))
   ;<  rec=(unit peer-rec:uc)  bind:m  (read-peer root i.ws)
   =/  known=(unit proto:uc)  (known-proto rec now)
-  ::  never asked, or the answer expired: version 1, which is us.
-  ?~  known  (peer-refusal root now c t.ws)
-  ?~  (peer-mark:uc known)
-    (pure:m `(no-version-error:uc i.ws u.known))
-  =/  cerr=(unit @t)  (peer-cap-error:uc i.ws c known)
-  ?^  cerr  (pure:m cerr)
+  ?~  known  (peer-refusals root now c t.ws acc)
+  =/  why=(unit @t)
+    ?~  (peer-mark:uc known)  `(no-version-error:uc i.ws u.known)
+    (peer-cap-error:uc i.ws c known)
   ::  recursion by ARM NAME: a $ with arguments inside a ;<
   ::  continuation cannot find the trap.
-  (peer-refusal root now c t.ws)
+  ?~  why  (peer-refusals root now c t.ws acc)
+  (peer-refusals root now c t.ws [[i.ws u.why] acc])
 ::
 ::  +first-unheld: the first named blob this ship does not hold, ~ when
 ::  it holds them all.
@@ -4233,6 +4323,21 @@
 ::    listing plus a thread refetch. The client retries GET /api/blob
 ::    instead, which is one peek per retry against a route it was going
 ::    to call anyway.
+::
+++  do-web-forget
+  |=  [src=@p eyre-id=@ta raw=@t]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  mine=?  bind:m  (is-owner src)
+  ?.  mine  (send-err eyre-id 403 'forbidden')
+  =/  jon=(unit json)  (de:json:html raw)
+  ?~  jon  (send-err eyre-id 400 'not json')
+  =/  res
+    %-  mule
+    |.  ((ot:dejs:format ~[ship+(se:dejs:format %p)]) u.jon)
+  ?:  ?=(%| -.res)  (send-err eyre-id 400 'bad ship')
+  ;<  ~  bind:m  (poke-writer [%forget-peer p.res])
+  (send-ok eyre-id)
 ::
 ++  do-web-fetch
   |=  [src=@p eyre-id=@ta raw=@t]
@@ -4518,6 +4623,28 @@
 ::
 ::  +send-err: errors are JSON too, so the client has one shape to parse
 ::  and can show the nexus's own reason instead of a bare status code.
+::
+::  +send-refused: ok, and who could not be reached.
+::
+::    `refused` is always present, empty list included, so a client can
+::    read it without asking whether the field exists. The composer shows
+::    "sent to N; ~x refused: <why>" off this; a client that ignores it
+::    sees exactly what it saw before.
+::
+++  send-refused
+  |=  [eyre-id=@ta bad=(list [who=ship why=@t])]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  %+  send-json  eyre-id
+  %-  pairs:enjs:format
+  :~  ['ok' [%b &]]
+      :-  'refused'
+      :-  %a
+      %+  turn  bad
+      |=  [w=ship y=@t]
+      ^-  json
+      (pairs:enjs:format ~[['ship' [%s (scot %p w)]] ['why' [%s y]]])
+  ==
 ::
 ++  send-err
   |=  [eyre-id=@ta code=@ud msg=@t]
