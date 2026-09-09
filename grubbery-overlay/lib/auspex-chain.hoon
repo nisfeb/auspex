@@ -194,6 +194,14 @@
       [%read ids=(set msg-id)]
       [%delete-thread =thread-id]
       [%fetch-blob hash=@uv from=ship]
+    ::  %forget-peer drops one discovery record so the next send
+    ::  re-probes. It exists because a refusal is otherwise SELF-SEALING:
+    ::  a peer whose cached answer names no version we speak refuses
+    ::  every send to it, and nothing in that path invalidates the record
+    ::  - only a nack or a timeout does, and neither happens when the
+    ::  poke is never sent. +proto-refusal-ttl shortens that window to an
+    ::  hour; this is how a person shortens it to now.
+      [%forget-peer who=ship]
       [%restrict-blob hash=@uv ships=(set ship)]
       [%publish-blob hash=@uv]
     ::  ── the mail-client actions. Every one is LOCAL STATE ──────────
@@ -1791,6 +1799,22 @@
 ::    for the stale answer to keep working.
 ::
 ++  proto-ttl  ^-(@dr ~d1)
+::  +proto-refusal-ttl: how long a record that REFUSES is believed.
+::
+::    An hour, not a day, and the asymmetry is the whole point. A record
+::    that lets mail through is checked by the send itself: a nack or a
+::    timeout drops it, so a wrong answer corrects on first use. A record
+::    that REFUSES is never checked by anything, because the poke is
+::    never sent - so a peer that once published a version ladder we do
+::    not share locks itself out for the full TTL with nothing in the
+::    system able to notice. That is self-sealing, and the cure for a
+::    self-sealing cache is a shorter fuse.
+::
+::    An hour rather than a minute because the thing it caches is a
+::    peer's DEPLOYED CODE. %forget-peer is how a person shortens it to
+::    now; this is the bound for everyone who does not know to.
+::
+++  proto-refusal-ttl  ^-(@dr ~h1)
 ::
 ::  +proto-ok: is a keened noun a $proto we can act on?
 ::
@@ -1802,12 +1826,22 @@
 ::    as silent - which is the safe direction, since silence means
 ::    version 1 and version 1 is what every Auspex speaks.
 ::
+::    THE BOUND IS CHECKED FIRST, and with +scag rather than +lent.
+::    This runs on a noun a stranger published into a namespace anyone
+::    may write to, so the two length walks below are work an attacker
+::    chooses the size of; +scag stops at 65 whatever it was handed, and
+::    a list longer than the bound is refused before anything walks it
+::    whole. 64 is far above any real version ladder - a protocol that
+::    has had sixty-four incompatible versions has a different problem -
+::    and far below where the walk costs anything.
+::
 ++  proto-ok
   |=  p=proto
   ^-  ?
   ?&  ?=(^ versions.p)
+      (lte (lent (scag 65 `(list @ud)`versions.p)) 64)
+      (lte (lent (scag 65 `(list @tas)`marks.p)) 64)
       =((lent versions.p) (lent marks.p))
-      (lte (lent versions.p) 64)
   ==
 ::
 ::  +common-version: the HIGHEST version both ships speak, ~ for none.
@@ -1874,10 +1908,26 @@
 ::
 ::  +peer-fresh: is this record still believed?
 ::
+::  +refusing: does this record, ON ITS OWN, refuse every send?
+::
+::    Answerable from the record alone, which is what makes the shorter
+::    TTL a property of the cache rather than of a particular send: a
+::    peer sharing no version with us refuses everything, whatever is in
+::    the chain. A CAP refusal is not derivable here - it depends on the
+::    message - so it keeps the ordinary TTL and %forget-peer is its
+::    remedy. Said plainly rather than papered over.
+::
+++  refusing
+  |=  r=peer-rec
+  ^-  ?
+  ?~  proto.r  |
+  ?=(~ (peer-mark `u.proto.r))
+::
 ++  peer-fresh
   |=  [r=peer-rec now=@da]
   ^-  ?
-  &((gte now asked.r) (lth (sub now asked.r) proto-ttl))
+  =/  ttl=@dr  ?:((refusing r) proto-refusal-ttl proto-ttl)
+  &((gte now asked.r) (lth (sub now asked.r) ttl))
 ::
 ::  ── the three refusals, as text ─────────────────────────────────────
 ::

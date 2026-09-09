@@ -19,18 +19,24 @@
 ::    +fake-pass ignores `life` and every life of a ship resolves to one
 ::    key.
 ::
-::    Output is a %txt wain of fixed-width chunks of ONE json document.
-::    Rejoining the lines with no separator restores the document byte for
-::    byte (`tr -d '\n'`). Two reasons: a dojo `*` write lands it in clay
-::    as a file, and a plain run prints it in lines short enough that no
-::    terminal wrap can corrupt it. A single 10KB line would survive the
-::    first and not the second.
+::    Output is a %json cask, so the dojo's write sink lands the document
+::    in CLAY, as a file, and the file that gets committed is the one the
+::    ship produced. It used to be a %txt wain of 72-character chunks
+::    meant to be read off a terminal and rejoined; that survived one
+::    round trip and lost two characters on the next - the indent strip
+::    ate a leading space inside a string, and the artifact in the repo
+::    disagreed with the ship that made it. A fixture reassembled by hand
+::    is not a fixture.
 ::
-::    Run in the ~feb dojo, from the %grubbery desk:
+::    Run in the dojo, with =dir pinned to the grubbery desk at the
+::    revision the |commit printed:
 ::
-::      *%/protocol/vectors/v1/txt +grubbery!auspex-vectors
+::      *%/protocol/vectors/v1/json +auspex-vectors
 ::
-::    or `+grubbery!auspex-vectors` to print it.
+::    then copy <desk>/protocol/vectors/v1.json out of the mount. The
+::    same file is synced back into the desk by scripts/sync-overlay.sh,
+::    which is what lets tests/lib/auspex-vectors.hoon read the artifact
+::    itself rather than a transcription of it.
 ::
 /+  ac=auspex-chain
 =>  |%
@@ -194,6 +200,14 @@
         ==
       (pairs:enjs:format (weld head extra))
     ::
+    ::  +case-cap: one cap, over the limit and at it.
+    ::
+    ::    `over` is the offending chain itself, and the case carries the
+    ::    JAM of its first message's `unsigned` plus the chain's length.
+    ::    Without those an implementer knows a predicate answered %.n and
+    ::    has no way to reconstruct the input that made it - which is the
+    ::    difference between a vector and an assertion.
+    ::
     ++  case-cap
       |=  $:  name=@t
               note=@t
@@ -203,8 +217,12 @@
               arm=@t
               refused=?
               at-limit=?
+              over=chain:ac
           ==
       ^-  json
+      =/  sj=json
+        ?~  over  ~
+        [%s (scot %uw (jam unsigned.i.over))]
       %-  pairs:enjs:format
       :~  name+s+name
           kind+s+'cap'
@@ -215,6 +233,8 @@
           arm+s+arm
           refused+b+refused
           'at_limit_accepted'^b+at-limit
+          'sample_len'^(numb:enjs:format (lent over))
+          'sample_jam'^sj
       ==
     ::  ── builders for the cap cases ────────────────────────────────
     ::
@@ -258,18 +278,6 @@
       |=  n=@ud
       ^-  (list attachment:ac)
       (turn (gulf 1 n) |=(k=@ `attachment:ac`['f' 1 'text/plain' `@uv`k]))
-    ::  +chop: one long tape as fixed-width lines. Rejoining with NO
-    ::  separator restores it exactly.
-    ::
-    ++  chop
-      |=  [t=tape n=@ud]
-      ^-  wain
-      ?~  t  ~
-      ::  `tape`t, not t: ?~ has narrowed t to a NON-EMPTY tape and both
-      ::  +scag and +slag are wet gates with a ~-producing branch, which
-      ::  does not nest under a non-empty list. The same shape the lib's
-      ::  +has-sub and +term-ok already carry a note for.
-      [(crip (scag n `tape`t)) $(t (slag n `tape`t))]
     --
 :-  %say
 |=  *
@@ -309,6 +317,16 @@
 =/  c-orphan=chain:ac  ~[m-orphan]
 =/  tk-orphan  (mule |.((thread-key:ac *(map thread-id:ac thread:ac) c-orphan)))
 =/  tk-tree    (mule |.((thread-key:ac *(map thread-id:ac thread:ac) c-tree)))
+::  I. THREE RECIPIENTS. `to` is a (set ship) and `sham` hashes the
+::  TREAP, so the id of a multi-recipient message depends on a noun no
+::  prose describes unless it describes the treap. Every other signed
+::  case here names one recipient and therefore pins nothing about it.
+=/  m-three=msg:ac
+  %-  mk
+  :*  zod  zod  1  (sy ~[zod nec bud])  'three'
+      'a set of three recipients, so the treap shape is pinned'
+      ''  ~2026.1.7  ~  ~
+  ==
 ::  H. two attachments, hashed from two fixed byte strings.
 =/  o-one=octs  [5 'hello']
 =/  o-two=octs  [5 'world']
@@ -375,6 +393,28 @@
           'max_mime'^(numb:enjs:format max-mime:ac)
           'max_blobs'^(numb:enjs:format max-blobs:ac)
           'max_blob_bytes'^(numb:enjs:format max-blob-bytes:ac)
+      ==
+    ::
+    ::  THE SET NOUN, pinned. `to` is a (set ship) and +sham hashes the
+    ::  treap, so a msg-id is not reproducible from a list of ships
+    ::  alone. The mugs are the priorities the heap is ordered by, and
+    ::  the jam is the noun itself.
+      :-  'set_noun'
+      %-  pairs:enjs:format
+      :~  'note'^s+'(sy ~[~zod ~nec ~bud]) - the noun sham hashes for `to`'
+          'mold'^s+'(tree [n=ship l=nlr r=nlr]), ~ for empty'
+          :-  'ships'
+          :-  %a
+          %+  turn  `(list ship)`~[zod nec bud]
+          |=  w=ship
+          ^-  json
+          %-  pairs:enjs:format
+          :~  'ship'^s+(scot %p w)
+              'mug'^(numb:enjs:format (mug w))
+          ==
+          'jam'^s+(scot %uw (jam (sy ~[zod nec bud])))
+          'jam_ux'^s+(scot %ux (jam (sy ~[zod nec bud])))
+          'empty_jam'^s+(scot %uw (jam *(set ship)))
       ==
     ::
     ::  the discovery fixture: what a version-1 nexus publishes at
@@ -495,6 +535,11 @@
                   (lent (place-of:ac c-orphan (id:ac unsigned.m-orphan)))
               ==
           ==
+        ::  I
+          %^    case-msg
+              'three-recipients'
+            'to is a (set ship): the treap noun is what sham hashes'
+          [zod m-three ~[[zod 1]]]
         ::  H
           %^    case-msg
               'two-attachments'
@@ -507,6 +552,7 @@
           :*  'max-chain'  max-chain:ac  +(max-chain:ac)  '+fits-length'
               !(fits-length:ac c-over-chain max-chain:ac)
               (fits-length:ac c-at-chain max-chain:ac)
+              c-over-chain
           ==
           %^    case-cap
               'cap-max-body'
@@ -514,6 +560,7 @@
           :*  'max-body'  max-body:ac  +(max-body:ac)  '+fits-bodies'
               !(fits-bodies:ac c-over-body max-body:ac)
               (fits-bodies:ac c-at-body max-body:ac)
+              c-over-body
           ==
           %^    case-cap
               'cap-max-subj'
@@ -521,6 +568,7 @@
           :*  'max-subj'  max-subj:ac  +(max-subj:ac)  '+fits-subjects'
               !(fits-subjects:ac c-over-subj max-subj:ac)
               %.y
+              c-over-subj
           ==
           %^    case-cap
               'cap-max-to'
@@ -528,6 +576,7 @@
           :*  'max-to'  max-to:ac  +(max-to:ac)  '+fits-recipients'
               !(fits-recipients:ac c-over-to max-to:ac)
               (fits-recipients:ac c-at-to max-to:ac)
+              c-over-to
           ==
           %^    case-cap
               'cap-max-mime-length'
@@ -535,6 +584,7 @@
           :*  'max-mime'  max-mime:ac  +(max-mime:ac)  '+fits-body-mimes'
               !(fits-body-mimes:ac c-over-mime max-mime:ac)
               %.y
+              c-over-mime
           ==
           %^    case-cap
               'cap-mime-control-byte'
@@ -542,6 +592,7 @@
           :*  'max-mime'  max-mime:ac  11  '+fits-body-mimes'
               !(fits-body-mimes:ac c-ctrl-mime max-mime:ac)
               %.y
+              c-ctrl-mime
           ==
           %^    case-cap
               'cap-max-attach'
@@ -549,6 +600,7 @@
           :*  'max-attach'  max-attach:ac  +(max-attach:ac)  '+fits-attachments'
               !(fits-attachments:ac c-over-attach max-attach:ac)
               (fits-attachments:ac c-at-attach max-attach:ac)
+              c-over-attach
           ==
           %^    case-cap
               'cap-max-blob'
@@ -556,6 +608,7 @@
           :*  'max-blob'  max-blob:ac  +(max-blob:ac)  '+attach-ok'
               !(fits-attachments:ac c-over-blob max-attach:ac)
               (attach-ok:ac ['ok.bin' max-blob:ac 'application/octet-stream' 0v2])
+              c-over-blob
           ==
           %^    case-cap
               'cap-max-depth'
@@ -563,6 +616,7 @@
           :*  'max-depth'  max-depth:ac  +(max-depth:ac)  '+fits-depth'
               !(fits-depth:ac c-over-depth max-depth:ac)
               (fits-depth:ac c-at-depth max-depth:ac)
+              c-over-depth
           ==
           %^    case-cap
               'cap-max-signers'
@@ -570,7 +624,8 @@
           :*  'max-signers'  max-signers:ac  +(max-signers:ac)  '+fits-signers'
               !(fits-signers:ac c-over-signers max-signers:ac)
               (fits-signers:ac c-at-signers max-signers:ac)
+              c-over-signers
           ==
       ==
   ==
-[%txt (chop (trip (en:json:html doc)) 72)]
+[%json doc]

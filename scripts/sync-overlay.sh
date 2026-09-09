@@ -26,6 +26,15 @@
 #                         imports the SAME lib the tests do)
 #   tests/**           -> tests/          (run via -test /=grubbery=/tests/...)
 #
+# And one tree from OUTSIDE the overlay:
+#   ../protocol/vectors/*  -> protocol/vectors/   (the conformance
+#                         artifact. It is generated ON the ship and
+#                         committed byte-exact, and the conformance test
+#                         reads THAT FILE with a /* clay import - a test
+#                         that regenerates its own expectations proves
+#                         nothing about the artifact an implementer
+#                         downloads.)
+#
 # Idempotent, and NEVER --delete: this writes into trees grubbery owns.
 #
 # Usage: scripts/sync-overlay.sh <grubbery-desk-root>
@@ -147,6 +156,14 @@ fi
 if [ -d "$OVERLAY/gen" ]; then
   rsync -a "$OVERLAY/gen/" "$DEST/gen/"
 fi
+# The conformance artifact, from the repo root rather than the overlay:
+# generated on a ship, committed byte-exact, and read back by
+# tests/lib/auspex-vectors.hoon through a /* import.
+VECTORS="$HERE/../protocol/vectors"
+if [ -d "$VECTORS" ]; then
+  mkdir -p "$DEST/protocol/vectors"
+  rsync -a "$VECTORS/" "$DEST/protocol/vectors/"
+fi
 # Tests: desk-level.
 rsync -a "$OVERLAY/tests/" "$DEST/tests/"
 
@@ -160,7 +177,8 @@ UIA=$(count "$DEST/gub/nex/auspex/ui-app" -type f)
 MAR=$(count "$DEST/gub/mar/auspex" -type f)
 WIR=$(count "$DEST/gub/mar" -maxdepth 1 -name 'auspex-*.hoon')
 GEN=$(count "$DEST/gen" -maxdepth 1 -name 'auspex-*.hoon')
-echo "synced overlay -> $DEST (auspex libs: $LIB, tests: $TST, gen: $GEN, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
+VEC=$(count "$DEST/protocol/vectors" -maxdepth 1 -name '*.json')
+echo "synced overlay -> $DEST (auspex libs: $LIB, tests: $TST, gen: $GEN, vectors: $VEC, nex: $NEX, ui-app: $UIA, marcs: $MAR, wire marcs: $WIR)"
 if [ "$UIA" -ne 4 ]; then
   echo "WARNING: ui-app should be exactly index.html, app.js, manifest.json and sw.js;" >&2
   echo "  found $UIA. Run (cd ui && npm run build) and sync again, or /apps/auspex" >&2
