@@ -440,7 +440,14 @@
       ::  the mail tree; it only routes.
           [[%ui ~] %'main.sig']
         ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/main: failed")
-        ;<  ~  bind:m  (bind-http:io [~ /apps/auspex])
+        ::  bind-http-self, not bind-http: the latter calls +get-here-abs
+        ::  to learn where it is, which a sandboxed app may not do. Its
+        ::  own docs name this case - 'so a nexus serving its own UI needs
+        ::  no walk to root' - and it is veto-tolerant besides, so a jailed
+        ::  install logs the refusal and lands in its request loop instead
+        ::  of parking the fiber. The approval reload re-runs the bind with
+        ::  grants in hand, which is why consent alone brings the UI up.
+        ;<  ~  bind:m  (bind-http-self:io [~ /apps/auspex])
         (http-dispatch:io %auspex)
       ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
           [[%ui %requests ~] @]
