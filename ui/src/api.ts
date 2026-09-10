@@ -292,7 +292,7 @@ export const thread = async (id: string): Promise<Thread | null> => {
   }
 }
 
-// The caps, mirrored from grubbery-overlay/lib/auspex-chain.hoon. A
+// The caps, mirrored from code/lib/auspex-chain.hoon. A
 // GUARD RAIL, never the boundary: POST /api/blob refuses a body over
 // max-blob with a 413 and the send refuses the count again. What these
 // buy is a refusal the user can act on — "this file is too big" at the

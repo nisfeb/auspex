@@ -6,8 +6,12 @@ travels with your message — so a third party who never spoke to the original
 author can still verify every word of it against that author's key. Named for
 the one who reads messages from birds; Talon's sibling.
 
-- `grubbery-overlay/` — the ship side, a **grubbery nexus** (not a gall agent).
-  Its README covers the layout, the two marc rules and the deploy loop.
+- `code/` — the ship side, a **grubbery nexus** (not a gall agent), laid out
+  as the code directory a grubbery `desk` mirrors: `bill.json`,
+  `version.json`, `tile.json`, `icon.svg` and `lib/ mar/ nex/`. It is
+  hermetic — every lib **and every marc** it uses is inside it, because a
+  guest resolves against its own `/desk/code` and nothing above it. Check
+  that with `scripts/code-closure.py code`.
 - `ui/` — the web client (React, served by the ship at `/apps/auspex`, PWA).
 - `desktop/` — the Tauri app: the same client in a window, plus native
   notifications for new mail. See `docs/desktop-plan.md`.

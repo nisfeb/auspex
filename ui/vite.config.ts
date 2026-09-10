@@ -12,7 +12,7 @@ const SHIP = process.env.SHIP_URL || 'http://localhost:8081'  // ~wex
 // build output, the same way lattice commits its own ui-app/ — the
 // overlay IS the deploy source, so an artifact that is not in it does not
 // ship.
-const OUT = resolve(import.meta.dirname, '../grubbery-overlay/nex/auspex/ui-app')
+const OUT = resolve(import.meta.dirname, '../code/nex/auspex/ui-app')
 
 // The four files +on-load lays down as grubs, and nothing else. The
 // shell and the script have always been two; the manifest and the
