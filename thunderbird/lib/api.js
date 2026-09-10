@@ -18,7 +18,22 @@
 //  is the options page. The caller flips status and stops syncing rather
 //  than retrying a request that will never start succeeding.
 
+import { BEACON_PATH } from './beacon.js'
+
 const BASE = '/apps/auspex'
+
+//  A TAP ON EVERY REQUEST, and nothing else.
+//
+//  Null in a shipped build and never set by anything in it. The selftest
+//  sets it, because "idle costs nothing" is a claim about the number of
+//  requests this extension makes and there is no other way to count them
+//  from inside an extension: an add-on cannot see its own network log, and
+//  a count taken from outside cannot tell this extension's traffic from
+//  the browser's. One function call per request, and the tap is called in
+//  a try so a reporting failure can never break a real request.
+let tap = null
+const setTap = (fn) => { tap = fn }
+const tapped = (what) => { if (tap) { try { tap(what) } catch { /* never */ } } }
 
 //  Caps mirrored from ui/src/api.ts, which mirrors the nexus lib. A GUARD
 //  RAIL, never the boundary: POST /api/blob answers 413 over max-blob and
@@ -86,6 +101,7 @@ class Api {
 
   async raw(path, init = {}) {
     let res
+    tapped(path)
     try {
       //  `credentials` LAST, so no caller can drop it by accident: every
       //  route on this surface is owner-gated behind the session cookie,
@@ -129,6 +145,7 @@ class Api {
   //  reaches no storage, no log and no header.
   async login(code) {
     let res
+    tapped('/~/login')
     try {
       res = await fetch(`${this.origin}/~/login`, {
         method: 'POST',
@@ -149,6 +166,40 @@ class Api {
   async whoami() {
     const { ship } = await this.json('/api/whoami')
     return ship
+  }
+
+  //  ── the change beacon ─────────────────────────────────────────────
+  //
+  //  THE OTHER REQUEST NOT UNDER /apps/auspex. It is grubbery's keep-SSE
+  //  endpoint — not an eyre channel, so there is nothing to ack and no
+  //  clog threshold — and it is still built from `this.origin` and
+  //  nothing else, which is the one rule this file exists to keep.
+  //
+  //  Returns the Response with its body unread: the frames are read by
+  //  the caller, which is the only thing that knows when to stop. A
+  //  non-OK answer is an ApiError so a 403 here flips "signed out" by the
+  //  same door as every other request; a fetch that never left is
+  //  UnreachableError for the same reason as everywhere else.
+  //
+  //  NO READ TIMEOUT, deliberately. A healthy connection to a quiet ship
+  //  sends nothing for minutes, and treating silence as death is the
+  //  exact bug this whole change exists to avoid.
+  async beacon(signal) {
+    let res
+    tapped(BEACON_PATH)
+    try {
+      //  `credentials` LAST, for the reason `raw` gives.
+      res = await fetch(`${this.origin}${BEACON_PATH}`, {
+        headers: { accept: 'text/event-stream' },
+        signal,
+        credentials: 'include',
+      })
+    } catch (e) {
+      throw new UnreachableError(e && e.message ? e.message : 'no answer')
+    }
+    if (!res.ok) throw new ApiError(res.status, `beacon ${res.status}`)
+    if (!res.body) throw new UnreachableError('beacon answered without a body')
+    return res
   }
 
   //  ── reads ─────────────────────────────────────────────────────────
@@ -249,6 +300,6 @@ class Api {
 }
 
 export {
-  Api, ApiError, UnreachableError, normaliseOrigin, patternFor,
+  Api, ApiError, UnreachableError, normaliseOrigin, patternFor, setTap,
   BASE, MAX_BLOB, MAX_ATTACH, NOT_FETCHED,
 }
