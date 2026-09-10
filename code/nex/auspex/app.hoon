@@ -445,7 +445,7 @@
       ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
           [[%ui %requests ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/requests: failed")
-        (handle-request rail name.rail)
+        (handle-request name.rail)
       ==
     --
 |%
@@ -3640,20 +3640,19 @@
   ;<  now=@da  bind:m  bowl-now
   (put-file (rf root /beacon %rev) [/ %json] (numb:enjs:format `@ud`now))
 ::
-::  +nexus-root: this nexus's absolute tree path, from a REQUEST fiber.
+::  +nexus-root: how far a REQUEST FIBER is from the nexus root.
 ::
-::    Derived, not a constant. A request fiber sits at
-::    <root>/ui/requests/<id>, so its own directory is two below the
-::    root. Lattice hardcodes its equivalent; here the install name is a
-::    documented failure mode - a nexus made under the wrong name seeds a
-::    tree that nothing looks at, with no error anywhere - and a constant
-::    that disagreed with the real install would peek an empty tree and
-::    serve an empty inbox rather than fail.
+::    Every serve-* arm below runs in a fiber at <root>/ui/requests/<id>,
+::    laid there by the /ui/requests row in +on-load. So the distance is
+::    the length of that path, and it is written as that path rather than
+::    as the number 2 - move the requests directory and this follows.
 ::
-++  nexus-root
-  |=  =rail:tarball
-  ^-  @ud
-  (lent path.rail)
+::    This is not the thing the sandbox forbids. We are not claiming to
+::    know where the nexus SITS, which no installed app can know; we are
+::    counting our own layout, which this file declares.
+::
+++  req-dir   ^-(path /ui/requests)
+++  nexus-root  ^-(@ud (lent req-dir))
 ::
 ::  +is-owner: is this request really from the ship that owns us?
 ::
@@ -3691,7 +3690,7 @@
 ::  +handle-request: one HTTP request, on its own ephemeral fiber.
 ::
 ++  handle-request
-  |=  [=rail:tarball eyre-id=@ta]
+  |=  eyre-id=@ta
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  [src=@p req=inbound-request:eyre]  bind:m
@@ -3821,7 +3820,7 @@
       %'manifest.json'  'application/manifest+json'
       %'icon.svg'       'image/svg+xml'
     ==
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ::  the client's four files are grubs under /app; the icon is a grub
   ::  at the nexus ROOT, because that is where the tiles nexus reads it
   ::  from. One arm, two directories, rather than a second copy of the
@@ -3858,7 +3857,7 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  our=@p  bind:m  bowl-our
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ;<  c=caps:uc  bind:m  (read-caps root)
   %+  send-json  eyre-id
   %-  pairs:enjs:format
@@ -3908,7 +3907,7 @@
   =/  off=@ud   (fall (arg-ud args 'offset') 0)
   ::  an ABSENT limit defaults; a limit of 0 is an empty page, literally.
   =/  lim=@ud   (min max-page:uc (fall (arg-ud args 'limit') 50))
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
   ;<  vw=view:nexus  bind:m  (peek:io (rv root (thread-dir root)) ~)
   =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
@@ -4021,7 +4020,7 @@
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
   ::  newest first, matching the listing's order.
   =/  sorted=(list draft:uc)
@@ -4046,7 +4045,7 @@
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
   %+  send-json  eyre-id
   :-  %a
@@ -4077,7 +4076,7 @@
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
   =/  sorted=(list [name=@t members=(set @p)])
     %+  sort  ls
@@ -4103,7 +4102,7 @@
   ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  (send-err eyre-id 400 'bad thread id')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ::  one peek, walked twice: once for the copies a reader can produce
   ::  and once for the ones it cannot. The second number is what stops
   ::  a thread holding only pre-break grubs from rendering as an empty
@@ -4168,7 +4167,7 @@
   ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  h=(unit @uv)  (slaw %uv seg)
   ?~  h  (send-err eyre-id 400 'bad hash')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ;<  got=(unit octs)  bind:m  (read-blob root u.h)
   ?~  got  (send-err eyre-id 409 'not fetched')
   ?.  (blob-ok:uc u.got u.h)
@@ -4487,7 +4486,7 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  req=(unit send-req:uw)  (de-send:uw u.jon)
   ?~  req  (send-err eyre-id 400 'bad send')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ::  THE KEY ROAD, CHECKED HERE, WHERE THE COMPOSER IS STILL OPEN.
   ::
   ::    +do-send-core refuses this send on the writer too, with the same
@@ -4769,7 +4768,7 @@
   ::  to its braces and costs one +met.
   ?.  (gte p.bts (met 3 q.bts))  (send-err eyre-id 400 'malformed body')
   =/  h=@uv  (blob-hash:uc bts)
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ::  IDEMPOTENT, AND THAT IS THE ADDRESSING WORKING. The same bytes
   ::  are the same blob; re-uploading them rewrites nothing, bumps no
   ::  case in the scry farm (see +store-blob on why that matters) and
@@ -5050,7 +5049,7 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  i=(unit @uv)  (de-id:uw u.jon)
   ?~  i  (send-err eyre-id 400 'bad id')
-  =/  root=@ud  (nexus-root rail)
+  =/  root=@ud  nexus-root
   ::  the key road, before the draft is even read: a send this ship
   ::  cannot sign is refused with the words the composer shows, and the
   ::  DRAFT IS NOT TOUCHED. +do-send-draft on the writer keeps it too -
