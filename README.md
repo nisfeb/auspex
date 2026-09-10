@@ -53,6 +53,62 @@ whoever receives a forward from another branch. That is the leak the tree
 exists to prevent, and the reason the picture and the count can never
 disagree: they are two renderings of one fact.
 
+## Where a thread lives, and what the ids are
+
+The tree in the UI is not a rendering of a flat list — it is the shape the
+messages are stored in. A thread on the ship is:
+
+```
+/apps/auspex.auspex_app/mail/thread/<tid>/meta
+/apps/auspex.auspex_app/mail/thread/<tid>/msg/<id>/<id>/.../<slot>
+```
+
+A message id is a **directory**; its replies are subdirectories keyed by their
+own ids. So a message's path *is* its ancestry, two branches are two sibling
+directories, and reading the chain a reply must carry is walking one path
+rather than sorting a set and chasing pointers through it. `meta` holds the
+local state — read marks, archive, labels — which is never signed and never
+travels.
+
+All three names are hashes. `sham` is Urbit's 128-bit noun hash, printed
+`@uv`.
+
+**`<id>`, a message id — `(sham unsigned)`.** It hashes the whole `$unsigned`
+noun and nothing else: `from`, `life`, `to`, `subj`, `body`, `body-mime`,
+`sent`, `prev`, `attachments`. That is the same preimage the signature covers,
+which is the point — an id cannot name content the signature did not
+authorise. `prev` is inside it, so a message's id depends on its parent's id:
+the ancestry is hashed in, and nothing can be reparented without becoming a
+different message.
+
+**`<tid>`, a thread id — the root message's id.** Not a separate hash and not
+assigned by anyone. Two ships hold the same conversation under the same path
+without coordinating, because the root message is byte-identical for both and
+so is its hash.
+
+**`<slot>`, one signed copy — `(sham [id sig])`.** The id paired with the
+signature bytes, not a positional index. This is what stops shadowing: two
+copies of one message differing only in signature hash to two different slots,
+so they sit as two grubs with two verdicts at the same node and neither can
+overwrite the other. A forgery lands *beside* the real message; it cannot
+displace it. Files and subdirectories are separate maps in a grubbery ball, so
+a node carries both its copies and its replies with no collision possible.
+
+Two hashes nearby that are **not** ids:
+
+- **The signature preimage** is `digest`, `(shaf %auspex (sham unsigned))` —
+  the message id with an `%auspex` salt on top. The salt is load-bearing: the
+  same key signs ames packets and attestations, and salting keeps those
+  preimage spaces disjoint so an auspex signature can never be replayed as one
+  of them.
+- **An attachment hash** is `(sham octs)` over the content bytes. Content
+  addressing means the hash is the authority and the courier is irrelevant, so
+  a blob may be fetched from any ship that has it.
+
+The wire-level definitions live in `docs/protocol.md`, with conformance
+vectors under `protocol/vectors/`; `grubbery-overlay/lib/auspex-chain.hoon` is
+the implementation.
+
 ## Development
 
 Two fake ships run the nexus for development; production is never touched
