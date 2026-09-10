@@ -468,8 +468,10 @@ a peer it is one click away, and that is enough.
 
 ### 9.3 The develop merge, measured
 
-Assessed 2026-09-10 in a worktree on branch `dist/develop-merge` (the
-trial merge was aborted; the branch is parked at `dist/lattice-only`).
+Assessed 2026-09-10 in a worktree on branch `dist/develop-merge`. The
+numbers below are the assessment; **the merge has since been done and
+rehearsed end to end on `~wex`** — see §9.4 for where it stands and §10
+for what it taught.
 
 - Our stack is **26 commits** on `7117ae1`; upstream is **36 ahead**.
 - 49 files collide. **44 of them we deleted** (the app-tier strip and the
@@ -529,6 +531,37 @@ launcher. Post-split, tiles is a pure data store and the shell is the
 view; taking `develop` gives us both, correctly. Merging the old fork
 would carry a launcher we would then have to un-carry.
 
+
+### 9.4 Where the five steps actually stand — 2026-09-10
+
+Everything below was read off a ship or a branch on the date written.
+Nothing has touched `~ricsul-bilwyt`.
+
+| # | Step | State |
+|---|------|-------|
+| 1 | Grubbery catches up to `develop` | **done and rehearsed**, `nisfeb/grubbery` `dist/develop-merge` @ `f866027`. Merged, trimmed, deployed to `~wex`, ball rebuilt, 0 bangs. Not on ricsul. |
+| 2 | Restructure — `alias.json`, `weir.json`, code namespace | **done**. Both apps declare both files and serve them live on `~wex`. Both `--code-dir` outputs build and resolve every source import (`scripts/codedir-check.py`, 0 unresolved each). |
+| 3 | Peer `~ricsul-bilwyt` | **not started** — production, and it wants the upstream default-peer rule first (issue #6). |
+| 4 | Lattice migrates in place | **blocked on the open question** (issue #5): a desk nexus cannot adopt an existing instance, so the guest route strands the data. |
+| 5 | Auspex discoverable | **waits on 3**. |
+
+Verified on `~wex` the same day: `/apps/auspex/`, `/apps/lattice/app`,
+`/grubbery/mcp` and `/grubbery/api/tree/apps` all 200; `/apps` holds
+exactly `auspex.auspex_app`, `lattice.lattice_app`, `mcp.mcp`,
+`shell.shell`; the launcher grid is Auspex / Lattice / Tools with no
+console errors; the MCP registry lists 14 tools and the protocol
+advertises 3; `-test /=grubbery=/tests/lib` is `ok=%.y`.
+
+**Known leftovers, none blocking.** `gub/nex/` still carries five asset
+directories with no compiling parent — `claw/`, `explorer/`, `git/`,
+`github/`, `web-test/`, about 80 KB. They are inert (no `.hoon` reaches
+them) and deleting them is a branch change nobody needs before a meeting.
+
+**One thing to settle before the meeting:** the five gap issues are filed
+on `gwbtc/drive` (#3–#7), while every grubbery issue we have filed before
+went to `gwbtc/grubbery`, which is where a core dev looks. They read as
+grubbery-core questions — weir expressiveness, the desk nexus, shell
+prompts, `/sys/scry` granularity. `gh issue transfer` moves them.
 
 ## 10. What the rehearsal on `~wex` actually taught — 2026-09-10
 
