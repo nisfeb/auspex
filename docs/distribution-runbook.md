@@ -486,19 +486,37 @@ trial merge was aborted; the branch is parked at `dist/lattice-only`).
 **The trim deleted the two things we now want back.** `gub/nex/shell.hoon`
 and `gub/nex/desk.hoon` are in the deleted-by-us list, and they are the
 entire mechanism this migration runs on. So the resolution is not
-uniform:
+uniform, but it is small — **8 files come back, 36 stay deleted**:
 
-- `git rm` every deleted-by-us conflict **except** shell and desk;
-  restore those from `develop` with their assets.
-- Restore `gub/nex/tiles.hoon` explicitly — upstream did not touch it in
-  these 36 commits, so it never conflicts; it simply stays deleted unless
-  we ask for it.
-- Resolve `root.hoon` by hand: our stripped rows plus rows for shell,
-  desk and tiles.
-- Re-run `tools/desk-reach.py` with the new roots (add `gub/nex/shell*`,
-  `gub/nex/desk*`, `gub/nex/tiles.hoon`), then `tools/trim-lattice-only.sh`.
+- Restore from `develop`: `gub/nex/shell.hoon` with `shell/app.js`,
+  `shell/docs.html`, `shell/docs.js`; `gub/nex/desk.hoon` with
+  `desk/ui/{app.js,index.html,style.css}`.
+- `git rm` every other deleted-by-us conflict.
+- Resolve `root.hoon` by hand: our stripped rows plus rows for shell and
+  desk.
+- `tools/desk-reach.py` already has the new roots (commit `5d880ed` on
+  `dist/develop-merge`); run it, then `tools/trim-lattice-only.sh`.
 - Re-vendor the lattice overlay, then build on `~wex` before anything
   else.
+
+**Nothing else in the app tier comes back**, on the standing assumption
+that every other app is installed by adding a peer. Three that looked
+like they might be needed, checked rather than assumed:
+
+- **`tiles.hoon` is not needed.** `+read-all-tiles` welds
+  `+read-local-tiles` with `+read-app-tiles`; an absent store peeks to a
+  non-`%ball` view and returns `~`, and app tiles come from each app's own
+  `tile.json`. The launcher grid works without a tiles store.
+- **`notifications.hoon` is not needed.** `+register-notify` is
+  `poke-soft` and says so: *"a failed registration is logged, not fatal —
+  re-run on every rise."*
+- **`peers.hoon` is not needed.** It is the usergroup and ship-management
+  *UI*; the peering mechanism itself is the shell's `peers.json` poke and
+  its `/peers` mirrors. One consequence lands on us rather than on users:
+  publishing means putting a road into `public.grp`'s weir, and without
+  that page we do it by poking. Worth asking whether the shell is meant
+  to grow a publish surface, since a distributor with no UI for
+  publishing is a rough edge for anyone but us.
 
 The shell imports only its own assets and `/lib/feather-icons.hoon` — it
 does **not** compile in other app-tier nexuses. It composes the tiles
