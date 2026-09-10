@@ -8,8 +8,9 @@ For the grubbery meeting, 2026-09-10. Written against `develop` at
 `develop` — the `desk` nexus and the shell's alias book — and that the
 right move is to make Auspex the first non-lattice app distributed that
 way, rather than to deepen my fork of the grubbery desk. Four things
-have to be answered before that can work, and one of them (signing) is a
-question about grubbery's permission model, not about my app.
+have to be answered before that can work. None of them blocks me; the
+first (§4.1, signing) is a question about grubbery's permission model
+that I think I am about to be the first app to raise.
 
 ---
 
@@ -88,7 +89,7 @@ is why §6 matters to me.
 
 Ranked by how much they block me.
 
-### 4.1 Signing — the one that is really about grubbery
+### 4.1 Signing — a granularity gap, not a blocker
 
 Auspex signs every message with the ship's networking key. Today it does
 this:
@@ -99,32 +100,58 @@ this:
 ```
 
 It reads `%vein` — the ship's **private ring** — and signs in app code.
-That is fine while it lives in `/apps`, the trusted tier where instances
-default to no weir. It is not fine as a desk-installed guest, and I do
-not think it should be: "this app may read your private key" is not a
-permission a user can meaningfully consent to, and it is unbounded — an
-app with the ring can sign anything, as you, for ever.
+I want to state the mechanics correctly, because I had them wrong at
+first and the real shape is more interesting than what I assumed.
 
-**Proposal: a signing service.** Grubbery offers "sign this digest as
-me"; the shell approves it per app the way it approves any other road;
-the key never enters app code. The reason this is safe rather than a
-different unbounded capability is **domain separation**, which Auspex
-already does:
+`typed-scry` is not a special power. It is an ordinary poke to
+`/sys/scry`'s `main.sig` (`lib/fiberio.hoon`), so it is weir-gated like
+any other `/sys` reach — your own comment beside `+grow` says it: *"a
+sandboxed grub (whose weir does not grant /sys) is vetoed by default, and
+no special-case gating exists anywhere."* And `handle-typed-scry` in
+`app/grubbery.hoon` passes the vane path straight through; nothing
+inspects which vane or care is being asked for.
 
-```
-digest = (shaf %auspex (sham unsigned))
-```
+So, concretely:
 
-A signature obtained under one app's domain tag cannot verify under
-another's. So the service's contract is: *you name your domain, I sign
-`(shaf <your-domain> <your-hash>)`, and I will not sign a bare hash for
-anyone.* That bounds the grant to "may sign things that only your own
-verifier accepts", which is a permission a user can actually reason
-about — and it is the difference between "Auspex can send mail as you"
-and "Auspex can be you".
+- A guest whose weir does **not** grant `/sys/scry` cannot scry arvo at
+  all — it cannot even *verify* a signature, because verification needs
+  `%puby` and `%life`.
+- A guest whose weir **does** grant it can scry anything any vane will
+  answer — including `%vein`.
 
-If the answer is "stay in `/apps` for now", that is workable and I will
-take it, but I would rather build against the service if it is coming.
+That is one road, and it is strictly more powerful than what any mail
+app needs. The sharp version: **every** Auspex install needs scry access,
+because every recipient must fetch the author's public key to verify. So
+a user who only ever *reads* mail must still grant the road that also
+lets the app sign as them, for ever. There is no way today to say "this
+app may read public keys" without also saying "this app may be me."
+
+Nothing else in grubbery reads `%vein` — I grepped `develop`, zero hits.
+So Auspex would be the first, and I would rather not be the precedent
+that makes `/sys/scry` a routine grant for third-party apps.
+
+Three ways out, and they compose:
+
+1. **A signing service.** Grubbery signs on request: you hand it a domain
+   tag and a hash, it returns `(sigh (shaf <domain> <hash>))`. No app
+   needs `/sys/scry` to sign. What bounds the grant is **domain
+   separation**, which Auspex already does — our digest is
+   `(shaf %auspex (sham unsigned))` — so a signature obtained under one
+   app's tag can never verify under another's, and the service refuses to
+   sign a bare hash for anyone. "May sign things only your own verifier
+   accepts" is a permission a user can reason about; "may read your
+   private key" is not.
+2. **Finer roads under `/sys/scry`** — per-vane, or per-vane-and-care, so
+   `%j /puby` is grantable without `%vein`. This is the one that helps
+   every future app, not just mine, and it is what makes a read-only mail
+   client expressible. Harder, because vane paths are open-ended.
+3. **Leave Auspex in `/apps`.** Works today, costs nothing, and does not
+   scale to apps you did not write.
+
+I am not blocked on any of this — (3) is available and I will take it for
+a beta. I am raising it because I think I am about to be the first app
+that makes the gap load-bearing, and because (1) is small and (2) is the
+one you would want anyway.
 
 ### 4.2 Outbound roads
 
@@ -245,8 +272,9 @@ value is that it exists and has been wrong a few times already.
 
 ## 7. What I need from the meeting
 
-1. The answer to §4.1 — signing — even if the answer is "trusted tier for
-   now".
+1. §4.1 — whether a signing service or finer `/sys/scry` roads are worth
+   doing, or whether the trusted tier is the answer for now. I am not
+   blocked either way; I think I am just the first app to make it matter.
 2. Yes or no on Auspex as the first code-nexus app, and roughly when.
 3. The installer floor (§4.4), which decides whether my beta waits.
 4. Whether the `/proto` idea is worth folding into the book, or whether
