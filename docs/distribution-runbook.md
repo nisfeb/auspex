@@ -528,3 +528,122 @@ restores pre-split `tiles.hoon` (upstream `d839ede`) as a self-contained
 launcher. Post-split, tiles is a pure data store and the shell is the
 view; taking `develop` gives us both, correctly. Merging the old fork
 would carry a launcher we would then have to un-carry.
+
+
+## 10. What the rehearsal on `~wex` actually taught — 2026-09-10
+
+The merge, the trim, the cull and the deploy were all run end to end on
+`~wex`. It works — grubbery at `origin/develop`, shell and desk nexus
+restored, 211 trimmed files gone from clay, sixteen app instances culled,
+lattice and auspex serving, three tiles, zero bangs. Almost everything
+below is a correction to what §9 said before it was tried.
+
+### 10.1 The trim tool was lying, and the trim broke the shell
+
+`tools/desk-reach.py` appended `.hoon` to **every** import before looking
+it up, so `shell/home.html` was sought as `home.html.hoon`, not found,
+and called unreachable. The trim then deleted seven files the shell
+needs — `home.html`, `marked.min.js`, `hoon-grammar.json`,
+`permits.html`, `style.css`, `/lib/feather-icons.hoon` and
+`/lib/docs-tools/` — so `shell.hoon` did not compile and its HTTP
+binding went with it. `/apps/grubbery` stopped answering and the console
+filled with `BANG file /apps/shell.shell/...`.
+
+The walker now tries an import path **as written** before assuming
+`.hoon`, and follows directory imports (`/lib/docs-tools/`).
+
+**But the fix is not to trust the fixed tool.** Gate a trim on an
+independent check that opens every remaining `.hoon` in `gub/` and
+resolves every `/<`, `/&`, `/=`, `/*` import against the tree. The bar is
+**0 unreachable AND 0 unresolved imports**, computed two different ways.
+A reachability tool that is wrong reports a clean run.
+
+### 10.2 Reachability by import cannot see instances
+
+`gub/nex/tools.hoon` is imported by nothing, and is needed by mcp's
+`tools.tools` **child instance**. The trim removed it and the console
+said `build-nexus: no built nexus %tools at /nex (from /apps/mcp.mcp/tools.tools)`.
+
+Rule: **a nexus named by any instance — a `root.hoon` row or a child
+instance inside another app — is a root**, whatever imports it. The same
+was true of `gub/nex/port.hoon` before upstream deleted it.
+
+### 10.3 Deletions from a mount DO reach clay
+
+Earlier notes say they do not. They do — through the live mount sync,
+not through `|commit`, and clay prints one `- /~ship/desk/<rev>/<path>`
+line each.
+
+This bit hard: `rsync -a --delete <branch>/desk/ <wex mount>/` removed
+**auspex** from clay, because auspex is an overlay the lattice branch
+knows nothing about. Auspex went dark and it took a while to see why.
+
+- Never `--delete` onto a mount that carries overlays the source tree
+  does not contain. Sync each overlay in afterwards, and commit.
+- Do not verify a deletion with `.^` under a pinned `=dir` — the case
+  resolves to that revision and a deleted file still reads `%.y`. Read
+  the `- /` lines the commit prints instead.
+
+### 10.4 Bulk deletion by `%info` works, in this shape
+
+211 files went in **8 lines of 30 entries**, all accepted:
+
+```
+|pass [%c %info %grubbery %.y ~[[/gub/lib/btc-rpc/hoon [%del ~]] ...]]
+```
+
+Mount path `a/b/c.ext` becomes clay path `/a/b/c/ext`. Build the list as
+*(what clay holds) minus (the branch) minus (every overlay)*, then assert
+the intersection with the current mount is **empty** before sending
+anything. A line is atomic: one bad path fails all thirty.
+
+### 10.5 Culling instances: shape, silence, and children
+
+The working command is:
+
+```
+:grubbery &grub-cmd [%clean2 [%cull /apps/'<name>' ~]]
+```
+
+Two things that cost time:
+
+- **The wrong shape is accepted.** `[%cull /apps [~ %'weather.weather']]`
+  echoes `>=` and does nothing. A no-op is indistinguishable from
+  success, so verify against `/grubbery/api/tree/apps` after each.
+- **Culling a parent leaves nested children alive, and they regenerate
+  the parent.** `forge.git_forge` came back until its
+  `repos/contacts.git_repo` child was culled first. **Children first.**
+
+### 10.6 The tiles store is not needed — now tested, not reasoned
+
+With `tiles.tiles` culled, the shell serves a grid of exactly
+**Auspex, Lattice, Tools**, each rendered from the app's own `tile.json`
+through `+read-app-tiles`. §9's conclusion stands.
+
+The one cost: the tiles store held exactly one local tile —
+**Landscape** — so dropping it removes the link back to Urbit's own UI.
+That is a product decision for production, not a technical one.
+
+Ghost tiles are real and now visible: before the cull, `~wex` showed
+**13** tiles for 4 live apps, including a stale `Mail -> /apps/urmail`
+from the auspex rename. Ricsul's ball has the same shape, so the cull is
+required there before the shell arrives — and it is a ball write, so it
+needs its own go.
+
+### 10.7 Sequence that worked, in order
+
+1. Merge `origin/develop`; restore shell + desk from upstream; resolve
+   `root.hoon` and `kiln/install.hoon`.
+2. Relocate lattice's MCP tools to `gub/lib/tool-bundle/tools/` and
+   repoint their import to `/lib/tools.hoon` (upstream dropped
+   `/lib/nex/`). Without this the memory tools do not build.
+3. Fix the reachability walker; re-vendor every overlay; trim; **verify
+   both ways**.
+4. Deploy additively, `|commit`, read the build line.
+5. Cull instances — children before parents — verifying the tree each
+   time.
+6. Delete the trimmed files with `%info` lines, thirty at a time.
+7. Re-sync every overlay and commit again, because step 4's `--delete`
+   or step 6's list may have taken one out.
+8. Bounce, then check endpoints, the grid, and that the console carries
+   no `BANG` or `missing import`.
