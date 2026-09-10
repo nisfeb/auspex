@@ -162,6 +162,29 @@
               image+s+'/grubbery/tiles/icon/auspex'
               href+s+'/apps/auspex'
           ==
+          ::  alias.json: WHO THIS NEXUS CLAIMS TO BE. The shell reads it
+          ::  and enters the claim in its alias book, which is what lets a
+          ::  peer resolve the name `auspex` to wherever this instance
+          ::  actually lives in that ship's namespace. Several nexuses may
+          ::  claim one alias; the book keeps the claimants and their
+          ::  locations, and the user decides. Inert until the shell is
+          ::  there to read it, which is why it costs nothing to declare
+          ::  now: it is one grub, and it is the whole of what this app has
+          ::  to say about its own identity.
+          :^  %over  %&  [/ %'alias.json']
+          :-  [/ %json]
+          %-  pairs:enjs:format
+          :~  name+s+'auspex'
+              description+s+'Signed mail, verified end to end'
+          ==
+          ::  weir.json: WHAT THIS NEXUS REACHES OUTSIDE ITS OWN TREE, and
+          ::  why, in words meant for the person being asked. A desk-
+          ::  installed instance is created with an empty weir - permit
+          ::  nothing - and earns each road through this file and the
+          ::  shell's consent. Auspex's own subtree (/mail, /proto, /probe,
+          ::  /beacon, /fetch, /ui, /requests, /tr) never crosses its own
+          ::  boundary and is not declared here.
+          [%over %& [/ %'weir.json'] [[/ %json] weir-json]]
           [%over %& [/ %'icon.svg'] [[/ %mime] uicon]]
           ::  /proto: WHAT THIS NEXUS SPEAKS. %over, not %fall, for the
           ::  same reason /app is: a redeploy that left every ship
@@ -3049,6 +3072,41 @@
   =/  known=(unit proto:uc)  (known-proto rec now)
   ?~  known  (enqueue-chain root c who now)
   (deliver-chain root c who known &)
+::
+::  +weir-json: every road auspex reaches outside its own tree, with the
+::  reason a person would need to judge it.
+::
+::    The `why` strings are not documentation. They are the text the shell
+::    shows when it asks, so each one says what the road buys the user,
+::    not what the code does with it.
+::
+::    /sys/scry is the uncomfortable one and it is written honestly. It is
+::    a single road that carries every vane answer: the sender's public
+::    key, which every recipient needs merely to VERIFY a message, and
+::    this ship's private key, which only sending needs. There is nothing
+::    narrower to ask for - the scry service passes the vane path straight
+::    through and no per-vane gating exists - so a user who only reads
+::    mail must still grant what a sender needs. Saying so is the least we
+::    can do about it; see docs/distribution-proposal.md.
+::
+++  weir-json
+  ^-  json
+  =/  line
+    |=  [r=@t w=@t]
+    `json`(pairs:enjs:format ~[['road' s+r] ['why' s+w]])
+  %-  pairs:enjs:format
+  :~  :-  'poke'
+      :-  %a
+      :~  %+  line  '/sys/bowl.sig'
+          'read the clock and the name of this ship: every message is stamped with when it was sent, and signed as who sent it'
+          %+  line  '/sys/behn/'
+          'give up on a delivery or an attachment fetch that is not coming, instead of waiting for ever'
+          %+  line  '/sys/eyre/'
+          'serve the mail client at /apps/auspex'
+          %+  line  '/sys/scry/'
+          'verify a signature against the public key of the ship that sent it, sign the mail you send, and fetch attachments from other ships. This one road also carries the private key of this ship: signing needs it, and nothing narrower can be asked for today'
+      ==
+  ==
 ::
 ++  send-timeout  ^-(@dr ~s20)
 ::

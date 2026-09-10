@@ -45,6 +45,60 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OVERLAY="$HERE/../grubbery-overlay"
+# ---------------------------------------------------------------------------
+# TWO SHAPES, ONE SOURCE.
+#
+#   sync-overlay.sh <grubbery-desk-root>     the desk shape (everything below)
+#   sync-overlay.sh --code-dir <out-dir>     the CODE NAMESPACE shape
+#
+# The desk shape is how auspex reaches a ship today: copied into a %grubbery
+# desk, which kiln syncs whole, so everything in it lands on everyone.
+#
+# The code-namespace shape is how grubbery distributes apps on `develop`: a
+# directory of `nex/ lib/ mar/` plus a bill.json naming the instances to
+# create, published at a path in the publisher's namespace and mirrored by a
+# `desk` nexus on each installer's ship, gated by an opaque `version.*` tag.
+# The installed instance is created sandboxed - an empty weir, permit nothing
+# - and earns its roads from the weir.json the nexus declares in on-load.
+#
+# The overlay was always this shape. The desk mode is the one doing work to
+# fit somewhere else. See docs/distribution-proposal.md.
+# ---------------------------------------------------------------------------
+CODE_DIR=0
+if [ "${1:-}" = "--code-dir" ]; then
+  CODE_DIR=1
+  shift
+fi
+DEST="${1:?usage: sync-overlay.sh <grubbery-desk-root> | --code-dir <out-dir>}"
+[ -d "$OVERLAY" ] || { echo "no overlay at $OVERLAY" >&2; exit 66; }
+
+if [ "$CODE_DIR" -eq 1 ]; then
+  mkdir -p "$DEST/nex" "$DEST/lib" "$DEST/mar"
+  rsync -a "$OVERLAY/nex/auspex/"  "$DEST/nex/auspex/"
+  rsync -a "$OVERLAY/lib/"         "$DEST/lib/"
+  rsync -a "$OVERLAY/mar/auspex/"  "$DEST/mar/auspex/"
+  #  Wire marcs sit at mar's top level: a blot with a path prefix is
+  #  unaddressable from a peer's poke, which flattens a blot to its bare
+  #  mark name. Same rule as the desk shape's gub/mar.
+  [ -d "$OVERLAY/mar-gub" ] && rsync -a "$OVERLAY/mar-gub/" "$DEST/mar/"
+  #  bill.json: the ONE desk-level file. instance name -> the nexus's code
+  #  path. `/auspex/app` resolves to the rail [/auspex %app] - the same neck
+  #  the hand-added root.hoon row names today.
+  printf '{"auspex": "/auspex/app"}\n' > "$DEST/bill.json"
+  #  version.*: the tag an installer's desk nexus watches. Opaque - it
+  #  re-syncs when the CONTENT changes and never parses it.
+  git -C "$HERE/.." describe --tags --always --dirty 2>/dev/null > "$DEST/version.txt" \
+    || date -u +%Y%m%d%H%M%S > "$DEST/version.txt"
+  cnt() { [ -d "$1" ] || { echo 0; return 0; }; find "$1" "${@:2}" | wc -l; }
+  echo "code dir -> $DEST (nex: $(cnt "$DEST/nex/auspex" -type f), libs: $(cnt "$DEST/lib" -maxdepth 1 -name 'auspex-*.hoon'), marcs: $(cnt "$DEST/mar/auspex" -type f), wire marcs: $(cnt "$DEST/mar" -maxdepth 1 -name 'auspex-*.hoon'), version: $(cat "$DEST/version.txt"))"
+  #  Deliberately NOT here: mar-core (desk-level marks a DOJO poke resolves),
+  #  gen/, tests/ and protocol/vectors/. None is code-namespace material -
+  #  ford builds them against a DESK's lib, which a published app has none
+  #  of. Tests keep running against a dev ship's desk, as they always have.
+  echo "  (desk-level and omitted: mar-core, gen, tests, protocol/vectors)"
+  exit 0
+fi
+
 DEST="${1:?usage: sync-overlay.sh <grubbery-desk-root>}"
 
 [ -d "$OVERLAY" ] || { echo "no overlay at $OVERLAY" >&2; exit 66; }
