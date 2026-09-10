@@ -177,6 +177,22 @@
           :~  name+s+'auspex'
               description+s+'Signed mail, verified end to end'
           ==
+          ::  link.json: the same claim, in the form the shell actually
+          ::  SCANS. +read-app-aliases walks /apps and each desk's data
+          ::  children reading link.json, not alias.json, and folds what it
+          ::  finds into the /sys/link registry as @name -> {path,
+          ::  description, source}. Without this grub auspex claims @auspex
+          ::  nowhere, and nothing can resolve it by name.
+          ::
+          ::  This is what makes a peer's auspex FINDABLE once desks are
+          ::  named at install time and no two ships need agree on a path.
+          ::  See +remote-install for the constant it is meant to retire.
+          :^  %over  %&  [/ %'link.json']
+          :-  [/ %json]
+          %-  pairs:enjs:format
+          :~  name+s+'auspex'
+              description+s+'Signed mail, verified end to end'
+          ==
           ::  weir.json: WHAT THIS NEXUS REACHES OUTSIDE ITS OWN TREE, and
           ::  why, in words meant for the person being asked. A desk-
           ::  installed instance is created with an empty weir - permit
@@ -347,8 +363,7 @@
           ::  bad road is an infinite crash loop at 100% CPU.
           [~ %'main.sig']
         ;<  ~  bind:m  (rise-wait:io prod "%auspex writer failed")
-        ;<  here=rail:tarball  bind:m  get-here-abs:io
-        =/  root=path  path.here
+        =/  root=@ud  (lent path.rail)
         ;<  ~  bind:m  (grant-public root)
         ::  BOTH OF THESE REACH /sys/scry, and +on-load has just laid
         ::  /caps denied, so on this line the answer is always "not
@@ -387,7 +402,7 @@
       ::  serialisation point for mail.
           [[%fetch ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex fetch: failed")
-        (run-fetch name.rail)
+        (run-fetch (lent path.rail) name.rail)
       ::  /probe/*: one EPHEMERAL fiber per discovery keen. It reads its
       ::  own grub - a $peer-rec with proto=~, the question rather than
       ::  the answer - keens the peer's /proto, pokes the completed
@@ -396,7 +411,7 @@
       ::  culling this request.
           [[%probe ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex probe: failed")
-        (run-probe name.rail)
+        (run-probe (lent path.rail) name.rail)
       ::  /keys/probe: THE ONE FIBER THAT IS ALLOWED TO DIE.
       ::
       ::  Its whole job is to find out whether this instance was
@@ -419,7 +434,7 @@
       ::  rather than three lines at the top of the writer.
           [[%keys ~] %probe]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex key probe: no key road")
-        run-key-probe
+        (run-key-probe (lent path.rail))
       ::  /ui/main.sig: bind the HTTP endpoint and dispatch each request
       ::  into its own fiber under /ui/requests. This fiber never touches
       ::  the mail tree; it only routes.
@@ -430,41 +445,70 @@
       ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
           [[%ui %requests ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/requests: failed")
-        (handle-request name.rail)
+        (handle-request rail name.rail)
       ==
     --
 |%
 ::  ── paths ───────────────────────────────────────────────────────────
 ::
-++  mail-dir    |=(root=path ^-(path (weld root /mail)))
-++  thread-dir  |=(root=path ^-(path (weld root /mail/thread)))
-++  tdir        |=([root=path t=thread-id:uc] ^-(path (weld (thread-dir root) /[(scot %uv t)])))
-++  mdir        |=([root=path t=thread-id:uc] ^-(path (weld (tdir root t) /msg)))
-++  blob-dir    |=(root=path ^-(path (weld root /mail/blob)))
-++  blob-rail   |=([root=path h=@uv] ^-(road:tarball [%& %& (blob-dir root) (scot %uv h)]))
-++  vis-rail    |=(root=path ^-(road:tarball [%& %& (mail-dir root) %blobvis]))
-++  draft-dir   |=(root=path ^-(path (weld root /mail/draft)))
-++  rule-dir    |=(root=path ^-(path (weld root /mail/rule)))
-++  list-dir    |=(root=path ^-(path (weld root /mail/list)))
-++  draft-rail  |=([root=path i=@uv] ^-(road:tarball [%& %& (draft-dir root) (scot %uv i)]))
-++  rule-rail   |=([root=path i=@uv] ^-(road:tarball [%& %& (rule-dir root) (scot %uv i)]))
+::  ROADS HERE ARE NEXUS-RELATIVE, and `root` is not a path any more: it
+::  is the number of steps from the calling fiber UP to the nexus root.
+::
+::    A sandboxed install cannot learn its own absolute path, and that is
+::    the sandbox working rather than a gap. +walk-here reveals only the
+::    ancestors a grub may peek and then stops, +coerce-here asserts
+::    `?> root.here` on what it got, and a desk-installed app fails that
+::    assertion - so every fiber that opened with +get-here-abs crashed on
+::    its first line, respawned, and crashed again.
+::
+::    So: no absolute roads. [%| steps lane] climbs `steps` to the nexus
+::    root and descends into `lane`, which is what +nex-road:io does and
+::    what every nexus upstream ships uses - wallet, mcp and the shell
+::    build roads this way and call +get-here-abs zero, zero and twice.
+::
+::    The step count is (lent path.rail) at the fiber's own dispatch arm,
+::    which is exact: a request fiber at <root>/ui/requests/<id> reads 2.
+::    The old +nexus-root computed the same number and then threw it away
+::    in favour of a path it had to ask permission to learn.
+::
+::  +rf, +rv: a file road and a directory road, `up` steps from here.
+::
+++  rf  |=([up=@ud p=path n=@ta] ^-(road:tarball [%| up [%& p n]]))
+++  rv  |=([up=@ud p=path] ^-(road:tarball [%| up [%| p]]))
+::  The dir arms keep their `root` argument although the path no longer
+::  needs it: every call site reads (tdir root t) today, and a signature
+::  that still takes it is a diff in this block instead of a diff in 117
+::  arms and hundreds of calls.
+::
+++  mail-dir    |=(root=@ud ^-(path /mail))
+++  thread-dir  |=(root=@ud ^-(path /mail/thread))
+++  tdir        |=([root=@ud t=thread-id:uc] ^-(path (weld (thread-dir root) /[(scot %uv t)])))
+++  mdir        |=([root=@ud t=thread-id:uc] ^-(path (weld (tdir root t) /msg)))
+++  blob-dir    |=(root=@ud ^-(path /mail/blob))
+++  blob-rail   |=([root=@ud h=@uv] ^-(road:tarball (rf root (blob-dir root) (scot %uv h))))
+++  vis-rail    |=(root=@ud ^-(road:tarball (rf root (mail-dir root) %blobvis)))
+++  draft-dir   |=(root=@ud ^-(path /mail/draft))
+++  rule-dir    |=(root=@ud ^-(path /mail/rule))
+++  list-dir    |=(root=@ud ^-(path /mail/list))
+++  draft-rail  |=([root=@ud i=@uv] ^-(road:tarball (rf root (draft-dir root) (scot %uv i))))
+++  rule-rail   |=([root=@ud i=@uv] ^-(road:tarball (rf root (rule-dir root) (scot %uv i))))
 ::  +list-rail: the grub for one list. The NAME IS THE SEGMENT, cast
 ::  straight to a knot rather than scotted: +list-name-ok:uw has already
 ::  refused everything a knot cannot hold - anything but a-z, 0-9 and
 ::  '-', an empty name, and anything over 64 bytes - and it is checked
 ::  at the route AND again at the writer, so this cast never sees a
 ::  name that was not admitted by both.
-++  list-rail   |=([root=path n=@t] ^-(road:tarball [%& %& (list-dir root) `@ta`n]))
-++  meta-rail   |=([root=path t=thread-id:uc] ^-(road:tarball [%& %& (tdir root t) %meta]))
+++  list-rail   |=([root=@ud n=@t] ^-(road:tarball (rf root (list-dir root) `@ta`n)))
+++  meta-rail   |=([root=@ud t=thread-id:uc] ^-(road:tarball (rf root (tdir root t) %meta)))
 ::  +caps-rail: the one grub every jael reach is gated on, at the nexus
 ::  root. See the /caps row in +on-load and $caps:uc.
-++  caps-rail   |=(root=path ^-(road:tarball [%& %& root %caps]))
+++  caps-rail   |=(root=@ud ^-(road:tarball (rf root / %caps)))
 ::  the discovery cache and the ephemeral probe that fills it. Two roads,
 ::  one $peer-rec shape - see mar/auspex/peer.hoon for why.
-++  peer-dir    |=(root=path ^-(path (weld root /mail/peer)))
-++  peer-rail   |=([root=path who=ship] ^-(road:tarball [%& %& (peer-dir root) (scot %p who)]))
-++  probe-dir   |=(root=path ^-(path (weld root /probe)))
-++  probe-rail  |=([root=path who=ship] ^-(road:tarball [%& %& (probe-dir root) (scot %p who)]))
+++  peer-dir    |=(root=@ud ^-(path /mail/peer))
+++  peer-rail   |=([root=@ud who=ship] ^-(road:tarball (rf root (peer-dir root) (scot %p who))))
+++  probe-dir   |=(root=@ud ^-(path /probe))
+++  probe-rail  |=([root=@ud who=ship] ^-(road:tarball (rf root (probe-dir root) (scot %p who))))
 ::  +slot: the grub name of one SIGNED COPY.
 ::
 ::    (sham [id sig]), not a positional index. The spec writes this leaf as
@@ -507,10 +551,10 @@
   (over:io road [blot noun])
 ::
 ++  ensure-dir
-  |=  pax=path
+  |=  [up=@ud pax=path]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  =/  road=road:tarball  [%& %| pax]
+  =/  road=road:tarball  (rv up pax)
   ;<  ex=?  bind:m  (peek-exists:io road)
   ?:  ex  (pure:m ~)
   (make:io road &+empty-dir:loader)
@@ -521,27 +565,27 @@
 ::    continuation cannot find the trap.
 ::
 ++  ensure-nodes
-  |=  [dir=path ps=(list path)]
+  |=  [up=@ud dir=path ps=(list path)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ps  (pure:m ~)
-  ;<  ~  bind:m  (ensure-dir (weld dir i.ps))
-  (ensure-nodes dir t.ps)
+  ;<  ~  bind:m  (ensure-dir up (weld dir i.ps))
+  (ensure-nodes up dir t.ps)
 ::
 ++  ensure-thread
-  |=  [root=path t=thread-id:uc]
+  |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  ~  bind:m  (ensure-dir (thread-dir root))
-  ;<  ~  bind:m  (ensure-dir (tdir root t))
-  ;<  ~  bind:m  (ensure-dir (mdir root t))
+  ;<  ~  bind:m  (ensure-dir root (thread-dir root))
+  ;<  ~  bind:m  (ensure-dir root (tdir root t))
+  ;<  ~  bind:m  (ensure-dir root (mdir root t))
   ::  lay a default meta so EVERY thread has the leaf the tree says it
   ::  has. A delivered thread is never marked read, so nothing else would
   ::  ever create one, and a reader would find the leaf missing rather
   ::  than empty. Guarded, so it never clobbers real read marks.
-  ;<  ex=?  bind:m  (peek-exists:io [%& %& (tdir root t) %meta])
+  ;<  ex=?  bind:m  (peek-exists:io (meta-rail root t))
   ?:  ex  (pure:m ~)
-  (put-file [%& %& (tdir root t) %meta] [/auspex %meta] *meta:uc)
+  (put-file (meta-rail root t) [/auspex %meta] *meta:uc)
 ::
 ::  ── reads ───────────────────────────────────────────────────────────
 ::
@@ -587,10 +631,10 @@
 ::    reason local state is kept out of `unsigned`.
 ::
 ++  read-meta
-  |=  [root=path t=thread-id:uc]
+  |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,meta:uc)
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %& (tdir root t) %meta] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (meta-rail root t) ~)
   ?.  ?=([%file *] vw)  (pure:m *meta:uc)
   ?:  (is-boom:tarball sang.vw)  (pure:m *meta:uc)
   =/  n  (sang-noun:tarball sang.vw)
@@ -610,10 +654,10 @@
 ::    and on request fibers, and neither may fail on one bad grub.
 ::
 ++  read-drafts
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list draft:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (draft-dir root)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (draft-dir root)) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   (pure:m (collect-drafts ball.vw))
 ::
@@ -629,7 +673,7 @@
   ?:(?=(%| -.res) ~ `p.res)
 ::
 ++  read-draft
-  |=  [root=path i=@uv]
+  |=  [root=@ud i=@uv]
   =/  m  (fiber:fiber:nexus ,(unit draft:uc))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (draft-rail root i) ~)
@@ -639,10 +683,10 @@
   (pure:m ?:(?=(%| -.res) ~ `p.res))
 ::
 ++  read-rules
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list rule:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (rule-dir root)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (rule-dir root)) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   (pure:m (collect-rules ball.vw))
 ::
@@ -669,10 +713,10 @@
 ::    request fibers, and neither may fail on one bad grub.
 ::
 ++  read-lists
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list [name=@t members=(set @p)]))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (list-dir root)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (list-dir root)) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   (pure:m (collect-lists ball.vw))
 ::
@@ -688,10 +732,10 @@
   ?:(?=(%| -.res) ~ `[`@t`nom members.p.res])
 ::
 ++  read-idx
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,mail-idx:uc)
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %& (mail-dir root) %idx] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rf root (mail-dir root) %idx) ~)
   ?.  ?=([%file *] vw)  (pure:m *mail-idx:uc)
   ?:  (is-boom:tarball sang.vw)  (pure:m *mail-idx:uc)
   =/  res  (mule |.(;;(mail-idx:uc (sang-noun:tarball sang.vw))))
@@ -717,7 +761,7 @@
 ::  +read-blob: one attachment's bytes, ~ when we do not hold them.
 ::
 ++  read-blob
-  |=  [root=path h=@uv]
+  |=  [root=@ud h=@uv]
   =/  m  (fiber:fiber:nexus ,(unit octs))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
@@ -736,7 +780,7 @@
 ::    numbers.
 ::
 ++  blob-size
-  |=  [root=path h=@uv]
+  |=  [root=@ud h=@uv]
   =/  m  (fiber:fiber:nexus ,(unit @ud))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
@@ -746,7 +790,7 @@
   ?~(st (pure:m ~) (pure:m `p.octs.u.st))
 ::
 ++  read-blobvis
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,blob-index:uc)
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (vis-rail root) ~)
@@ -764,7 +808,7 @@
 ::    rather than crashing a fiber that must not fail on one bad grub.
 ::
 ++  read-peer
-  |=  [root=path who=ship]
+  |=  [root=@ud who=ship]
   =/  m  (fiber:fiber:nexus ,(unit peer-rec:uc))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (peer-rail root who) ~)
@@ -796,7 +840,7 @@
 ::    +run-probe reads the same grub and recovers the same way.
 ::
 ++  read-probe
-  |=  [root=path who=ship]
+  |=  [root=@ud who=ship]
   =/  m  (fiber:fiber:nexus ,(unit probe-req:uc))
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (probe-rail root who) ~)
@@ -816,10 +860,10 @@
 ::    delivered chain, which carries metadata and no bytes at all.
 ::
 ++  list-blobs
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list blob-row:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (blob-dir root)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (blob-dir root)) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   ?~  fil.ball.vw  (pure:m ~)
   %-  pure:m
@@ -841,7 +885,7 @@
 ::    without culling their blobs, so these genuinely accumulate.
 ::
 ++  all-referenced
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(set @uv))
   ^-  form:m
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
@@ -862,7 +906,7 @@
 ::    bounds govern the TREE store, not everything the ship holds.
 ::
 ++  make-room
-  |=  [root=path bytes=@ud]
+  |=  [root=@ud bytes=@ud]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
@@ -873,7 +917,7 @@
   (pure:m &)
 ::
 ++  evict
-  |=  [root=path hs=(list @uv)]
+  |=  [root=@ud hs=(list @uv)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  hs  (pure:m ~)
@@ -888,10 +932,10 @@
 ::    upgrade path is the same, a [msg-id sig] -> thread-id index grub.
 ::
 ++  read-threads
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map path stored-msg:uc)))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (thread-dir root)) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   (pure:m (collect-threads ball.vw))
 ::
@@ -1054,18 +1098,18 @@
 ::  ── the trace grub ──────────────────────────────────────────────────
 ::
 ++  note
-  |=  [root=path stage=@t ok=? why=@t]
+  |=  [root=@ud stage=@t ok=? why=@t]
   (note-at root %last stage ok why)
 ::
 ::  +note-at: the same, at a named trace grub. Discovery writes its own
 ::  rather than sharing /tr/last - see the /tr/discovery row.
 ::
 ++  note-at
-  |=  [root=path name=@ta stage=@t ok=? why=@t]
+  |=  [root=@ud name=@ta stage=@t ok=? why=@t]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  now=@da  bind:m  bowl-now
-  %^  put-file  [%& %& (weld root /tr) name]  [/ %json]
+  %^  put-file  (rf root /tr name)  [/ %json]
   %-  pairs:enjs:format
   :~  ['stage' [%s stage]]
       ['ok' [%b ok]]
@@ -1079,7 +1123,7 @@
 ::    one question - DID ANYTHING CHANGE - and a refusal never did.
 ::
 ++  reject
-  |=  [root=path why=@t]
+  |=  [root=@ud why=@t]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (trace:io ~[leaf+"auspex: rejected: {(trip why)}"])
@@ -1102,7 +1146,7 @@
 ::    agent's `?>  =(our.bowl src.bowl)` was.
 ::
 ++  grant-public
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
@@ -1111,7 +1155,7 @@
     (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
   ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
   %+  reg-how:io  /public
-  [make=~ poke=(sy ~[`road:tarball`[%& %& root %'main.sig']]) peek=~]
+  [make=~ poke=(sy ~[`road:tarball`(rf root / %'main.sig')]) peek=~]
 ::
 ::  ── the writer ──────────────────────────────────────────────────────
 ::
@@ -1153,7 +1197,7 @@
 ::    still standing and the next poke still its own.
 ::
 ++  apply
-  |=  [root=path =from:fiber:nexus =sage:tarball]
+  |=  [root=@ud =from:fiber:nexus =sage:tarball]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ::  a chain from ANYONE. src is deliberately not checked against the
@@ -1200,7 +1244,7 @@
   (act root p.res)
 ::
 ++  act
-  |=  [root=path a=action:uc]
+  |=  [root=@ud a=action:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?-  -.a
@@ -1281,7 +1325,7 @@
 ::    beacon itself, from inside, before the fan-out. See the end.
 ::
 ++  do-send
-  |=  $:  root=path
+  |=  $:  root=@ud
           to=(set ship)
           subject=@t
           body=@t
@@ -1325,7 +1369,7 @@
 ::    be evicted between the route's check and the writer's.
 ::
 ++  do-send-refs
-  |=  $:  root=path
+  |=  $:  root=@ud
           to=(set ship)
           subject=@t
           body=@t
@@ -1353,7 +1397,7 @@
 ::    measures it.
 ::
 ++  resolve-refs
-  |=  [root=path rs=(list attach-ref:uc)]
+  |=  [root=@ud rs=(list attach-ref:uc)]
   =/  m  (fiber:fiber:nexus ,(unit (list attachment:uc)))
   ^-  form:m
   ?~  rs  (pure:m `~)
@@ -1373,7 +1417,7 @@
 ::    [name size mime hash] came from and in nothing else.
 ::
 ++  do-send-core
-  |=  $:  root=path
+  |=  $:  root=@ud
           to=(set ship)
           subject=@t
           body=@t
@@ -1541,7 +1585,7 @@
 ::    and poke would otherwise make the whole batch fail.
 ::
 ++  do-read
-  |=  [root=path ids=(set msg-id:uc)]
+  |=  [root=@ud ids=(set msg-id:uc)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?:  =(~ ids)  (pure:m |)
@@ -1601,7 +1645,7 @@
 ::    would mark it read again - a loop, not a burst.
 ::
 ++  do-unread
-  |=  [root=path ids=(set msg-id:uc)]
+  |=  [root=@ud ids=(set msg-id:uc)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?:  =(~ ids)  (pure:m |)
@@ -1629,7 +1673,7 @@
 ::    thread is, and the disagreement would be invisible.
 ::
 ++  do-label
-  |=  [root=path t=thread-id:uc l=@tas add=?]
+  |=  [root=@ud t=thread-id:uc l=@tas add=?]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ::  the label is user input arriving as a JSON string. Nothing
@@ -1637,7 +1681,7 @@
   ::  happily and then crashes `scot %tas` on a request fiber, which is
   ::  an HTTP connection that never answers.
   ?.  (label-ok:uc l)  (reject root 'bad label')
-  ;<  ex=?  bind:m  (peek-exists:io [%& %| (tdir root t)])
+  ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir root t)))
   ?.  ex  (reject root 'unknown thread')
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   =/  now=(set @tas)  ?:(add (~(put in labels.mt) l) (~(del in labels.mt) l))
@@ -1659,10 +1703,10 @@
 ::    silently, which is the one thing a mail client must never do.
 ::
 ++  do-archive
-  |=  [root=path t=thread-id:uc arch=?]
+  |=  [root=@ud t=thread-id:uc arch=?]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ex=?  bind:m  (peek-exists:io [%& %| (tdir root t)])
+  ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir root t)))
   ?.  ex  (reject root 'unknown thread')
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ?:  =(arch archived.mt)  (pure:m |)
@@ -1683,7 +1727,7 @@
 ::    debounced save costs one grub however many keystrokes it covers.
 ::
 ++  do-save-draft
-  |=  [root=path d=draft:uc]
+  |=  [root=@ud d=draft:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ::  the send caps, checked at SAVE time. A draft that cannot be sent
@@ -1703,7 +1747,7 @@
   (pure:m |)
 ::
 ++  do-delete-draft
-  |=  [root=path i=@uv]
+  |=  [root=@ud i=@uv]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (draft-rail root i))
@@ -1727,7 +1771,7 @@
 ::    added to prevent, arriving through a different door.
 ::
 ++  do-send-draft
-  |=  [root=path i=@uv]
+  |=  [root=@ud i=@uv]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  d=(unit draft:uc)  bind:m  (read-draft root i)
@@ -1745,7 +1789,7 @@
 ::  ── filters ─────────────────────────────────────────────────────────
 ::
 ++  do-save-rule
-  |=  [root=path r=rule:uc]
+  |=  [root=@ud r=rule:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ::  a rule with no condition matches every delivered chain, and with
@@ -1764,7 +1808,7 @@
   (pure:m |)
 ::
 ++  do-delete-rule
-  |=  [root=path i=@uv]
+  |=  [root=@ud i=@uv]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (rule-rail root i))
@@ -1792,7 +1836,7 @@
 ::    every place that expands a list.
 ::
 ++  do-save-list
-  |=  [root=path name=@t members=(set @p)]
+  |=  [root=@ud name=@t members=(set @p)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?.  (list-name-ok:uw name)  (reject root 'bad list name')
@@ -1815,7 +1859,7 @@
   (pure:m |)
 ::
 ++  do-delete-list
-  |=  [root=path name=@t]
+  |=  [root=@ud name=@t]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?.  (list-name-ok:uw name)  (reject root 'bad list name')
@@ -1847,7 +1891,7 @@
 ::    rules are then applied over, not something applied after them.
 ::
 ++  file-arrival
-  |=  [root=path t=thread-id:uc c=chain:uc wrote=?]
+  |=  [root=@ud t=thread-id:uc c=chain:uc wrote=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
@@ -1871,14 +1915,14 @@
 ::  marks with it, so deleting actually reclaims capacity.
 ::
 ++  do-delete
-  |=  [root=path t=thread-id:uc]
+  |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  =/  road=road:tarball  [%& %| (tdir root t)]
+  =/  road=road:tarball  (rv root (tdir root t))
   ;<  ~  bind:m  (cull-if-there road)
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
   ;<  ~  bind:m
-    %^  put-file  [%& %& (mail-dir root) %idx]  [/auspex %idx]
+    %^  put-file  (rf root (mail-dir root) %idx)  [/auspex %idx]
     ix(inbox (skip inbox.ix |=(o=thread-id:uc =(o t))))
   ;<  ~  bind:m  (note root 'delete-thread' & (scot %uv t))
   (pure:m &)
@@ -1907,7 +1951,7 @@
 ::    incoming chain has a verdict.
 ::
 ++  deliver
-  |=  [root=path c=chain:uc]
+  |=  [root=@ud c=chain:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?:  =(~ c)  (pure:m |)
@@ -2007,7 +2051,7 @@
 ::  +store-files: put each attached file in the store and publish it.
 ::
 ++  store-files
-  |=  [root=path fs=(list file:uc)]
+  |=  [root=@ud fs=(list file:uc)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  fs  (pure:m ~)
@@ -2030,7 +2074,7 @@
 ::    bump the case. See +keen-blob for the one thing that does.
 ::
 ++  store-blob
-  |=  [root=path =octs]
+  |=  [root=@ud =octs]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  h=@uv  (blob-hash:uc octs)
@@ -2043,7 +2087,7 @@
 ::  +unheld-files: the files in a send we do not already hold.
 ::
 ++  unheld-files
-  |=  [root=path fs=(list file:uc)]
+  |=  [root=@ud fs=(list file:uc)]
   =/  m  (fiber:fiber:nexus ,(list file:uc))
   ^-  form:m
   ?~  fs  (pure:m ~)
@@ -2054,7 +2098,7 @@
 ::  +room-for: can the store take all of these? Sheds if it has to.
 ::
 ++  room-for
-  |=  [root=path fs=(list file:uc)]
+  |=  [root=@ud fs=(list file:uc)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?~  fs  (pure:m &)
@@ -2077,7 +2121,7 @@
 ::    (lattice grows at /pub/page/...), hence the /auspex prefix.
 ::
 ++  publish-blob
-  |=  [root=path h=@uv =octs force=?]
+  |=  [root=@ud h=@uv =octs force=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ::  THE FARM IS DOWN /sys/scry, so this whole arm is behind the key
@@ -2143,7 +2187,7 @@
 ::    skipped: it is withdrawn on purpose.
 ::
 ++  republish-all
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ::  the farm listing and every regrow are /sys/scry. Denied, there is
@@ -2173,7 +2217,7 @@
   ?=(%restricted -.v)
 ::
 ++  republish-loop
-  |=  [root=path rs=(list blob-row:uc)]
+  |=  [root=@ud rs=(list blob-row:uc)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  rs  (pure:m ~)
@@ -2219,7 +2263,7 @@
 ::    it.
 ::
 ++  publish-proto
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ::  the farm is /sys/scry, so discovery is behind the key road too.
@@ -2256,7 +2300,7 @@
     (cull-farm:io proto-spur:uc)
   ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
   ;<  ~  bind:m
-    (put-file [%& %& root %'proto-pub'] [/auspex %proto] our-proto:uc)
+    (put-file (rf root / %'proto-pub') [/auspex %proto] our-proto:uc)
   %-  trace:io
   :~  leaf+"auspex: /proto {?:(bound "changed" "published")}; grown into the farm"
   ==
@@ -2268,10 +2312,10 @@
 ::  answer until the next protocol change.
 ::
 ++  read-proto-pub
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,proto:uc)
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %& root %'proto-pub'] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rf root / %'proto-pub') ~)
   ?.  ?=([%file *] vw)  (pure:m *proto:uc)
   ?:  (is-boom:tarball sang.vw)  (pure:m *proto:uc)
   =/  res  (mule |.(;;(proto:uc (sang-noun:tarball sang.vw))))
@@ -2390,7 +2434,7 @@
 ::    Auspex before discovery speaks. Nothing new has to be handled.
 ::
 ++  fetch-keen
-  |=  [root=path who=ship h=@uv]
+  |=  [root=@ud who=ship h=@uv]
   =/  m  (fiber:fiber:nexus ,(unit octs))
   ^-  form:m
   ;<  may=?  bind:m  (may-scry root)
@@ -2398,7 +2442,7 @@
   (keen-blob who h 1)
 ::
 ++  probe-keen
-  |=  [root=path who=ship]
+  |=  [root=@ud who=ship]
   =/  m  (fiber:fiber:nexus ,(unit proto:uc))
   ^-  form:m
   ;<  may=?  bind:m  (may-scry root)
@@ -2457,7 +2501,7 @@
 ::    unknown ship both arrive.
 ::
 ++  enqueue-chain
-  |=  [root=path c=chain:uc who=ship now=@da]
+  |=  [root=@ud c=chain:uc who=ship now=@da]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  ~  bind:m  (ensure-dir (probe-dir root))
@@ -2495,7 +2539,7 @@
 ::    the summary when the fiber reports back.
 ::
 ++  deliver-chain
-  |=  [root=path c=chain:uc who=ship known=(unit proto:uc) notes=?]
+  |=  [root=@ud c=chain:uc who=ship known=(unit proto:uc) notes=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  mk=(unit @tas)  (peer-mark:uc known)
@@ -2513,7 +2557,7 @@
   ;<  ~  bind:m
     ?^  known  (pure:m ~)
     (say-send root who (unanswered-note:uc who) notes)
-  =/  rd=road:tarball  (remote-road [%& %& root %'main.sig'] who)
+  =/  rd=road:tarball  (remote-road [%& %& remote-install %'main.sig'] who)
   ;<  res=(unit (unit tang))  bind:m
     ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ u.mk] c]))
   ?~  res
@@ -2562,7 +2606,7 @@
 ::  the summary when the fiber reports back.
 ::
 ++  say-send
-  |=  [root=path who=ship why=@t notes=?]
+  |=  [root=@ud who=ship why=@t notes=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  ~  bind:m  (trace:io ~[leaf+"auspex: {(trip why)}"])
@@ -2594,11 +2638,9 @@
 ::    for the reason +run-fetch's is.
 ::
 ++  run-probe
-  |=  id=@ta
+  |=  [root=@ud id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  here=rail:tarball  bind:m  get-here-abs:io
-  =/  root=path  (snip path.here)
   =/  wu=(unit @p)  (slaw %p id)
   ?~  wu
     (trace:io ~[leaf+"auspex: probe at {<id>} is not a ship name"])
@@ -2608,7 +2650,7 @@
   =/  q=(list chain:uc)  ?~(rq ~ pending.u.rq)
   ;<  now=@da  bind:m  get-time:io
   ;<  ~  bind:m  (drain-probe root who got q |)
-  %+  poke:io  [%& %& root %'main.sig']
+  %+  poke:io  (rf root / %'main.sig')
   [[/auspex %probereq] `probe-req:uc`[%0 who now ~ got (lent q)]]
 ::
 ::  +drain-probe: send the held chains, oldest first.
@@ -2617,7 +2659,7 @@
 ::    cannot find the trap.
 ::
 ++  drain-probe
-  |=  [root=path who=ship known=(unit proto:uc) q=(list chain:uc) notes=?]
+  |=  [root=@ud who=ship known=(unit proto:uc) q=(list chain:uc) notes=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  q  (pure:m ~)
@@ -2643,7 +2685,7 @@
 ::    refetches its whole mailbox. Same argument as +take-blob's.
 ::
 ++  take-probe-done
-  |=  [root=path r=probe-req:uc]
+  |=  [root=@ud r=probe-req:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (ensure-dir (peer-dir root))
@@ -2678,7 +2720,7 @@
 ::    peer said must not throw away what a person wrote.
 ::
 ++  do-forget-peer
-  |=  [root=path who=ship]
+  |=  [root=@ud who=ship]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (peer-rail root who))
@@ -2700,20 +2742,20 @@
 ::    holding the bytes may serve them, and the hash proves them.
 ::
 ++  do-fetch-blob
-  |=  [root=path h=@uv who=ship]
+  |=  [root=@ud h=@uv who=ship]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
   ?^  have
     ;<  ~  bind:m  (note root 'fetch-blob' & 'already held')
     (pure:m |)
-  ;<  ~  bind:m  (ensure-dir (weld root /fetch))
+  ;<  ~  bind:m  (ensure-dir root /fetch)
   ::  the id is derived from [hash ship], so asking twice for the same
   ::  blob from the same peer overwrites one request rather than
   ::  spawning a second fiber to race the first.
   =/  id=@ta  (scot %uv (sham [h who]))
   ;<  ~  bind:m
-    (put-file [%& %& (weld root /fetch) id] [/auspex %fetchreq] [%0 h who])
+    (put-file (rf root /fetch id) [/auspex %fetchreq] [%0 h who])
   ::  %.n, AND +take-blob ANSWERS %.n TOO: neither queueing the fetch
   ::  nor the bytes arriving moves /beacon/rev, so nothing on this path
   ::  ever bumps it. A queued request is not something any reader
@@ -2742,14 +2784,12 @@
 ::    move of the path.
 ::
 ++  run-fetch
-  |=  id=@ta
+  |=  [root=@ud id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  here=rail:tarball  bind:m  get-here-abs:io
-  =/  root=path  (snip path.here)
   ;<  rq=fetch-req:uc  bind:m  (get-state-as:io ,fetch-req:uc)
   ;<  got=(unit octs)  bind:m  (fetch-keen root from.rq hash.rq)
-  %+  poke:io  [%& %& root %'main.sig']
+  %+  poke:io  (rf root / %'main.sig')
   [[/auspex %blob-in] [%0 id hash.rq got]]
 ::
 ::  +take-blob: the writer's half of a fetch. Local only.
@@ -2765,10 +2805,10 @@
 ::    leaves nothing behind to respawn on the next reload.
 ::
 ++  take-blob
-  |=  [root=path b=blob-in:uc]
+  |=  [root=@ud b=blob-in:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (cull-if-there [%& %& (weld root /fetch) id.b])
+  ;<  ~  bind:m  (cull-if-there (rf root /fetch id.b))
   ?~  res.b  (reject root 'blob fetch missed')
   ::  bound what a hostile publisher can hand back before we measure it
   ?.  (lte p.u.res.b max-blob:uc)
@@ -2827,7 +2867,7 @@
 ::    attempted and skipped quietly when the group is absent.
 ::
 ++  do-restrict
-  |=  [root=path h=@uv ships=(set ship)]
+  |=  [root=@ud h=@uv ships=(set ship)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
@@ -2845,7 +2885,7 @@
   (pure:m &)
 ::
 ++  unpublish-if-public
-  |=  [root=path cur=blob-vis:uc h=@uv]
+  |=  [root=@ud cur=blob-vis:uc h=@uv]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?.  ?=(%public -.cur)  (pure:m ~)
@@ -2862,7 +2902,7 @@
 ::  parked a high-water mark; +max-case-probe is what covers that.
 ::
 ++  do-publish
-  |=  [root=path h=@uv]
+  |=  [root=@ud h=@uv]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
@@ -2896,7 +2936,7 @@
 ::    from overwriting each other's grant.
 ::
 ++  grant-blob
-  |=  [root=path h=@uv]
+  |=  [root=@ud h=@uv]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  grp=path  /auspex/[(scot %uv h)]
@@ -2922,13 +2962,13 @@
 ::    actually new.
 ::
 ++  write-msg
-  |=  [root=path t=thread-id:uc place=(list msg-id:uc) mg=msg:uc v=verdict:uc]
+  |=  [root=@ud t=thread-id:uc place=(list msg-id:uc) mg=msg:uc v=verdict:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  dir=path  (mdir root t)
   =/  pax=path  (node-dir place)
-  ;<  ~  bind:m  (ensure-nodes dir (prefixes:uc pax))
-  %^  put-file  [%& %& (weld dir pax) (slot (id:uc unsigned.mg) sig.mg)]
+  ;<  ~  bind:m  (ensure-nodes root dir (prefixes:uc pax))
+  %^  put-file  (rf root (weld dir pax) (slot (id:uc unsigned.mg) sig.mg))
     [/auspex %msg]
   [%2 mg v]
 ::
@@ -2993,7 +3033,7 @@
 ::    overlap.
 ::
 ++  sync-slots
-  |=  $:  root=path
+  |=  $:  root=@ud
           t=thread-id:uc
           have=(map path stored-msg:uc)
           want=(map path stored-msg:uc)
@@ -3013,9 +3053,9 @@
     %+  skip  ~(tap in ~(key by have))
     |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
   =/  dead=(list path)  (minimal-dirs:uc stale)
-  ;<  ~  bind:m  (ensure-nodes dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
+  ;<  ~  bind:m  (ensure-nodes root dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
   ;<  ~  bind:m  (put-slots dir puts)
-  ;<  ~  bind:m  (cull-dirs dir dead)
+  ;<  ~  bind:m  (cull-dirs root dir dead)
   ;<  ~  bind:m  (cull-slots dir gone)
   ::  the answer +deliver needs: did this emit a single dart? A
   ::  redelivery of a chain we already hold emits none, and must not be
@@ -3026,19 +3066,19 @@
 ::  continuation cannot find the trap (-find.$.+2).
 ::
 ++  cull-dirs
-  |=  [dir=path ps=(list path)]
+  |=  [up=@ud dir=path ps=(list path)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ps  (pure:m ~)
-  ;<  ~  bind:m  (cull-if-there [%& %| (weld dir i.ps)])
-  (cull-dirs dir t.ps)
+  ;<  ~  bind:m  (cull-if-there (rv up (weld dir i.ps)))
+  (cull-dirs up dir t.ps)
 ::
 ++  cull-slots
   |=  [dir=path ps=(list path)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ps  (pure:m ~)
-  ;<  *  bind:m  (cull-soft:io [%& %& (weld dir (snip i.ps)) (rear i.ps)])
+  ;<  *  bind:m  (cull-soft:io (rf root (weld dir (snip i.ps)) (rear i.ps)))
   (cull-slots dir t.ps)
 ::
 ++  put-slots
@@ -3047,7 +3087,7 @@
   ^-  form:m
   ?~  xs  (pure:m ~)
   ;<  ~  bind:m
-    %^  put-file  [%& %& (weld dir (snip pk.i.xs)) (rear pk.i.xs)]
+    %^  put-file  (rf root (weld dir (snip pk.i.xs)) (rear pk.i.xs))
       [/auspex %msg]
     st.i.xs
   (put-slots dir t.xs)
@@ -3089,14 +3129,14 @@
 ::    only from +serve-thread.
 ::
 ++  migrate-flat
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   (migrate-loop root ~(tap by loaded))
 ::
 ++  migrate-loop
-  |=  [root=path ts=(list [t=thread-id:uc ss=(map path stored-msg:uc)])]
+  |=  [root=@ud ts=(list [t=thread-id:uc ss=(map path stored-msg:uc)])]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ts  (pure:m ~)
@@ -3104,7 +3144,7 @@
   (migrate-loop root t.ts)
 ::
 ++  migrate-one
-  |=  [root=path t=thread-id:uc ss=(map path stored-msg:uc)]
+  |=  [root=@ud t=thread-id:uc ss=(map path stored-msg:uc)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ::  a one-segment path is a copy directly under msg/, which is what a
@@ -3122,12 +3162,12 @@
 ::    grow the grub.
 ::
 ++  record-bcc
-  |=  [root=path t=thread-id:uc i=msg-id:uc bcc=(set ship)]
+  |=  [root=@ud t=thread-id:uc i=msg-id:uc bcc=(set ship)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?:  =(~ bcc)  (pure:m ~)
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  %^  put-file  [%& %& (tdir root t) %meta]  [/auspex %meta]
+  %^  put-file  (meta-rail root t)  [/auspex %meta]
   mt(bcc (~(put by bcc.mt) i bcc))
 ::
 ::  +mark-direct: this thread reached us through a DELIVERY POKE.
@@ -3139,13 +3179,13 @@
 ::    rewrite meta.
 ::
 ++  mark-direct
-  |=  [root=path t=thread-id:uc]
+  |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ?:  direct.mt  (pure:m |)
   ;<  ~  bind:m
-    %^  put-file  [%& %& (tdir root t) %meta]  [/auspex %meta]
+    %^  put-file  (meta-rail root t)  [/auspex %meta]
     mt(direct &)
   (pure:m &)
 ::
@@ -3153,7 +3193,7 @@
 ::  cannot find the trap.
 ::
 ++  mark-read-loop
-  |=  [root=path xs=(list [t=thread-id:uc is=(set msg-id:uc)]) rd=?]
+  |=  [root=@ud xs=(list [t=thread-id:uc is=(set msg-id:uc)]) rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
@@ -3168,7 +3208,7 @@
 ::    what keeps them from disagreeing about what a set of ids names.
 ::
 ++  mark-read
-  |=  [root=path t=thread-id:uc is=(set msg-id:uc) rd=?]
+  |=  [root=@ud t=thread-id:uc is=(set msg-id:uc) rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
@@ -3176,17 +3216,17 @@
   mt(read ?:(rd (~(uni in read.mt) is) (~(dif in read.mt) is)))
 ::
 ++  touch-idx
-  |=  [root=path t=thread-id:uc]
+  |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
-  %^  put-file  [%& %& (mail-dir root) %idx]  [/auspex %idx]
+  %^  put-file  (rf root (mail-dir root) %idx)  [/auspex %idx]
   ix(inbox [t (skip inbox.ix |=(o=thread-id:uc =(o t)))])
 ::
 ::  ── delivery out ────────────────────────────────────────────────────
 ::
 ++  fan-out
-  |=  [root=path c=chain:uc ws=(list ship)]
+  |=  [root=@ud c=chain:uc ws=(list ship)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ws  (pure:m ~)
@@ -3214,7 +3254,7 @@
 ::    decision is written down.
 ::
 ++  send-one
-  |=  [root=path c=chain:uc who=ship]
+  |=  [root=@ud c=chain:uc who=ship]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  now=@da  bind:m  bowl-now
@@ -3264,11 +3304,35 @@
 ::  `shp`, so a dart routes to that ship. The peer's auspex sits at the
 ::  same absolute path its own root nexus gave it.
 ::
+::  +remote-install: WHERE AUSPEX LIVES ON SOMEBODY ELSE'S SHIP.
+::
+::    A stopgap, and the last absolute path in this file. Delivery pokes
+::    the recipient's writer, which means naming a path in THEIR tree -
+::    and this used to be our own absolute path, on the assumption that
+::    two ships install auspex in the same place. The desk model retires
+::    that assumption twice: a sandboxed app cannot read its own absolute
+::    path, and the desk NAME is chosen by whoever installs it.
+::
+::    The real answer is the alias book. An app publishes link.json to
+::    claim @auspex, the shell folds it into /sys/link, and a sender
+::    resolves the recipient's @auspex against THEIR registry - the same
+::    move wallet makes for @contacts, which the shell resolves into
+::    grant.json's aliases map so that "we never hardcode where contacts
+::    lives - it follows renames".
+::
+::    Until that lands, this constant is the conventional install path
+::    and it is WRONG for any ship that named its desk something else or
+::    still runs auspex in /apps. Delivery to such a ship fails; nothing
+::    is mis-sent, because a bad road is refused rather than rerouted.
+::
+++  remote-install  ^-(path /apps/'shell.shell'/desks/'auspex.desk'/desk/data/'auspex.auspex_app')
 ++  remote-road
   |=  [=road:tarball shp=@p]
   ^-  road:tarball
   ?-  -.road
-    %|  road
+    ::  a RELATIVE road names a place in OUR tree, so mirroring it onto
+    ::  another ship would poke ourselves and call it delivery. Refuse.
+    %|  ~|(%auspex-remote-road-relative !!)
     %&
       =/  prefix=path  /sys/ames/ships/[(scot %p shp)]/root
       ?-  -.p.road
@@ -3290,7 +3354,7 @@
 ::    whole application.
 ::
 ++  read-caps
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,caps:uc)
   ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (caps-rail root) ~)
@@ -3308,7 +3372,7 @@
 ::    The probe did that once, off the writer, so nothing else has to.
 ::
 ++  may-scry
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  c=caps:uc  bind:m  (read-caps root)
@@ -3333,16 +3397,15 @@
 ::    from the wrong depth climbs past the nexus root and crashes.
 ::
 ++  run-key-probe
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  here=rail:tarball  bind:m  get-here-abs:io
-  =/  root=path  (snip path.here)
   ;<  our=@p  bind:m  bowl-our
   ::  the reach. If we were not granted the road, execution stops on
   ::  this line and the two below never run.
   ;<  *  bind:m  (our-life our)
   ;<  ~  bind:m  (trace:io ~[leaf+"auspex: key road reachable"])
-  %+  poke:io  [%& %& root %'main.sig']
+  %+  poke:io  (rf root / %'main.sig')
   [[/ %auspex-action] `action:uc`[%set-caps &]]
 ::
 ::  +do-set-caps: raise or lower /caps, on the writer.
@@ -3369,7 +3432,7 @@
 ::    it would not observe.
 ::
 ++  do-set-caps
-  |=  [root=path keys=?]
+  |=  [root=@ud keys=?]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  was=caps:uc  bind:m  (read-caps root)
@@ -3450,7 +3513,7 @@
 ::    no fourth for this.
 ::
 ++  delivery-keys
-  |=  [root=path c=chain:uc]
+  |=  [root=@ud c=chain:uc]
   =/  m  (fiber:fiber:nexus ,(map [ship @ud] (unit pass)))
   ^-  form:m
   ;<  may=?  bind:m  (may-scry root)
@@ -3571,11 +3634,11 @@
 ::    reader only ever compares it against the last one it saw.
 ::
 ++  bump-beacon
-  |=  root=path
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  now=@da  bind:m  bowl-now
-  (put-file [%& %& (weld root /beacon) %rev] [/ %json] (numb:enjs:format `@ud`now))
+  (put-file (rf root /beacon %rev) [/ %json] (numb:enjs:format `@ud`now))
 ::
 ::  +nexus-root: this nexus's absolute tree path, from a REQUEST fiber.
 ::
@@ -3588,12 +3651,9 @@
 ::    serve an empty inbox rather than fail.
 ::
 ++  nexus-root
-  =/  m  (fiber:fiber:nexus ,path)
-  ^-  form:m
-  ;<  here=rail:tarball  bind:m  get-here-abs:io
-  =/  p=path  path.here
-  =/  n=@ud  (lent p)
-  (pure:m ?:((lth n 2) p (scag (sub n 2) p)))
+  |=  =rail:tarball
+  ^-  @ud
+  (lent path.rail)
 ::
 ::  +is-owner: is this request really from the ship that owns us?
 ::
@@ -3631,7 +3691,7 @@
 ::  +handle-request: one HTTP request, on its own ephemeral fiber.
 ::
 ++  handle-request
-  |=  eyre-id=@ta
+  |=  [=rail:tarball eyre-id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  [src=@p req=inbound-request:eyre]  bind:m
@@ -3761,13 +3821,13 @@
       %'manifest.json'  'application/manifest+json'
       %'icon.svg'       'image/svg+xml'
     ==
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ::  the client's four files are grubs under /app; the icon is a grub
   ::  at the nexus ROOT, because that is where the tiles nexus reads it
   ::  from. One arm, two directories, rather than a second copy of the
   ::  peek-and-unwrap for one file.
-  =/  dir=path  ?:(=(%'icon.svg' nam) root (weld root /app))
-  ;<  pv=view:nexus  bind:m  (peek:io [%& %& dir nam] ~)
+  =/  dir=path  ?:(=(%'icon.svg' nam) / /app)
+  ;<  pv=view:nexus  bind:m  (peek:io (rf root dir nam) ~)
   ?.  ?=([%file *] pv)  (send-err eyre-id 404 'not found')
   =/  res=(each mime tang)  (mule |.(!<(mime (need-vase:tarball sang.pv))))
   ?:  ?=(%| -.res)  (send-err eyre-id 500 'bad asset')
@@ -3798,7 +3858,7 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  our=@p  bind:m  bowl-our
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ;<  c=caps:uc  bind:m  (read-caps root)
   %+  send-json  eyre-id
   %-  pairs:enjs:format
@@ -3848,9 +3908,9 @@
   =/  off=@ud   (fall (arg-ud args 'offset') 0)
   ::  an ABSENT limit defaults; a limit of 0 is an empty page, literally.
   =/  lim=@ud   (min max-page:uc (fall (arg-ud args 'limit') 50))
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (thread-dir root)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (thread-dir root)) ~)
   =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
   =/  loaded  (collect-threads b)
   =/  metas   (collect-metas b)
@@ -3961,7 +4021,7 @@
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
   ::  newest first, matching the listing's order.
   =/  sorted=(list draft:uc)
@@ -3986,7 +4046,7 @@
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
   %+  send-json  eyre-id
   :-  %a
@@ -4017,7 +4077,7 @@
   ^-  form:m
   ;<  mine=?  bind:m  (is-owner src)
   ?.  mine  (send-err eyre-id 403 'forbidden')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
   =/  sorted=(list [name=@t members=(set @p)])
     %+  sort  ls
@@ -4043,12 +4103,12 @@
   ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  (send-err eyre-id 400 'bad thread id')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ::  one peek, walked twice: once for the copies a reader can produce
   ::  and once for the ones it cannot. The second number is what stops
   ::  a thread holding only pre-break grubs from rendering as an empty
   ::  thread with no explanation - see +unreadable-in.
-  ;<  vw=view:nexus  bind:m  (peek:io [%& %| (tdir root u.t)] ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (tdir root u.t)) ~)
   =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
   =/  ss=(map path stored-msg:uc)  (collect-slots b)
   =/  lost=@ud  (unreadable-in b)
@@ -4108,7 +4168,7 @@
   ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  h=(unit @uv)  (slaw %uv seg)
   ?~  h  (send-err eyre-id 400 'bad hash')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ;<  got=(unit octs)  bind:m  (read-blob root u.h)
   ?~  got  (send-err eyre-id 409 'not fetched')
   ?.  (blob-ok:uc u.got u.h)
@@ -4427,7 +4487,7 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  req=(unit send-req:uw)  (de-send:uw u.jon)
   ?~  req  (send-err eyre-id 400 'bad send')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ::  THE KEY ROAD, CHECKED HERE, WHERE THE COMPOSER IS STILL OPEN.
   ::
   ::    +do-send-core refuses this send on the writer too, with the same
@@ -4599,7 +4659,7 @@
 ::    writer checks both on the real chain.
 ::
 ++  peer-refusals
-  |=  $:  root=path
+  |=  $:  root=@ud
           now=@da
           c=chain:uc
           ws=(list ship)
@@ -4631,7 +4691,7 @@
 ::    all again a moment later.
 ::
 ++  first-unheld
-  |=  [root=path rs=(list attach-ref:uc)]
+  |=  [root=@ud rs=(list attach-ref:uc)]
   =/  m  (fiber:fiber:nexus ,(unit @uv))
   ^-  form:m
   ?~  rs  (pure:m ~)
@@ -4709,7 +4769,7 @@
   ::  to its braces and costs one +met.
   ?.  (gte p.bts (met 3 q.bts))  (send-err eyre-id 400 'malformed body')
   =/  h=@uv  (blob-hash:uc bts)
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ::  IDEMPOTENT, AND THAT IS THE ADDRESSING WORKING. The same bytes
   ::  are the same blob; re-uploading them rewrites nothing, bumps no
   ::  case in the scry farm (see +store-blob on why that matters) and
@@ -4990,7 +5050,7 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  i=(unit @uv)  (de-id:uw u.jon)
   ?~  i  (send-err eyre-id 400 'bad id')
-  ;<  root=path  bind:m  nexus-root
+  =/  root=@ud  (nexus-root rail)
   ::  the key road, before the draft is even read: a send this ship
   ::  cannot sign is refused with the words the composer shows, and the
   ::  DRAFT IS NOT TOUCHED. +do-send-draft on the writer keeps it too -
