@@ -15,7 +15,7 @@
 //  Thunderbird. The sink is a plain node http server on localhost; the
 //  selftest manifest grants that origin and the ship's, and nothing else.
 
-import { patternFor } from './lib/api.js'
+import { patternFor, setTap } from './lib/api.js'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export async function runSelftest(cfg, api) {
@@ -47,6 +47,13 @@ export async function runSelftest(cfg, api) {
       return null
     }
   }
+
+  //  THE BEACON RUN, a different question entirely and so a different
+  //  script. The run above asks whether the mirror is correct; this one
+  //  asks what it COSTS — how many requests an idle extension makes, that
+  //  a change still arrives, that a reconnect mirrors nothing, and that a
+  //  dead ship is backed off rather than drummed on.
+  if (cfg.mode === 'beacon') return runBeaconTest(cfg, api, log, step)
 
   //  A FETCH PROBE, first, because "NetworkError" from an extension is one
   //  word for a dozen causes and the only way to tell them apart is to vary
@@ -389,4 +396,160 @@ export async function runSelftest(cfg, api) {
   })
 
   await step('done', async () => JSON.stringify((await api.getState()).counts))
+}
+
+//  ── the beacon run ──────────────────────────────────────────────────
+//
+//  The claim under test is a COST, so everything here is a count. The
+//  request tap in lib/api.js is the instrument: it is the only way to
+//  count from inside an extension what that extension asked the ship for,
+//  because an add-on cannot see its own network log and a count taken
+//  from outside cannot tell this extension's traffic from the browser's.
+//
+//  The one step that needs a hand from outside is the change: something
+//  has to send mail. This logs a marker and then waits, so the harness can
+//  watch for the marker, send from the other ship, and watch for what
+//  follows.
+async function runBeaconTest(cfg, api, log, step) {
+  //  every request, from the moment the tap is set
+  const requests = []
+  setTap((path) => requests.push({ at: Date.now(), path }))
+  const since = (t) => requests.filter((r) => r.at >= t)
+
+  const listFolder = async (name) => {
+    const folders = (await api.getState()).folders
+    const page = await browser.messages.list(folders[name])
+    let msgs = page.messages.slice()
+    let id = page.id
+    while (id) {
+      const next = await browser.messages.continueList(id)
+      msgs = msgs.concat(next.messages)
+      id = next.id
+    }
+    return msgs
+  }
+
+  //  A sync that actually ran. `connect` starts one in the background, so
+  //  the first explicit syncNow answers `{skipped: true}` and anything
+  //  measured after it would be measuring the seed.
+  const settled = async () => {
+    let r = await api.syncNow()
+    for (let i = 0; i < 30 && r && r.skipped && !r.why; i += 1) {
+      await sleep(2000)
+      r = await api.syncNow()
+    }
+    return r
+  }
+
+  await step('connect', async () => {
+    const res = await api.connect(cfg.origin, cfg.code)
+    if (!res.ok) throw new Error(res.error)
+    await settled()
+    return JSON.stringify({ ship: res.ship, counts: (await api.getState()).counts })
+  })
+
+  //  ── 1. what an idle extension costs ───────────────────────────────
+  //
+  //  The whole reason for the change. The old build synced every sixty
+  //  seconds: three syncs in this window, each a whoami plus at least one
+  //  inbox page plus a thread fetch per changed thread. The new one
+  //  should make NOTHING — one connection, already open, held.
+  await step('idle', async () => {
+    //  let the seed's own traffic finish before the window opens
+    await sleep(5000)
+    const from = Date.now()
+    const streamAt = requests.length
+    for (let i = 0; i < 18; i += 1) await sleep(10000)   // 180s, in slices
+    const made = since(from)
+    return JSON.stringify({
+      windowSeconds: Math.round((Date.now() - from) / 1000),
+      requests: made.length,
+      paths: made.map((r) => r.path),
+      streamOpens: requests.slice(streamAt).filter((r) => r.path.includes('/beacon/')).length,
+      streaming: api.beacon.running(),
+      log: api.beacon.log.slice(-5),
+    })
+  })
+
+  //  ── 2. a change still arrives ─────────────────────────────────────
+  //
+  //  The marker is the handshake: the harness sends from the other ship
+  //  when it sees this line, and what follows is the beacon's own doing.
+  await step('await-send', async () => 'SEND NOW')
+
+  await step('change', async () => {
+    const from = Date.now()
+    const before = api.beacon.log.filter((e) => e.change).length
+    let seen = null
+    for (let i = 0; i < 60; i += 1) {
+      const changes = api.beacon.log.filter((e) => e.change)
+      if (changes.length > before) { seen = changes[changes.length - 1]; break }
+      await sleep(1000)
+    }
+    if (!seen) throw new Error(`no beacon change in 60s; requests: ${since(from).length}`)
+    //  the sync the change fired has to finish before the folder is read
+    await sleep(1000)
+    await settled()
+    const inbox = await listFolder('Inbox')
+    const hit = inbox.filter((m) => (m.subject || '').includes(cfg.expectSubject))
+    return JSON.stringify({
+      secondsToChange: (seen.at - from) / 1000,
+      requestsAfterChange: since(seen.at).map((r) => r.path),
+      inbox: inbox.length,
+      matched: hit.length,
+      subject: hit.length ? hit[0].subject : null,
+    })
+  })
+
+  //  ── 3. a reconnect mirrors nothing ────────────────────────────────
+  //
+  //  Abort the stream under the reader. It reconnects, registration
+  //  replays the current revision as `old /rev`, and that must cost
+  //  exactly one request and produce no sync at all.
+  await step('reconnect', async () => {
+    const from = Date.now()
+    api.beacon.abort()
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(1000)
+      if (since(from).some((r) => r.path.includes('/beacon/'))) break
+    }
+    await sleep(15000)
+    const made = since(from)
+    const beacons = made.filter((r) => r.path.includes('/beacon/'))
+    return JSON.stringify({
+      total: made.length,
+      beaconOpens: beacons.length,
+      apiRequests: made.filter((r) => !r.path.includes('/beacon/')).map((r) => r.path),
+      streaming: api.beacon.running(),
+    })
+  })
+
+  //  ── 4. a dead ship is backed off, not drummed on ──────────────────
+  //
+  //  Pointed at a port nothing listens on, so every attempt fails at once
+  //  — which is the shape that makes a bare retry loop a hot loop. The
+  //  gaps are what is under test: 3, 6, 12, 24, 30, 30, each spread over
+  //  0.5–1.5×, and not six evenly spaced threes.
+  //
+  //  LAST, because it leaves the extension pointed at nothing.
+  await step('backoff', async () => {
+    api.beacon.stop()
+    await sleep(2000)
+    await api.setState({ origin: cfg.deadOrigin })
+    api.beacon.log.length = 0
+    const from = Date.now()
+    api.beacon.start()
+    for (let i = 0; i < 13; i += 1) await sleep(10000)   // 130s
+    const attempts = api.beacon.log.filter((e) => e.delay !== undefined)
+    const gaps = attempts.map((e, i) => (i ? (e.at - attempts[i - 1].at) / 1000 : (e.at - from) / 1000))
+    return JSON.stringify({
+      windowSeconds: Math.round((Date.now() - from) / 1000),
+      attempts: attempts.length,
+      gapsSeconds: gaps,
+      plannedDelays: attempts.map((e) => e.delay / 1000),
+      counts: attempts.map((e) => e.attempt),
+    })
+  })
+
+  await step('done', async () => JSON.stringify({ requests: requests.length }))
 }

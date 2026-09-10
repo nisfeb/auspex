@@ -28,7 +28,7 @@ const FILES = [
   'background.js',
   'options.html', 'options.js',
   'popup.html', 'popup.js',
-  'lib/api.js', 'lib/address.js', 'lib/rfc822.js', 'lib/sync.js',
+  'lib/api.js', 'lib/address.js', 'lib/beacon.js', 'lib/rfc822.js', 'lib/sync.js',
   'icons/auspex-16.png', 'icons/auspex-32.png', 'icons/auspex-48.png',
   'icons/auspex-64.png', 'icons/auspex-128.png',
 ]
