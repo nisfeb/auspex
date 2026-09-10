@@ -364,7 +364,7 @@
           [~ %'main.sig']
         ;<  ~  bind:m  (rise-wait:io prod "%auspex writer failed")
         =/  root=@ud  (lent path.rail)
-        ;<  ~  bind:m  (grant-public root)
+        ;<  ~  bind:m  (grant-public rail root)
         ::  BOTH OF THESE REACH /sys/scry, and +on-load has just laid
         ::  /caps denied, so on this line the answer is always "not
         ::  yet". They are no-ops here and run from +do-set-caps the
@@ -1145,15 +1145,21 @@
 ::    check is what makes that harmless, and it is the same check the
 ::    agent's `?>  =(our.bowl src.bowl)` was.
 ::
+::  +grant-public: put our writer in the public usergroup so another ship
+::  may poke it. Takes the writer's own RAIL, because the registry wants
+::  a rail and a sandboxed app has no absolute one to offer - desk.hoon
+::  reaches for +get-here-abs here and can, being a host-layer nexus.
+::  If this cannot be done the arm already says so and delivery stays
+::  local, which is the honest degradation rather than a crash.
 ++  grant-public
-  |=  root=@ud
+  |=  [=rail:tarball root=@ud]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
   ;<  ok=?  bind:m  (peek-exists:io gdir)
   ?.  ok
     (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
-  ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
+  ;<  ~  bind:m  (reg-register-at:io rail)
   %+  reg-how:io  /public
   [make=~ poke=(sy ~[`road:tarball`(rf root / %'main.sig')]) peek=~]
 ::
@@ -2947,7 +2953,7 @@
     :_  ~
     :-  %leaf
     "auspex: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
-  ;<  ~  bind:m  (reg-register-at:io [root %'main.sig'])
+  ;<  ~  bind:m  (reg-register-at:io rail)
   %+  reg-how:io  grp
   [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
 ::
