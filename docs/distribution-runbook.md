@@ -35,9 +35,9 @@ Two consequences for what follows:
    everyone.** Guest isolation removes the reason for it.
 
 The proposal taken to the grubbery meeting on 2026-09-10 is
-`docs/distribution-proposal.md`. Use this runbook only if that path is
-more than about a week out — and then use the **minimum-surface variant**
-in §5.0.
+`docs/distribution-proposal.md`; **the plan that supersedes this runbook
+is §9 below**. Use §1–§8 only if the code-namespace path is more than
+about a week out — and then use the **minimum-surface variant** in §5.0.
 
 ## 1. How lattice reaches users today
 
@@ -409,3 +409,104 @@ code directory and the shell that manages the permissions around it. See
 §0 and `docs/distribution-proposal.md`. The desk route below is the route
 that exists on the revision `~ricsul-bilwyt` runs *today*, and nothing
 more than that.
+
+
+---
+
+## 9. The next release, as planned — 2026-09-10
+
+The shape agreed after reading `develop`. Each step is invisible to a
+user and shippable alone; that is the requirement, not a nicety. An
+architecture migration bundled with features is one you cannot roll back
+and cannot blame.
+
+### 9.1 The sequence, and what gates what
+
+1. **Grubbery catches up to `develop`.** Everything below needs a shell,
+   and the shell is `develop`-only — so this comes first, and *today it
+   comes from us*, because we are still the distributor. This is the
+   genuinely risky step in the whole plan: a kernel merge into a desk
+   that a real planet tracks unattended. It ships alone.
+2. **Restructure**: `alias.json`, `weir.json` (both written, inert), and
+   the code namespace.
+3. **Peer**: `~ricsul-bilwyt` added as a software peer for everyone who
+   got grubbery from us.
+4. **Lattice migrates in place**, its code coming from the peer rather
+   than from our desk.
+5. **Auspex becomes discoverable** — one click in their storefront.
+
+### 9.2 Three decisions, with their reasons
+
+**Auto-peering is a one-time migration step, not app code.** If lattice
+pokes the shell's `peers.json` itself, lattice needs a standing road to
+`/apps/shell.shell` — a road that means *may rewrite your software
+sources*, held for ever, for something that happens once. That is exactly
+the coarse grant §4.5 of the proposal objects to, and we should not be
+the first to take it. The poke belongs in the upgrade we ship: runs once,
+auditable, no permanent capability. Better still is the upstream rule
+(proposal §4.6), which makes it nobody's code.
+
+The guard is **"they got grubbery from ricsul"**, not "this ship is not
+ricsul". Someone who took grubbery from the moon and lattice by another
+route should not have us inserted into their sources.
+
+**Lattice migrates in place; the guest world would strand its data.**
+`bill.json` creates instances at `/desk/data/<name>`. Point that at
+lattice and the user gets a second, empty lattice while every page they
+wrote stays in the old instance. The URL survives either way (both apps
+bind their route by name from `ui/main.sig`), so the data is the whole
+risk. In-place code-namespace governance keeps instance, data and URL
+exactly where they are — but has no update path today, which is the open
+question for the meeting.
+
+**Auspex is discoverable, not installed.** Installing it for everyone
+means a new tile, new state and a mail nexus compiling in the ball of
+people who asked for a notes app. That is a perceivable change, it is
+what the permission model exists to prevent, and it is the same objection
+that made us stop shipping auspex through the shared desk. Once ricsul is
+a peer it is one click away, and that is enough.
+
+### 9.3 The develop merge, measured
+
+Assessed 2026-09-10 in a worktree on branch `dist/develop-merge` (the
+trial merge was aborted; the branch is parked at `dist/lattice-only`).
+
+- Our stack is **26 commits** on `7117ae1`; upstream is **36 ahead**.
+- 49 files collide. **44 of them we deleted** (the app-tier strip and the
+  ball trim) and upstream merely changed — they resolve as "stay
+  deleted".
+- **The kernel merged clean.** `desk/app/grubbery.hoon` and
+  `desk/gub/mar/poke-ack.hoon` are not in the conflict list at all, so
+  the `%3 → %1` state downgrade and our poke-ack fix (filed as
+  gwbtc/grubbery#56) did not collide — most likely because the fix went
+  upstream.
+- Genuine conflicts: `desk/lib/root.hoon` (our stripped rows vs theirs)
+  and `desk/gub/mar/clay/base/kiln/install.hoon` (both added).
+
+**The trim deleted the two things we now want back.** `gub/nex/shell.hoon`
+and `gub/nex/desk.hoon` are in the deleted-by-us list, and they are the
+entire mechanism this migration runs on. So the resolution is not
+uniform:
+
+- `git rm` every deleted-by-us conflict **except** shell and desk;
+  restore those from `develop` with their assets.
+- Restore `gub/nex/tiles.hoon` explicitly — upstream did not touch it in
+  these 36 commits, so it never conflicts; it simply stays deleted unless
+  we ask for it.
+- Resolve `root.hoon` by hand: our stripped rows plus rows for shell,
+  desk and tiles.
+- Re-run `tools/desk-reach.py` with the new roots (add `gub/nex/shell*`,
+  `gub/nex/desk*`, `gub/nex/tiles.hoon`), then `tools/trim-lattice-only.sh`.
+- Re-vendor the lattice overlay, then build on `~wex` before anything
+  else.
+
+The shell imports only its own assets and `/lib/feather-icons.hoon` — it
+does **not** compile in other app-tier nexuses. It composes the tiles
+store and the notifications bell over the namespace at runtime, so an
+absent store means an empty grid, not a broken shell.
+
+**And `dist/launcher-restore` should be abandoned, not merged.** It
+restores pre-split `tiles.hoon` (upstream `d839ede`) as a self-contained
+launcher. Post-split, tiles is a pure data store and the shell is the
+view; taking `develop` gives us both, correctly. Merging the old fork
+would carry a launcher we would then have to un-carry.
