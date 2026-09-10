@@ -237,10 +237,44 @@ const post = async (path: string, body: unknown): Promise<unknown> => {
 // editing every component to carry a value that never changes.
 export let ourShip = ''
 
+// CAN THIS SHIP MAKE OR CHECK A SIGNATURE?
+//
+// Auspex reaches jael through one road, /sys/scry, and under grubbery's
+// distribution model an installed app is created permitted nothing and
+// earns each road from the user's consent. Refused it, the nexus can
+// neither sign an outgoing message nor look up a sender's key — so
+// sending is off and every message reads as unverified, which is the
+// correct verdict rather than a degraded one: a missing key is never a
+// forgery.
+//
+// A live binding beside `ourShip`, and set from the same one request,
+// because it is the same kind of fact: something about this ship that
+// every surface needs and none can derive. Read at render time, so a
+// component reads whatever the last whoami established.
+//
+// TRUE UNTIL THE SHIP SAYS OTHERWISE. A nexus older than /caps sends no
+// `caps` at all, and on that ship signing works — so absence means yes
+// and only an explicit `false` turns the warnings on. If whoami itself
+// fails the app still mounts (see main.tsx) and this stays true: the
+// inbox will report its own error, and claiming the ship cannot sign
+// because we could not ask it would be a second, invented failure.
+export let canSign = true
+
 export const whoami = async () => {
-  const { ship } = await get<{ ship: string }>('/api/whoami')
+  const { ship, caps } = await get<{
+    ship: string
+    caps?: { keys?: boolean }
+  }>('/api/whoami')
   ourShip = ship
+  canSign = caps?.keys !== false
 }
+
+// The one sentence the client says about a ship with no key road, in the
+// words the sidebar shows. Kept here so the sidebar, the composer and the
+// reply box cannot drift into three different explanations of one fact.
+export const NO_KEYS_LINE
+  = 'This ship cannot check or make signatures. Mail still arrives; every'
+  + ' message shows as unverified and sending is off.'
 
 // The listing is always a PAGE now: a page of rows plus the total of the
 // view they came from. See `pageOf` below, which every caller uses.

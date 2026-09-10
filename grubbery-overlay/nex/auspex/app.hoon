@@ -209,6 +209,31 @@
           [%fall %& [/ %'proto-pub'] [[/auspex %proto] *proto:uc]]
           ::  the writer. %fall, so an existing live process is kept.
           [%fall %& [/ %'main.sig'] [[/ %sig] ~]]
+          ::  /caps: WHAT THIS INSTANCE MAY REACH, and the one thing
+          ::  every jael reach below is gated on. %over and DENIED, on
+          ::  every load, because a veto cannot be caught: the road is
+          ::  granted by the shell at install time and nothing in this
+          ::  nexus can ask whether it was. So we assume not, and the
+          ::  key probe below raises the flag by proving the reach
+          ::  works. A load that came up granted spends one scry to
+          ::  say so again; a load that came up refused spends nothing
+          ::  and keeps its writer.
+          ::
+          ::  DENIED IS WRITTEN OUT, never bunted: $caps's `keys` is a
+          ::  `?`, and `?` bunts to %.y. See +caps-denied:uc.
+          [%over %& [/ %caps] [[/auspex %caps] caps-denied:uc]]
+          ::  /keys/probe: THE PROBE, and writing this grub IS the
+          ::  spawn - grubbery calls +on-file for every file in the
+          ::  bole on every load. One cheap jael scry, a poke at the
+          ::  writer if it answers, and nothing at all if it is
+          ::  vetoed. See +run-key-probe.
+          ::
+          ::  %over rather than %fall so the question is asked again
+          ::  after every deploy, which is when the answer can have
+          ::  changed. Its own directory, so the grub can never
+          ::  collide with a mail path.
+          [%fall %| /keys empty-dir:loader]
+          [%over %& [/keys %probe] [[/ %json] ~]]
           ::  /mail: %fall %| copies the WHOLE existing subtree, which is
           ::  what makes every dynamically created thread, message and meta
           ::  grub survive a reload. Without this row a nexus reload
@@ -325,6 +350,14 @@
         ;<  here=rail:tarball  bind:m  get-here-abs:io
         =/  root=path  path.here
         ;<  ~  bind:m  (grant-public root)
+        ::  BOTH OF THESE REACH /sys/scry, and +on-load has just laid
+        ::  /caps denied, so on this line the answer is always "not
+        ::  yet". They are no-ops here and run from +do-set-caps the
+        ::  moment the key probe raises the flag - which is a poke this
+        ::  writer takes a few events from now. On a ship that was
+        ::  refused the road they never run, which is the point: a
+        ::  vetoed grow here would fail the writer, and a failed writer
+        ::  is restarted, and the restart would reach again.
         ;<  ~  bind:m  (republish-all root)
         ;<  ~  bind:m  publish-proto
         ;<  ~  bind:m  (migrate-flat root)
@@ -364,6 +397,29 @@
           [[%probe ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex probe: failed")
         (run-probe name.rail)
+      ::  /keys/probe: THE ONE FIBER THAT IS ALLOWED TO DIE.
+      ::
+      ::  Its whole job is to find out whether this instance was
+      ::  granted /sys/scry, and the only way to find that out is to
+      ::  reach for it: no arm asks the shell what our weir holds, and
+      ::  a veto is not catchable - lib/fiberio.hoon answers [~ %veto *]
+      ::  with [%fail (veto-error ...)] in +typed-scry, in +keen and in
+      ::  the +take-pack every poke ends on, the -soft arms included.
+      ::  So the probe is the reach, and the answer arrives either as a
+      ::  poke at the writer or as an absence.
+      ::
+      ::  EPHEMERAL, AND NOT ON THE WRITER. A failed process is
+      ::  RESTARTED by grubbery - immediately, with `prod` set - so a
+      ::  vetoed scry on a long-lived sig fiber is an infinite
+      ::  full-speed crash loop: 100% CPU and no HTTP. +rise-wait is
+      ::  what makes the restart harmless: on a restart it BLOCKS on a
+      ::  poke that will never come, so the restarted process parks
+      ::  instead of reaching again. That is the /fetch and /probe
+      ::  discipline exactly, and it is why this is a grub of its own
+      ::  rather than three lines at the top of the writer.
+          [[%keys ~] %probe]
+        ;<  ~  bind:m  (rise-wait:io prod "%auspex key probe: no key road")
+        run-key-probe
       ::  /ui/main.sig: bind the HTTP endpoint and dispatch each request
       ::  into its own fiber under /ui/requests. This fiber never touches
       ::  the mail tree; it only routes.
@@ -400,6 +456,9 @@
 ::  name that was not admitted by both.
 ++  list-rail   |=([root=path n=@t] ^-(road:tarball [%& %& (list-dir root) `@ta`n]))
 ++  meta-rail   |=([root=path t=thread-id:uc] ^-(road:tarball [%& %& (tdir root t) %meta]))
+::  +caps-rail: the one grub every jael reach is gated on, at the nexus
+::  root. See the /caps row in +on-load and $caps:uc.
+++  caps-rail   |=(root=path ^-(road:tarball [%& %& root %caps]))
 ::  the discovery cache and the ephemeral probe that fills it. Two roads,
 ::  one $peer-rec shape - see mar/auspex/peer.hoon for why.
 ++  peer-dir    |=(root=path ^-(path (weld root /mail/peer)))
@@ -1193,6 +1252,10 @@
   ::  listing plus a thread refetch for a change nobody else can see.
     %save-list      (do-save-list root name.a members.a)
     %delete-list    (do-delete-list root name.a)
+  ::  the key road. Raised by the probe, and forceable from the dojo -
+  ::  see +do-set-caps for why that seam is the honest way to reach the
+  ::  degraded paths at all. %.n like every other local-state action.
+    %set-caps       (do-set-caps root keys.a)
   ==
 ::
 ::  +do-send: compose, reply and forward are all this.
@@ -1322,6 +1385,27 @@
       ==
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
+  ::  THE KEY ROAD, CHECKED BEFORE ANYTHING IS SIGNED OR STORED.
+  ::
+  ::    Signing needs jael twice - %j /life for our life and %j /vein
+  ::    for the ring - and both go down /sys/scry. Denied, those two
+  ::    binds are a VETO, and a veto is not a nack: it fails the fiber,
+  ::    and this fiber is /main.sig, the ship's single serialisation
+  ::    point for mail. So the send is refused HERE, at the top, where
+  ::    nothing has been written: no blob stored, no thread made, no
+  ::    copy filed, no beacon moved, and the draft (if this came from
+  ::    one) survives because +reject answers %.n.
+  ::
+  ::    This is the point-of-use half of a pair. +do-web-send refuses
+  ::    the same send at the route with the same words, so the composer
+  ::    stays open with its content instead of being answered 200 by a
+  ::    ship that then quietly declined - but a route check is not a
+  ::    substitute for a check here, because this arm is not the route's
+  ::    alone: a dojo poke and %send-draft both arrive without passing
+  ::    it.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may
+    (reject root 'this ship cannot sign mail: Auspex has not been granted the key road')
   ?.  (lte (met 3 body) max-body:uc)
     (reject root 'body too long')
   ?.  (lte (met 3 subj) max-subj:uc)
@@ -1863,9 +1947,7 @@
   ::  why the number is 128 and for the per-source rate budget this
   ::  deliberately does not attempt.
   ?.  (fits-signers:uc c max-signers:uc)   (reject root 'too many signers')
-  ;<  fake=?  bind:m  fake-ship
-  ;<  keys=(map [ship @ud] (unit pass))  bind:m
-    (key-map fake ~(tap in (signers:uc c)) ~)
+  ;<  keys=(map [ship @ud] (unit pass))  bind:m  (delivery-keys root c)
   =/  vs=(list [[msg-id:uc @ux] verdict:uc])  (verify-chain:uc keys c)
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  thread identity is never (root:uc c). `c` is attacker-controlled and
@@ -1956,7 +2038,7 @@
   ?:  ex  (pure:m ~)
   ;<  now=@da  bind:m  bowl-now
   ;<  ~  bind:m  (put-file (blob-rail root h) [/auspex %blob] [%1 octs now])
-  (publish-blob h octs |)
+  (publish-blob root h octs |)
 ::
 ::  +unheld-files: the files in a send we do not already hold.
 ::
@@ -1995,9 +2077,18 @@
 ::    (lattice grows at /pub/page/...), hence the /auspex prefix.
 ::
 ++  publish-blob
-  |=  [h=@uv =octs force=?]
+  |=  [root=path h=@uv =octs force=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ::  THE FARM IS DOWN /sys/scry, so this whole arm is behind the key
+  ::  road. Denied, we keep the bytes and publish nothing: peers cannot
+  ::  fetch our attachments, which is honest degradation - a fetcher
+  ::  reports a miss and the message is still stored, threaded and
+  ::  readable. A grow here would be a veto, and a veto on the writer
+  ::  is the application.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may
+    (trace:io ~[leaf+"auspex: no key road; blob {<h>} stays unpublished"])
   ::  NOTHING MAY GROW A SPUR IT HAS NOT ESTABLISHED IS UNBOUND. gall
   ::  assigns las+1 on a non-empty fan, so a second %grow at a bound
   ::  spur raises the case a peer has to probe for, and cases only ever
@@ -2055,6 +2146,13 @@
   |=  root=path
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ::  the farm listing and every regrow are /sys/scry. Denied, there is
+  ::  nothing to re-bind and nothing lost by saying so quietly: the
+  ::  bytes are in the tree either way. Re-run from +do-set-caps if the
+  ::  road is ever granted.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may
+    (trace:io ~[leaf+"auspex: no key road; not republishing blobs"])
   ::  no ?~ early-return on `held`: it would narrow the face to a lest,
   ::  and the ;< continuations below are gates whose bodies mull against
   ::  BOTH branches of that narrowing, so the null case then fails to
@@ -2115,6 +2213,14 @@
   ^-  form:m
   ;<  here=rail:tarball  bind:m  get-here-abs:io
   =/  root=path  (snip path.here)
+  ::  the farm is /sys/scry, so discovery is behind the key road too.
+  ::  Denied, we publish nothing and a peer's probe finds nothing -
+  ::  which already means "treated as version 1", the answer every
+  ::  Auspex before discovery gave. Honest degradation, and it costs
+  ::  the peer one probe.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may
+    (trace:io ~[leaf+"auspex: no key road; /proto not published"])
   ;<  bound=?  bind:m  (farm-has proto-spur:uc)
   ;<  last=proto:uc  bind:m  (read-proto-pub root)
   ?:  &(bound =(last our-proto:uc))
@@ -2260,6 +2366,35 @@
 ::
 ++  proto-probe-cases  ^-(@ud 8)
 ++  proto-timeout      ^-(@dr ~s4)
+::
+::  +fetch-keen / +probe-keen: the two keens, BEHIND THE KEY ROAD.
+::
+::    A %keen is a poke at /sys/scry like every other farm operation, so
+::    both are vetoed on an instance that was refused it. These two
+::    fibers are ephemeral, so a veto would not touch the writer - but
+::    it would spend a fiber and a restart to learn what /caps already
+::    says, and leave a request grub for the next reload to respawn.
+::
+::    ~ IS ALREADY BOTH CALLERS' ANSWER for "did not come back": a blob
+::    fetch reports a miss and the writer culls the request; a peer that
+::    answers no /proto is treated as version 1, which is what every
+::    Auspex before discovery speaks. Nothing new has to be handled.
+::
+++  fetch-keen
+  |=  [root=path who=ship h=@uv]
+  =/  m  (fiber:fiber:nexus ,(unit octs))
+  ^-  form:m
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may  (pure:m ~)
+  (keen-blob who h 1)
+::
+++  probe-keen
+  |=  [root=path who=ship]
+  =/  m  (fiber:fiber:nexus ,(unit proto:uc))
+  ^-  form:m
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may  (pure:m ~)
+  (keen-proto who 1)
 ::
 ++  keen-proto
   |=  [who=ship case=@ud]
@@ -2459,7 +2594,7 @@
   ?~  wu
     (trace:io ~[leaf+"auspex: probe at {<id>} is not a ship name"])
   =/  who=ship  u.wu
-  ;<  got=(unit proto:uc)  bind:m  (keen-proto who 1)
+  ;<  got=(unit proto:uc)  bind:m  (probe-keen root who)
   ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
   =/  q=(list chain:uc)  ?~(rq ~ pending.u.rq)
   ;<  now=@da  bind:m  get-time:io
@@ -2604,7 +2739,7 @@
   ;<  here=rail:tarball  bind:m  get-here-abs:io
   =/  root=path  (snip path.here)
   ;<  rq=fetch-req:uc  bind:m  (get-state-as:io ,fetch-req:uc)
-  ;<  got=(unit octs)  bind:m  (keen-blob from.rq hash.rq 1)
+  ;<  got=(unit octs)  bind:m  (fetch-keen root from.rq hash.rq)
   %+  poke:io  [%& %& root %'main.sig']
   [[/auspex %blob-in] [%0 id hash.rq got]]
 ::
@@ -2643,7 +2778,7 @@
   ::  answerable by ANYONE holding the bytes, not only the author,
   ::  exactly as a chain is forwardable by anyone. That is also why
   ::  restriction is unpublishing and not revocation - see $blob-vis.
-  ;<  ~  bind:m  (publish-blob hash.b u.res.b |)
+  ;<  ~  bind:m  (publish-blob root hash.b u.res.b |)
   ;<  ~  bind:m  (note root 'fetch-blob' & (scot %uv hash.b))
   ::  %.n, AND THE BEACON IS THE REASON. +apply's answer is what moves
   ::  /beacon/rev, and a blob arrival is not message content: no
@@ -2692,7 +2827,7 @@
   =/  cur=blob-vis:uc  (~(gut by vis.ix) h [%public ~])
   ::  cull ONLY from public. cull-farm is not idempotent: +farm-top's %gw
   ::  lookup crashes on the emptied plot a previous cull left.
-  ;<  ~  bind:m  (unpublish-if-public cur h)
+  ;<  ~  bind:m  (unpublish-if-public root cur h)
   ;<  ~  bind:m
     %^  put-file  (vis-rail root)  [/auspex %blobvis]
     ix(vis (~(put by vis.ix) h [%restricted ships]))
@@ -2701,10 +2836,16 @@
   (pure:m &)
 ::
 ++  unpublish-if-public
-  |=  [cur=blob-vis:uc h=@uv]
+  |=  [root=path cur=blob-vis:uc h=@uv]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?.  ?=(%public -.cur)  (pure:m ~)
+  ::  a cull is a poke at /sys/scry like a grow is, so it is behind the
+  ::  same road. Denied, the blob was never published in the first
+  ::  place - +publish-blob refused too - so there is nothing bound to
+  ::  withdraw and the record is still written by the caller.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may  (pure:m ~)
   (cull-farm:io (blob-spur:uc h))
 ::
 ::  +do-publish: put a restricted blob back in the permissionless
@@ -2734,7 +2875,7 @@
   ;<  ~  bind:m
     %^  put-file  (vis-rail root)  [/auspex %blobvis]
     ix(vis (~(del by vis.ix) h))
-  ;<  ~  bind:m  (publish-blob h u.have &)
+  ;<  ~  bind:m  (publish-blob root h u.have &)
   ;<  ~  bind:m  (note root 'publish-blob' & (scot %uv h))
   (pure:m &)
 ::
@@ -3127,6 +3268,110 @@
       ==
   ==
 ::
+::  ── the key road: what we may reach, and how we found out ───────────
+::
+::  +read-caps: /caps, or DENIED if it cannot be read.
+::
+::    Unreadable, absent, a shape this build does not understand: all
+::    three answer denied, and that is the only safe direction. A
+::    wrongly-denied ship refuses to sign and shows every message
+::    unverified until the probe corrects it; a wrongly-granted one
+::    reaches into a road it was not given and the reach is a VETO,
+::    which kills the fiber that made it. On the writer that is the
+::    whole application.
+::
+++  read-caps
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,caps:uc)
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (caps-rail root) ~)
+  ?.  ?=([%file *] vw)  (pure:m caps-denied:uc)
+  ?:  (is-boom:tarball sang.vw)  (pure:m caps-denied:uc)
+  =/  res  (mule |.(;;(caps:uc (sang-noun:tarball sang.vw))))
+  (pure:m ?:(?=(%| -.res) caps-denied:uc p.res))
+::
+::  +may-scry: may this ship reach /sys/scry? One peek of a tiny grub.
+::
+::    EVERY REACH INTO THAT ROAD IS BEHIND THIS, and it is a read of
+::    our own tree rather than a question asked of the shell, because
+::    there is nothing to ask: no arm reports our weir, and the only
+::    way to learn the answer is to reach and see whether we survive.
+::    The probe did that once, off the writer, so nothing else has to.
+::
+++  may-scry
+  |=  root=path
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  c=caps:uc  bind:m  (read-caps root)
+  (pure:m keys.c)
+::
+::  +run-key-probe: the ephemeral fiber that asks the only question.
+::
+::    ONE SCRY, and the cheapest one auspex makes: %j /life/<our>, which
+::    +our-life already does on every send. It is harmless - our own
+::    life is not a secret and nothing is written from it here - and it
+::    goes down the same /sys/scry road every other jael read does, so
+::    surviving it is proof for all of them.
+::
+::    On success: poke the writer to raise /caps. On a veto: this fiber
+::    FAILS, grubbery restarts it, +rise-wait parks the restart on a
+::    poke that never comes, and /caps stays denied. The signal we
+::    wanted arrives as an absence, which is the only shape a veto can
+::    take.
+::
+::    Its road to the writer is ABSOLUTE, from +get-here-abs, for the
+::    reason every long-lived road here is: a depth-relative road called
+::    from the wrong depth climbs past the nexus root and crashes.
+::
+++  run-key-probe
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  here=rail:tarball  bind:m  get-here-abs:io
+  =/  root=path  (snip path.here)
+  ;<  our=@p  bind:m  bowl-our
+  ::  the reach. If we were not granted the road, execution stops on
+  ::  this line and the two below never run.
+  ;<  *  bind:m  (our-life our)
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: key road reachable"])
+  %+  poke:io  [%& %& root %'main.sig']
+  [[/ %auspex-action] `action:uc`[%set-caps &]]
+::
+::  +do-set-caps: raise or lower /caps, on the writer.
+::
+::    Two callers: the key probe, which raises it by proof, and a dojo
+::    poke, which is the TEST SEAM - auspex lives in /apps, the trusted
+::    tier, which has no weir, so no veto can be made to happen on a
+::    development ship and forcing the flag is the only way to walk the
+::    degraded paths. See %set-caps in $action:uc.
+::
+::    A RAISE RUNS THE RISE WORK THE DENIED WRITER SKIPPED. +on-load
+::    lays /caps denied on every load, so the writer's own rise finds
+::    it denied and skips +republish-all and +publish-proto - and on a
+::    granted ship the probe's answer lands a moment later. Without
+::    this the two would never run again on any ship: discovery would
+::    answer with whatever was published before this existed, and a
+::    blob binding lost to a nuked agent would stay lost. Both are
+::    gated on the farm listing and are no-ops in the ordinary case.
+::
+::    %.n: the beacon does not move for this. Nothing a reader renders
+::    changed, the flag is fetched once at startup with /api/whoami,
+::    and the probe pokes on EVERY load - so a bump here would cost
+::    every open tab a full inbox listing on every deploy, for a change
+::    it would not observe.
+::
+++  do-set-caps
+  |=  [root=path keys=?]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  was=caps:uc  bind:m  (read-caps root)
+  ?:  =(keys keys.was)  (pure:m |)
+  ;<  ~  bind:m  (put-file (caps-rail root) [/auspex %caps] `caps:uc`[%0 keys])
+  ;<  ~  bind:m  (note root 'set-caps' & ?:(keys 'key road granted' 'key road denied'))
+  ?.  keys  (pure:m |)
+  ;<  ~  bind:m  (republish-all root)
+  ;<  ~  bind:m  publish-proto
+  (pure:m |)
+::
 ::  ── jael, through the scry service ──────────────────────────────────
 ::
 ::  A nexus cannot .^ directly; /sys/scry does it with the agent's live
@@ -3179,6 +3424,30 @@
 ::
 ::  +key-map: one scry per distinct [ship life], not one per message.
 ::  Recursion by arm name, for the ;< reason stated above.
+::
+::  +delivery-keys: the keys to verify an inbound chain against, or NONE.
+::
+::    Denied the key road, this answers the EMPTY MAP and reaches for
+::    nothing - not the per-signer %puby scries, and not the %j /fake
+::    read that decides how to answer them, which is a jael scry too.
+::
+::    An empty key map is not a degraded verdict, it is the correct
+::    one. +verify-chain answers %unverified for a signer it has no key
+::    for and %forged for none, because A MISSING KEY IS NEVER A
+::    FORGERY - the same rule that makes every moon and comet message
+::    %unverified today. So mail still arrives, is still verified before
+::    storage, is still threaded and readable, and every message says
+::    plainly that its signature was not checked. Three verdicts, and
+::    no fourth for this.
+::
+++  delivery-keys
+  |=  [root=path c=chain:uc]
+  =/  m  (fiber:fiber:nexus ,(map [ship @ud] (unit pass)))
+  ^-  form:m
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may  (pure:m ~)
+  ;<  fake=?  bind:m  fake-ship
+  (key-map fake ~(tap in (signers:uc c)) ~)
 ::
 ++  key-map
   |=  $:  fake=?
@@ -3503,16 +3772,30 @@
 ::
 ::  ── reads ───────────────────────────────────────────────────────────
 ::
-::  +serve-whoami: our own @p, so the reply composer can drop us from its
-::  own default recipient list. One /sys/bowl round trip, and the client
-::  makes it once at startup rather than per request.
+::  +serve-whoami: our own @p AND WHAT THIS SHIP MAY DO, so the client
+::  can say so before a person composes a message it cannot sign.
+::
+::    One /sys/bowl round trip and one peek, and the client makes it
+::    once at startup rather than per request.
+::
+::    `caps` rides here rather than on a route of its own because it is
+::    the same kind of fact - something about this ship that every
+::    surface needs and no surface can derive - and because a second
+::    startup request for one boolean would be a second round trip
+::    before the first paint.
 ::
 ++  serve-whoami
   |=  eyre-id=@ta
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  our=@p  bind:m  bowl-our
-  (send-json eyre-id (pairs:enjs:format ~[['ship' [%s (scot %p our)]]]))
+  ;<  root=path  bind:m  nexus-root
+  ;<  c=caps:uc  bind:m  (read-caps root)
+  %+  send-json  eyre-id
+  %-  pairs:enjs:format
+  :~  ['ship' [%s (scot %p our)]]
+      ['caps' (pairs:enjs:format ~[['keys' [%b keys.c]]])]
+  ==
 ::
 ::  +serve-inbox: the thread listing - EVERY VIEW, PAGED, SEARCHABLE.
 ::
@@ -4135,6 +4418,21 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   =/  req=(unit send-req:uw)  (de-send:uw u.jon)
   ?~  req  (send-err eyre-id 400 'bad send')
+  ;<  root=path  bind:m  nexus-root
+  ::  THE KEY ROAD, CHECKED HERE, WHERE THE COMPOSER IS STILL OPEN.
+  ::
+  ::    +do-send-core refuses this send on the writer too, with the same
+  ::    words, and that check is the real one. But this route answers as
+  ::    soon as the writer TAKES the poke, so a refusal that happened
+  ::    only there would be a composed message destroyed behind a 200 -
+  ::    the exact failure the caps checks below were added to stop,
+  ::    arriving through a different door. Answered here, the composer
+  ::    stays open with its content and its files, exactly as it does
+  ::    when the ship is unreachable.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may
+    %^  send-err  eyre-id  400
+    'this ship cannot sign mail: Auspex has not been granted the key road'
   ::  THE CAPS, CHECKED HERE, WHERE THE ANSWER CAN STILL BE NO.
   ::
   ::    This route pokes the writer and answers as soon as the writer
@@ -4196,7 +4494,6 @@
   ::  attachment" alone tells a person nothing about which file went
   ::  missing. +peek-exists and not +blob-size, because existence is
   ::  all this needs and the writer has to read the blob anyway.
-  ;<  root=path  bind:m  nexus-root
   ;<  missing=(unit @uv)  bind:m  (first-unheld root refs)
   ?^  missing
     %^  send-err  eyre-id  400
@@ -4416,7 +4713,7 @@
   ::  is OUR file and a recipient must be able to keen it the instant
   ::  the chain lands. Visibility is %public by absence from
   ::  /mail/blobvis, which is what +store-files leaves behind too.
-  ;<  ~  bind:m  (publish-blob h bts |)
+  ;<  ~  bind:m  (publish-blob root h bts |)
   (blob-uploaded eyre-id h p.bts)
 ::
 ::  +blob-uploaded: the upload's one answer shape, on both paths through
@@ -4685,6 +4982,15 @@
   =/  i=(unit @uv)  (de-id:uw u.jon)
   ?~  i  (send-err eyre-id 400 'bad id')
   ;<  root=path  bind:m  nexus-root
+  ::  the key road, before the draft is even read: a send this ship
+  ::  cannot sign is refused with the words the composer shows, and the
+  ::  DRAFT IS NOT TOUCHED. +do-send-draft on the writer keeps it too -
+  ::  +do-send answers %.n and the delete is gated on that answer - so
+  ::  the two halves agree that a refused send loses nothing.
+  ;<  may=?  bind:m  (may-scry root)
+  ?.  may
+    %^  send-err  eyre-id  400
+    'this ship cannot sign mail: Auspex has not been granted the key road'
   ;<  d=(unit draft:uc)  bind:m  (read-draft root u.i)
   ::  a draft that is not there is a 404 and not an ok. The composer
   ::  turns it into "this draft no longer exists", which is what a draft

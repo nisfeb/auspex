@@ -242,7 +242,59 @@
     ::  is a set of ships and nothing else.
       [%save-list name=@t members=(set ship)]
       [%delete-list name=@t]
+    ::  %set-caps: SET WHAT THIS SHIP MAY REACH, DIRECTLY.
+    ::
+    ::    Two callers, and they are not the same kind of thing.
+    ::
+    ::    The key probe pokes [%set-caps &] when its one jael scry came
+    ::    back, which is the only way /caps is ever raised in ordinary
+    ::    running - see the /keys/probe fiber in the nexus.
+    ::
+    ::    And it is A TEST SEAM, deliberately: auspex lives in /apps,
+    ::    the trusted tier, which has no weir, so no veto can be made to
+    ::    happen on a development ship. Forcing the flag from the dojo
+    ::    is the only way to walk the degraded paths at all, and an
+    ::    honest seam beats a fake veto. It is owner-gated like every
+    ::    other action (+apply's src check), so no peer can lower this
+    ::    ship's caps for it.
+      [%set-caps keys=?]
   ==
+::
+::  $caps: WHAT THIS INSTANCE HAS BEEN GRANTED, as far as it knows.
+::
+::    One field today: `keys` means "this ship may reach /sys/scry".
+::    That road is what signing a message and checking a signature both
+::    go through, and under grubbery's distribution model a desk-
+::    installed instance is created with an EMPTY WEIR - permit nothing
+::    - and earns each road from the weir.json it declares and the
+::    shell's consent. /sys/scry is the one road a user may reasonably
+::    refuse; the other three auspex asks for are ambient.
+::
+::    A VETO CANNOT BE CAUGHT. lib/fiberio.hoon answers [~ %veto *] with
+::    [%fail (veto-error ...)] in +typed-scry, +keen and +take-pack, so
+::    a reach into a road we were not granted FAILS THE FIBER rather
+::    than returning an error. Degradation therefore cannot be
+::    try-and-catch; it has to be know-before-you-go, and this is the
+::    thing that is known.
+::
+::    Versioned and read through `;;` like every other persisted shape
+::    here, because the marc is a noun passthrough. THE BUNT IS THE
+::    WRONG ANSWER: `?` bunts to %.y, which is "granted", and the safe
+::    direction is denied. Nothing may use *caps as a default - use
+::    +caps-denied.
+::
++$  caps  [%0 keys=?]
+::
+::  +caps-denied: the default, and the direction that cannot hurt.
+::
+::    The cost of being wrong here is a refusal at startup that the
+::    probe corrects a moment later. The cost of the opposite is a
+::    vetoed scry on the /main.sig writer, which is the ship's single
+::    serialisation point for mail: no mail in, no mail out, no drafts,
+::    and the failure is a dead fiber rather than a message anyone can
+::    read.
+::
+++  caps-denied  ^-(caps [%0 |])
 ::
 ::  $file: one file as handed to %send, before it is hashed and stored.
 ::

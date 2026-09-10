@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteThread, garbled, isShip, markRead, markUnread, ourShip, refusalLine, send,
-  setArchived, setLabel, thread, unreachable, uploadAll,
+  canSign, deleteThread, garbled, isShip, markRead, markUnread, NO_KEYS_LINE,
+  ourShip, refusalLine, send, setArchived, setLabel, thread, unreachable,
+  uploadAll,
   type MailList, type Message, type Thread,
 } from './api'
 import { FilePicker } from './Attachments'
@@ -732,14 +733,21 @@ export default function ThreadView({
             (!reply.trim() && files.length === 0)
             || sending
             || targetForged
+            || !canSign
             || (recipients.length === 0 && !pending.trim())
           }
-          title={noTarget ?? undefined}
+          title={noTarget ?? (canSign ? undefined : NO_KEYS_LINE)}
           className="btn btn-primary"
         >
           {upload ?? (sending ? 'Sending…' : 'Send')}
         </button>
       </div>
+      {/* Same reason the forged-target line below is repeated here: a
+          disabled button's title is not something a reader finds
+          without hovering the thing that is refusing them. */}
+      {!canSign && (
+        <p className="mt-1 text-[11px] text-warn-ink">{NO_KEYS_LINE}</p>
+      )}
       {/* A NODE NOTHING CAN POINT AT. Said here as well as on the two
           disabled controls, because a disabled button's title is not
           something a reader finds without hovering the thing that is

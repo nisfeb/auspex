@@ -166,6 +166,49 @@
     !>  ~[%unverified]
     !>  (turn (verify-chain:auspex (malt ~[[[~sampel-palnet 1] ~]]) ~[a]) |=([* v=verdict:sur] v))
 ::
+::  AN EMPTY KEY MAP IS THE DEGRADED SHIP'S WHOLE VERIFICATION STORY.
+::
+::    Refused the /sys/scry road, +delivery-keys in the nexus reaches for
+::    nothing and hands +verify-chain the empty map - no %puby scry per
+::    signer, and not even the %j /fake read that decides how to answer
+::    them. This is the pure half of that, and it is why the degraded
+::    path needs no new verdict: every message reads %unverified, which
+::    is exactly what the format already says about a message whose
+::    signer's key we do not hold.
+::
+::    A chain that includes a REAL FORGERY - a genuine signature over a
+::    lying `from` - is in here deliberately. With no keys it too is
+::    %unverified, and that is the correct answer rather than a
+::    permissive one: a ship that cannot look up a key has no evidence
+::    of forgery, and A MISSING KEY IS NEVER A FORGERY. The accusation
+::    requires the key.
+++  test-no-keys-is-all-unverified
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'from sampel' ~2026.1.1 ~)
+  =/  b
+    %-  forge
+    :*  ~palnet-sampel  (sy ~[~marbud-marbud])  'fwd: hi'  'see below'
+        ~2026.1.2  `(id:auspex unsigned.a)
+    ==
+  =/  liar  (fake-from ~palnet-sampel ~sampel-palnet 'hi' 'not me' ~2026.1.3)
+  =/  vs
+    %+  turn  (verify-chain:auspex ~ ~[a b liar])
+    |=([* v=verdict:sur] v)
+  ;:  weld
+    (expect-eq !>(~[%unverified %unverified %unverified]) !>(vs))
+    (expect-eq !>(|) !>((lien vs |=(v=verdict:sur ?=(%forged v)))))
+    (expect-eq !>(|) !>((lien vs |=(v=verdict:sur ?=(%verified v)))))
+  ==
+::
+::  and the same chain WITH the keys, so the test above is known to be
+::  about the empty map and not about a chain that could never verify.
+++  test-no-keys-differs-from-keys
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'from sampel' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel ~sampel-palnet 'hi' 'not me' ~2026.1.3)
+  =/  keys  (all-keys ~[~sampel-palnet ~palnet-sampel])
+  %+  expect-eq
+    !>  ~[%verified %forged]
+    !>  (turn (verify-chain:auspex keys ~[a liar]) |=([* v=verdict:sur] v))
+::
 ::  merging the same chain twice is a no-op: double delivery must not
 ::  duplicate messages
 ++  test-merge-dedupes

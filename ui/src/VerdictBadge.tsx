@@ -1,3 +1,4 @@
+import { canSign } from './api'
 import type { Verdict } from './api'
 
 // One definition, used by both the thread view and the inbox list. The
@@ -66,11 +67,23 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
     )
   }
 
+  // WHY there was no key is a different fact from the verdict, and it
+  // is only ever said in the one state where it is true. On a ship that
+  // was refused the key road EVERY message reads unverified, and a
+  // reader who does not know that reads it as something about the
+  // sender. The verdict itself does not change and must not: three
+  // verdicts, and a missing key is %unverified whatever the reason.
+  const why = canSign
+    ? `No key available for ${who}, so the signature could not be checked.`
+      + ' Moons and comets always land here.'
+    : 'This ship has not been granted the key road, so no signature could be'
+      + ' checked — on any message, from any sender.'
+
   return (
     <span
       role="img"
-      title={`No key available for ${who}, so the signature could not be checked. Moons and comets always land here.`}
-      aria-label={`Unverified: no key available for ${who}, so the signature could not be checked`}
+      title={why}
+      aria-label={`Unverified: ${why}`}
       className={`shrink-0 text-[13px] leading-none text-ink-faint ${className}`}
     >
       ○

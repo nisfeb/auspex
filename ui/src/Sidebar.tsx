@@ -1,3 +1,4 @@
+import { canSign, NO_KEYS_LINE } from './api'
 import type { View } from './api'
 
 // The views, and the one rule that shapes this whole panel: a FOLDER IS
@@ -147,6 +148,18 @@ export default function Sidebar({
         >
           {theme === 'dark' ? 'Light theme' : 'Dark theme'}
         </button>
+        {/* THE ONE QUIET LINE. Beside the theme control rather than
+            over the inbox, because it is a standing fact about this
+            ship and not an event: a banner that never goes away is a
+            banner people stop seeing, and this has to still be true
+            the tenth time someone looks for why a message says
+            unverified. The composer and the reply box say it again at
+            the moment it stops someone. */}
+        {!canSign && (
+          <p className="mt-1 px-1 text-[11px] leading-snug text-warn-ink">
+            {NO_KEYS_LINE}
+          </p>
+        )}
         {installable && (
           <button
             type="button"

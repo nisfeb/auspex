@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  deleteDraft, garbled, isShip, newId, refusalLine, saveDraft, send, sendDraft,
-  unreachable, uploadAll,
+  canSign, deleteDraft, garbled, isShip, newId, NO_KEYS_LINE, refusalLine,
+  saveDraft, send, sendDraft, unreachable, uploadAll,
   type Draft, type MailList,
 } from './api'
 import { FilePicker } from './Attachments'
@@ -383,9 +383,16 @@ export default function Compose({
             competes for the eye with the primary action is a control
             people press by mistake. */}
         <div className="mt-2 flex items-center gap-2">
+          {/* DISABLED WITH THE REASON, not refused on submit. The
+              nexus refuses this send at the route and again at the
+              writer, so pressing it is safe - but a button that looks
+              live and then reports that the ship will not sign is a
+              message someone composed for nothing. Discard still
+              works, and so does Save draft: the text is not lost. */}
           <button
             onClick={onSend}
-            disabled={(to.length === 0 && !pending.trim()) || sending}
+            disabled={(to.length === 0 && !pending.trim()) || sending || !canSign}
+            title={canSign ? undefined : NO_KEYS_LINE}
             className="btn btn-primary"
           >
             {upload ?? (sending ? 'Sending…' : forward ? 'Forward' : 'Send')}
@@ -399,6 +406,12 @@ export default function Compose({
             Discard
           </button>
         </div>
+        {/* Said in the panel as well as on the button: a disabled
+            control's title is not something a reader finds without
+            hovering the thing that is refusing them. */}
+        {!canSign && (
+          <p className="mt-1 text-[11px] text-warn-ink">{NO_KEYS_LINE}</p>
+        )}
         {error && <p className="mt-1 text-danger">{error}</p>}
       </div>
     </div>
