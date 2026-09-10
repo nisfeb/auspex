@@ -364,7 +364,7 @@
           [~ %'main.sig']
         ;<  ~  bind:m  (rise-wait:io prod "%auspex writer failed")
         =/  root=@ud  (lent path.rail)
-        ;<  ~  bind:m  (grant-public rail root)
+        ;<  ~  bind:m  (grant-public root)
         ::  BOTH OF THESE REACH /sys/scry, and +on-load has just laid
         ::  /caps denied, so on this line the answer is always "not
         ::  yet". They are no-ops here and run from +do-set-caps the
@@ -1146,20 +1146,19 @@
 ::    agent's `?>  =(our.bowl src.bowl)` was.
 ::
 ::  +grant-public: put our writer in the public usergroup so another ship
-::  may poke it. Takes the writer's own RAIL, because the registry wants
-::  a rail and a sandboxed app has no absolute one to offer - desk.hoon
-::  reaches for +get-here-abs here and can, being a host-layer nexus.
-::  If this cannot be done the arm already says so and delivery stays
+::  may poke it. desk.hoon reaches for +get-here-abs at this exact spot
+::  and may, being a host-layer nexus; we register +writer-rail instead.
+::  If the group is absent the arm already says so and delivery stays
 ::  local, which is the honest degradation rather than a crash.
 ++  grant-public
-  |=  [=rail:tarball root=@ud]
+  |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
   ;<  ok=?  bind:m  (peek-exists:io gdir)
   ?.  ok
     (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
-  ;<  ~  bind:m  (reg-register-at:io rail)
+  ;<  ~  bind:m  (reg-register-at:io writer-rail)
   %+  reg-how:io  /public
   [make=~ poke=(sy ~[`road:tarball`(rf root / %'main.sig')]) peek=~]
 ::
@@ -2953,7 +2952,7 @@
     :_  ~
     :-  %leaf
     "auspex: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
-  ;<  ~  bind:m  (reg-register-at:io rail)
+  ;<  ~  bind:m  (reg-register-at:io writer-rail)
   %+  reg-how:io  grp
   [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
 ::
@@ -3658,6 +3657,11 @@
 ::    counting our own layout, which this file declares.
 ::
 ++  req-dir   ^-(path /ui/requests)
+::  +writer-rail: the writer's own rail, nexus-relative. Declared by the
+::  /main.sig row in +on-load, so it is our layout rather than a guess
+::  about where we are installed. The usergroup registry wants a rail and
+::  a sandboxed app has no absolute one to give it.
+++  writer-rail  ^-(rail:tarball [/ %'main.sig'])
 ++  nexus-root  ^-(@ud (lent req-dir))
 ::
 ::  +is-owner: is this request really from the ship that owns us?
