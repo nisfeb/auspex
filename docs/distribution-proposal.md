@@ -85,9 +85,11 @@ implementation (`docs/protocol.md`, with conformance vectors a second
 implementation must reproduce). It is a protocol as much as an app, which
 is why §6 matters to me.
 
-## 4. The four questions
+## 4. The questions
 
-Ranked by how much they block me.
+The first four ranked by how much they block me; the fifth is not a
+question so much as an opinion about the shell, offered because I have
+just had to write the strings a user would be shown.
 
 ### 4.1 Signing — a granularity gap, not a blocker
 
@@ -198,6 +200,58 @@ otherwise.)
 - Does the storefront read a published code dir from a ship that is not
   the publisher of grubbery itself?
 
+### 4.5 How the shell should ask — a prompt is a scarce resource
+
+Here is Auspex's whole `weir.json`, which I wrote this morning:
+
+| road | why |
+|---|---|
+| `/sys/bowl.sig` | read the clock and the name of this ship |
+| `/sys/behn/` | give up on a delivery that is not coming |
+| `/sys/eyre/` | serve the mail client at `/apps/auspex` |
+| `/sys/scry/` | verify signatures, sign your mail, fetch attachments |
+
+Ask which of those a user could rationally deny. The clock? Timers?
+Binding its own route? Deny any one and the app does not run; there is
+no world in which "no" is a considered answer. **Three of the four are
+not decisions. They are the definition of a running app.** Exactly one
+is a real decision, and only because it is coarse enough to matter.
+
+So the problem with a wall of toggles is not that it is tedious. It is
+that it is **camouflage**: put the one consequential grant in a list of
+three inevitable ones and you have trained the user to click through the
+consequential one. A prompt that is never rationally denied is worse
+than no prompt, because it teaches the reflex that defeats the prompt
+that matters.
+
+Three suggestions, in dependency order:
+
+1. **Ambient vs consequential.** Let the shell classify roads and grant
+   the ambient set by the act of installing. Bowl, behn, and eyre-for-
+   your-own-route are ambient. This alone takes Auspex from four prompts
+   to one.
+2. **Finer `/sys/scry` roads** — §4.1 arriving from the other direction.
+   You cannot safely auto-grant a road that means "anything any vane will
+   answer", so granularity is the thing that makes automation possible:
+   `%j /puby` is ambient for any app that verifies anything, and "sign as
+   me" is the one grant worth a sentence of the user's attention. Today
+   they are the same road, so the coarse one must be asked, and asked
+   scarily.
+3. **Prompt on the delta, not on install.** The declaration is a contract
+   the kernel already enforces. Grant the declared set at install and
+   surface only what an *update* adds. "Auspex 1.4 wants a road 1.3 did
+   not" is real signal; "Auspex wants four roads" on first install is
+   noise.
+
+One half of this is mine, not yours, and I am building it: **a denied
+road should produce a comprehensible app, not an error.** If `/sys/scry`
+is refused, Auspex should still open, show every message as
+`unverified` — which the format already allows, since a missing key is
+never a forgery — and refuse to *send* with a plain reason, rather than
+failing to start. That is the precondition for contextual consent ever
+working: you can only ask at the moment of need if the app has a sane
+state before the answer.
+
 ## 5. What I want to do, and my fallback
 
 **Preferred: make Auspex the first non-lattice app on the code-nexus
@@ -279,3 +333,5 @@ value is that it exists and has been wrong a few times already.
 3. The installer floor (§4.4), which decides whether my beta waits.
 4. Whether the `/proto` idea is worth folding into the book, or whether
    you would rather it stay mine.
+5. §4.5 — whether "ambient vs consequential" is a distinction the shell
+   wants to draw. I will build the graceful-degradation half either way.
