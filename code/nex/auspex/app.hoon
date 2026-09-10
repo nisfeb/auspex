@@ -1150,12 +1150,29 @@
 ::  and may, being a host-layer nexus; we register +writer-rail instead.
 ::  If the group is absent the arm already says so and delivery stays
 ::  local, which is the honest degradation rather than a crash.
+::  +exists-soft: +peek-exists, but a VETO answers no instead of killing
+::  the fiber. +peek-soft handles [~ %veto *] with [%done ~]; the hard
+::  peek does not, and the writer is not a fiber that may die - a crashed
+::  sig fiber respawns, so one refused road is a crash loop.
+::
+::  This is what makes the usergroup roads OPTIONAL rather than required.
+::  An install that was not granted them delivers locally and says so,
+::  which is the degradation the weir.json copy promises.
+::
+++  exists-soft
+  |=  =road:tarball
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  vw=(unit view:nexus)  bind:m  (peek-soft:io road ~)
+  ?~  vw  (pure:m %.n)
+  (pure:m !?=(?(%none %miss %veto %tomb) -.u.vw))
+::
 ++  grant-public
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
-  ;<  ok=?  bind:m  (peek-exists:io gdir)
+  ;<  ok=?  bind:m  (exists-soft gdir)
   ?.  ok
     (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
   ;<  ~  bind:m  (reg-register-at:io writer-rail)
@@ -2946,7 +2963,7 @@
   ^-  form:m
   =/  grp=path  /auspex/[(scot %uv h)]
   =/  gdir=path  (weld /sys/ames/usergroups/auspex /[(cat 3 (scot %uv h) '.grp')])
-  ;<  ok=?  bind:m  (peek-exists:io [%& %& gdir %'who.ships'])
+  ;<  ok=?  bind:m  (exists-soft [%& %& gdir %'who.ships'])
   ?.  ok
     %-  trace:io
     :_  ~
@@ -3300,6 +3317,16 @@
           'serve the mail client at /apps/auspex'
           %+  line  '/sys/scry/'
           'verify a signature against the public key of the ship that sent it, sign the mail you send, and fetch attachments from other ships. This one road also carries the private key of this ship: signing needs it, and nothing narrower can be asked for today'
+      ==
+    ::  the usergroup roads are READS, and they are OPTIONAL: refuse them
+    ::  and auspex still runs, still reads mail, still signs and sends to
+    ::  ships that can already reach it - it just cannot publish itself
+    ::  for delivery, and says so. +exists-soft is what makes that true
+    ::  rather than aspirational.
+      :-  'peek'
+      :-  %a
+      :~  %+  line  '/sys/ames/usergroups/'
+          'let other ships deliver mail to you, and let a recipient fetch an attachment you sent them. Without this you can still read and send; people cannot reach you first'
       ==
   ==
 ::
