@@ -1,11 +1,31 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  isChange, framesIn, backoffFor, jittered, nextDelay, nextAttempt,
+  isChange, revIn, framesIn, backoffFor, jittered, nextDelay, nextAttempt,
   BACKOFF_MIN, BACKOFF_MAX, LIVED_MS, MAX_ATTEMPT, BEACON_PATH,
 } from '../lib/beacon.js'
 
 //  ── the frame classifier ────────────────────────────────────────────
+
+test('a reconnect that missed nothing is worth no sync', () => {
+  //  The revision rides on every frame, including registration's replay.
+  //  Same revision on reconnect = nothing moved while we were away, which
+  //  is what makes a reconnect one request instead of a listing.
+  const old1 = 'id: 43\nevent: old /rev\ndata: 170141184508152841273086689431159830477'
+  const old2 = 'id: 44\nevent: old /rev\ndata: 170141184508152841273086689431159830477'
+  const moved = 'id: 45\nevent: old /rev\ndata: 170141184508152841273086689431159830999'
+  assert.equal(revIn(old1), '170141184508152841273086689431159830477')
+  assert.equal(revIn(old1), revIn(old2), 'an unchanged ship replays the same revision')
+  assert.notEqual(revIn(old1), revIn(moved), 'a ship that moved replays a new one')
+  assert.equal(isChange(old1), false, 'an old frame is still not a change')
+})
+
+test('a frame for another leaf carries no revision', () => {
+  //  The stream is the whole /beacon directory, so frames for its other
+  //  leaves arrive here and are not the mail revision.
+  assert.equal(revIn('id: 1\nevent: new /other\ndata: 12'), null)
+  assert.equal(revIn('id: 1\nevent: old /rev'), null, 'a /rev frame with no data line')
+})
 
 test('the frame replayed at registration is not a change', () => {
   //  THE WHOLE POINT OF A CHEAP RECONNECT. Registration replays the

@@ -7,7 +7,7 @@
 //  be read rather than to be short.
 
 import { Api, ApiError, UnreachableError, MAX_BLOB, MAX_ATTACH } from './lib/api.js'
-import { isChange, framesIn, nextDelay, nextAttempt } from './lib/beacon.js'
+import { isChange, revIn, framesIn, nextDelay, nextAttempt } from './lib/beacon.js'
 import {
   addressToShip, shipToAddress, describeRecipient, DOMAIN,
 } from './lib/address.js'
@@ -395,6 +395,9 @@ async function syncNow() {
 //  syncs per change — and Vere serves HTTP/1.1, where a wasted connection
 //  is one the rest of the client does not get.
 let streaming = false
+//  The last beacon revision this client saw, from any frame. Memory only:
+//  a restart syncs anyway, so persisting it would buy nothing.
+let lastRev = null
 let stopStream = false
 let streamAbort = null
 
@@ -449,7 +452,17 @@ async function runBeacon() {
       streamAbort = new AbortController()
       const res = await api.beacon(streamAbort.signal)
       await readStream(res, (frame) => {
-        if (!isChange(frame)) return
+        const rev = revIn(frame)
+        if (rev === null) return
+        //  The stream carries the revision on every frame, including the
+        //  `old …` one that registration replays. A reconnect whose
+        //  revision matches the last one seen missed nothing and syncs
+        //  nothing — that is what makes it cheap. One that does NOT match
+        //  is a connection that was down while the ship moved, and it is
+        //  worth exactly one sync.
+        const moved = lastRev !== null && rev !== lastRev
+        lastRev = rev
+        if (!isChange(frame) && !moved) return
         logAttempt({ change: true })
         //  THE ONE ACTION. Nothing else in this file syncs except the
         //  fallback alarm and a user pressing Sync.
@@ -490,6 +503,16 @@ function startBeacon() {
 
 //  Stop it: a disconnect, or a 403. `abort` is what unblocks a reader
 //  sitting on a stream that will never send anything again.
+//  CYCLE, not stop. A stream that dies SILENTLY — no FIN, no error, the
+//  shape a NAT timeout or a closed lid produces — leaves its reader
+//  blocked for ever on a socket that will never speak again, and
+//  `streaming` stays true, so nothing in this file would ever notice.
+//  Aborting the held connection lets the loop open a fresh one, and the
+//  fresh one's `old` frame says whether anything was missed. One request.
+function cycleBeacon() {
+  try { if (streamAbort) streamAbort.abort() } catch { /* already gone */ }
+}
+
 function stopBeacon() {
   stopStream = true
   try { if (streamAbort) streamAbort.abort() } catch { /* already gone */ }
@@ -819,12 +842,18 @@ browser.alarms.onAlarm.addListener(async (a) => {
   const { origin, status } = await getState()
   if (!origin || status === 'signed-out') return
   //  A loop that has genuinely EXITED is restarted — that is not a
-  //  staleness watchdog, it is noticing there is no reader at all.
-  if (!streaming) startBeacon()
+  //  staleness watchdog, it is noticing there is no reader at all. Its
+  //  first frame carries the revision, so a restart catches up by itself.
+  if (!streaming) { startBeacon(); return }
   const since = Date.now() - FALLBACK_MINUTES * 60000
   const proved = beaconLog.some((e) => e.change && e.at >= since)
-  if (streaming && proved) return
-  syncNow()
+  if (proved) return
+  //  Quiet. Either the ship has had nothing to say, or this stream is one
+  //  of the dead ones that cannot report it. Cycling answers both for the
+  //  price of one request, where this used to run a whole mailbox listing
+  //  every fifteen minutes on a silent mailbox — O(stored messages) on the
+  //  nexus, for an answer the reconnect gives away.
+  cycleBeacon()
 })
 
 //  On startup, and only if there is something to sync: an unconfigured

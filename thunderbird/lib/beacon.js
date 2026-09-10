@@ -80,6 +80,24 @@ function isChange(frame) {
   return ev.endsWith(' /rev') && !ev.startsWith('old')
 }
 
+//  The revision a ` /rev` frame carries, or null if it is not one.
+//
+//  The `data:` line is the beacon's value — the revision the nexus bumps
+//  on every change a reader can see. It matters on the frame `isChange`
+//  deliberately ignores: registration replays the CURRENT revision as an
+//  `old …` frame, so comparing it to the last one this client saw answers,
+//  for the price of the reconnect itself, the question the fallback used
+//  to answer with a full mailbox listing — did anything move while I was
+//  not looking? This is what lattice's editor does, and the third rule in
+//  the briefing ("a reconnect must be cheap") is why.
+function revIn(frame) {
+  const lines = String(frame).split(/\r?\n/)
+  const ev = lines.find((l) => l.startsWith('event:'))
+  if (ev === undefined || !ev.slice('event:'.length).trim().endsWith(' /rev')) return null
+  const data = lines.find((l) => l.startsWith('data:'))
+  return data === undefined ? null : data.slice('data:'.length).trim()
+}
+
 //  Split a read buffer into whole frames and whatever is left over.
 //
 //  A blank line ends an SSE frame, and a `reader.read()` lands wherever
@@ -117,5 +135,5 @@ function nextAttempt(attempt, livedMs) {
 
 export {
   BEACON_PATH, BACKOFF_MIN, BACKOFF_MAX, LIVED_MS, MAX_ATTEMPT,
-  isChange, framesIn, backoffFor, jittered, nextDelay, nextAttempt,
+  isChange, revIn, framesIn, backoffFor, jittered, nextDelay, nextAttempt,
 }
