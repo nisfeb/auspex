@@ -501,6 +501,17 @@ uniform, but it is small — **8 files come back, 36 stay deleted**:
 - Re-vendor the lattice overlay, then build on `~wex` before anything
   else.
 
+**Explorer comes back too — as a default, not an app-tier extra**
+(2026-09-10). It is the only way to look at a grubbery ship's namespace
+at all, and it is not merely nice to have: `shell.hoon` builds every
+storefront app icon as
+`/grubbery/ball{...}/desk/code/{icon}?raw=1` (+read-peer-desks, line
+~1853), and **`/grubbery/ball` is bound by explorer and nothing else**.
+Without it, every icon in "Get apps" is a dead link — on the very
+surface step 5 of §9.1 depends on. It takes upstream's `root.hoon` row
+unchanged and costs `gub/lib/feather.hoon` plus ~83 KB of its own assets;
+the codemirror and `lib/ui` bundles it draws on were already carried.
+
 **Nothing else in the app tier comes back**, on the standing assumption
 that every other app is installed by adding a peer. Three that looked
 like they might be needed, checked rather than assumed:
@@ -539,18 +550,33 @@ Nothing has touched `~ricsul-bilwyt`.
 
 | # | Step | State |
 |---|------|-------|
-| 1 | Grubbery catches up to `develop` | **done and rehearsed**, `nisfeb/grubbery` `dist/develop-merge` @ `f866027`. Merged, trimmed, deployed to `~wex`, ball rebuilt, 0 bangs. Not on ricsul. |
+| 1 | Grubbery catches up to `develop` | **done and rehearsed**, `nisfeb/grubbery` `dist/develop-merge` @ `ec8674a`. Merged, trimmed, deployed to `~wex`, ball rebuilt, 0 bangs. Not on ricsul. |
 | 2 | Restructure — `alias.json`, `weir.json`, code namespace | **done**. Both apps declare both files and serve them live on `~wex`. Both `--code-dir` outputs build and resolve every source import (`scripts/codedir-check.py`, 0 unresolved each). |
 | 3 | Peer `~ricsul-bilwyt` | **not started** — production, and it wants the upstream default-peer rule first (issue #6). |
 | 4 | Lattice migrates in place | **blocked on the open question** (issue #5): a desk nexus cannot adopt an existing instance, so the guest route strands the data. |
 | 5 | Auspex discoverable | **waits on 3**. |
 
 Verified on `~wex` the same day: `/apps/auspex/`, `/apps/lattice/app`,
-`/grubbery/mcp` and `/grubbery/api/tree/apps` all 200; `/apps` holds
-exactly `auspex.auspex_app`, `lattice.lattice_app`, `mcp.mcp`,
-`shell.shell`; the launcher grid is Auspex / Lattice / Tools with no
-console errors; the MCP registry lists 14 tools and the protocol
-advertises 3; `-test /=grubbery=/tests/lib` is `ok=%.y`.
+`/grubbery/mcp`, `/grubbery/ball`, `/apps/grubbery` and
+`/grubbery/api/tree/apps` all 200; `/apps` holds exactly
+`auspex.auspex_app`, `explorer.explorer`, `lattice.lattice_app`,
+`mcp.mcp`, `shell.shell`; the launcher grid is Auspex / Explorer /
+Lattice / Tools; the MCP registry lists 14 tools and the protocol
+advertises 3; `-test /=grubbery=/tests/lib` is `ok=%.y`; 0 bangs.
+
+The launcher logs **one** 404, and it is a decision rather than a fault:
+the bell fetches `/apps/notifications.notifications/inbox.inbox`, and
+§9.3 keeps `notifications.hoon` out. The bell is empty and nothing else
+notices.
+
+**Two gates, not one, now that there is a tool for the second.**
+`tools/desk-reach.py` says what nothing reaches; `tools/imports-resolve.py`
+says what is reached but missing. The second found 44 unresolved imports
+on its first run, none of them explorer's: `desk/lib/mcp/` was the
+pre-relocation tool path still importing the `/lib/nex/tools.hoon`
+upstream dropped, and `desk/lib/tool-bundle/` was those tools mirrored to
+the desk level where no test imports them. Both deleted; lattice's sync no
+longer makes the second. Both gates are clean.
 
 **Known leftovers, none blocking.** `gub/nex/` still carries five asset
 directories with no compiling parent — `claw/`, `explorer/`, `git/`,
