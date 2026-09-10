@@ -359,7 +359,7 @@
         ::  vetoed grow here would fail the writer, and a failed writer
         ::  is restarted, and the restart would reach again.
         ;<  ~  bind:m  (republish-all root)
-        ;<  ~  bind:m  publish-proto
+        ;<  ~  bind:m  (publish-proto root)
         ;<  ~  bind:m  (migrate-flat root)
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
@@ -2208,11 +2208,20 @@
 ::    VERSIONS - version 1 is what silence means anyway - only about
 ::    caps, and the receiver enforces those regardless.
 ::
+::    ROOT IS PASSED IN, and it has to be. This arm used to derive it
+::    with (snip path.here) from +get-here-abs, which is right for the
+::    ephemeral fibers under /probe and /fetch and WRONG here: this runs
+::    on the writer, whose own rail is [<nexus root> %'main.sig'], so
+::    path.here IS the nexus root and snipping it climbed one directory
+::    ABOVE the nexus - /apps. Every read and write of /proto-pub below
+::    went there, so the "did it change" record was never found and
+::    every rise republished. Both callers hold the real root; they pass
+::    it.
+::
 ++  publish-proto
+  |=  root=path
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  here=rail:tarball  bind:m  get-here-abs:io
-  =/  root=path  (snip path.here)
   ::  the farm is /sys/scry, so discovery is behind the key road too.
   ::  Denied, we publish nothing and a peer's probe finds nothing -
   ::  which already means "treated as version 1", the answer every
@@ -3369,7 +3378,7 @@
   ;<  ~  bind:m  (note root 'set-caps' & ?:(keys 'key road granted' 'key road denied'))
   ?.  keys  (pure:m |)
   ;<  ~  bind:m  (republish-all root)
-  ;<  ~  bind:m  publish-proto
+  ;<  ~  bind:m  (publish-proto root)
   (pure:m |)
 ::
 ::  ── jael, through the scry service ──────────────────────────────────
