@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Loading from './Loading'
 import {
   canSign, deleteThread, garbled, isShip, markRead, markUnread, NO_KEYS_LINE,
   ourShip, refusalLine, send, setArchived, setLabel, thread, unreachable,
@@ -203,7 +204,11 @@ export default function ThreadView({
   if (notFound) {
     return <p className="p-3 text-ink-faint">This conversation no longer exists.</p>
   }
-  if (!t) return null
+  //  Was `null`: a blank pane, which on a slow read is indistinguishable
+  //  from a thread that failed to open. `t` survives a navigation, so
+  //  this is the FIRST thread only — every later one keeps the previous
+  //  conversation on screen until its own arrives.
+  if (!t) return <Loading what="Opening" />
 
   const onDelete = async () => {
     // Deleting drops evidence: the signed chain is the artifact, and a

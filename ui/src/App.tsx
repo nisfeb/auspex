@@ -43,6 +43,18 @@ export default function App() {
   const [entries, setEntries] = useState<InboxEntry[]>([])
   const [total, setTotal] = useState(0)
   const [inboxError, setInboxError] = useState<string | null>(null)
+  // THE THIRD STATE OF A LIST: not empty, not failed, not answered yet.
+  // Starts true because a refresh fires on mount, so the very first paint
+  // is already a wait — the paint that used to claim "Nothing here."
+  const [listLoading, setListLoading] = useState(true)
+  // Which refresh owns the spinner. Two overlapping fetches (type in the
+  // search box, page before it lands) both resolve, and the FIRST one to
+  // finish would otherwise clear the flag while the second is still out.
+  // The finally only counts if the token is still the one it started with.
+  const listSeq = useRef(0)
+  // Drafts, filters and lists come back together on one sidebar fetch,
+  // and each of their panes reported "none yet" until it landed.
+  const [metaLoaded, setMetaLoaded] = useState(false)
   // WHO A SEND WAS NOT CARRIED TO, after the composer has closed.
   //
   // The composer unmounts on a successful send, so a refusal that is
@@ -200,7 +212,12 @@ export default function App() {
   const searching = applied.trim() !== ''
 
   const refresh = useCallback(() => {
-    if (!isThreadPane) return
+    //  Nothing is in flight for a pane this fetch does not serve, so the
+    //  flag has to come down here too — left standing, a Drafts-first
+    //  visit would show the thread list a spinner that never resolves.
+    if (!isThreadPane) { setListLoading(false); return }
+    const seq = ++listSeq.current
+    setListLoading(true)
     pageOf(searching ? 'all' : pane as View, {
       // The label narrows a view, so it goes with the view and not with
       // the search: a query is a question about the whole mailbox.
@@ -215,6 +232,7 @@ export default function App() {
         setTotal(p.total)
       })
       .catch((e) => { console.error(e); setInboxError('Could not reach the ship.') })
+      .finally(() => { if (seq === listSeq.current) setListLoading(false) })
   }, [pane, label, applied, offset, isThreadPane, searching])
 
   // The label list and the draft count are sidebar state, not list
@@ -228,9 +246,15 @@ export default function App() {
         setLabels([...seen].sort())
       })
       .catch((e) => { console.error(e) })
-    apiDrafts().then(setDrafts).catch((e) => { console.error(e) })
-    apiRules().then(setRules).catch((e) => { console.error(e) })
-    apiLists().then(setLists).catch((e) => { console.error(e) })
+    //  allSettled, not all: one of these failing still means the wait is
+    //  over for the other two, and each pane already renders its own
+    //  emptiness. A refresh after the first never re-arms the flag —
+    //  those panes have content to keep showing.
+    void Promise.allSettled([
+      apiDrafts().then(setDrafts),
+      apiRules().then(setRules),
+      apiLists().then(setLists),
+    ]).then(() => setMetaLoaded(true))
   }, [])
 
   const onChange = useCallback(() => {
@@ -512,6 +536,7 @@ export default function App() {
               {pane === 'drafts' ? (
                 <Drafts
                   drafts={drafts}
+                  loading={!metaLoaded}
                   onOpen={(d) => { setForwarding(null); setComposing(false); setResume(d) }}
                   onDelete={(id) => {
                     apiDeleteDraft(id).then(refreshSidebar).catch(console.error)
@@ -522,6 +547,7 @@ export default function App() {
                   <ThreadList
                     entries={entries}
                     error={inboxError}
+                    loading={listLoading}
                     selected={selected}
                     onSelect={setSelected}
                   />

@@ -1,4 +1,5 @@
 import type { Draft } from './api'
+import Loading from './Loading'
 
 // A DRAFT IS NOT A MESSAGE, and this list says so rather than assuming
 // the reader knows. There is no sender line and no verdict badge here,
@@ -10,13 +11,18 @@ import type { Draft } from './api'
 // components each declaring the same width is two places to change it
 // and one place to forget.
 export default function Drafts({
-  drafts, onOpen, onDelete,
+  drafts, loading, onOpen, onDelete,
 }: {
   drafts: Draft[]
+  // Drafts are fetched with the sidebar, once, so this pane opened on
+  // "No drafts." for as long as that took — a lie about the one folder
+  // whose whole point is that it holds work in progress.
+  loading: boolean
   onOpen: (d: Draft) => void
   onDelete: (id: string) => void
 }) {
   if (drafts.length === 0) {
+    if (loading) return <Loading />
     return <div className="flex-1 p-3 text-ink-faint">No drafts.</div>
   }
   return (

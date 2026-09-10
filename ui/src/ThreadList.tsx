@@ -1,4 +1,5 @@
 import type { InboxEntry } from './api'
+import Loading from './Loading'
 import VerdictBadge from './VerdictBadge'
 
 // A date in the width a list row can spare. Today is a time, this year
@@ -31,12 +32,16 @@ export const when = (ms: number): string => {
 // its content — which is what makes a list scannable, and also what
 // stops a sender-chosen subject or ship name from deciding the layout.
 export default function ThreadList({
-  entries, error, selected, onSelect,
+  entries, error, loading, selected, onSelect,
 }: {
   entries: InboxEntry[]
   // Distinct from an empty view: a failed fetch (unreachable ship) reads
   // differently than "nothing here", so the user can tell the two apart.
   error: string | null
+  // And so does an answer that has not come back yet — the third state
+  // the two above used to be collapsed into. Only consulted when there
+  // is nothing to draw; a refresh over existing rows leaves them up.
+  loading: boolean
   selected: string | null
   onSelect: (id: string) => void
 }) {
@@ -44,6 +49,7 @@ export default function ThreadList({
     return <div className="flex-1 p-3 text-danger">{error}</div>
   }
   if (entries.length === 0) {
+    if (loading) return <Loading />
     return <div className="flex-1 p-3 text-ink-faint">Nothing here.</div>
   }
   return (
