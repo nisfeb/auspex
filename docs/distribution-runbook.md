@@ -647,3 +647,36 @@ needs its own go.
    or step 6's list may have taken one out.
 8. Bounce, then check endpoints, the grid, and that the console carries
    no `BANG` or `missing import`.
+
+### 10.8 The tool bundle is a hermetic namespace — and the MCP surface is three tools
+
+Two separate reasons the mcp app listed **zero** tools after the trim.
+
+**`gub/lib/tool-bundle/` is never compiled in the desk's namespace.**
+`mcp.hoon` takes it as a directory import and seeds it into its
+`tools.tools` child as that instance's own `/code/lib`, and
+`+find-code-ns` is explicit: *"Governance is hermetic — Lower namespaces
+must include marks/libs they need."* So a tool's
+`/<  tools  /lib/tools.hoon` means `tool-bundle/tools.hoon`, **not**
+`gub/lib/tools.hoon`. Three files were missing from the bundle
+(`tools.hoon` plus the two lattice libs its tools import), so all eleven
+failed to compile — and `+scan-own` skips a tool that will not compile
+without a word. A hermetic sub-namespace needs its **whole** dep closure
+copied in beside it; the reachability walker resolved those imports
+against `gub/lib`, found the outer copies, and pruned the inner ones.
+
+**`tools/list` does not advertise the registry.** `mcp-rpc`'s
+`+handle-request` skims it down to `list_tools`, `call_tool` and `echo`,
+and a client reaches everything else through `call_tool`. All three are
+upstream tools, so a trim that keeps only our own leaves an MCP client
+looking at a server with no tools however full the registry is. Keep
+those three.
+
+Verified on `~wex`: registry 14 tools, protocol advertises 3, and
+`call_tool → lattice-list` returns the vault. Both surfaces are worth
+checking after a trim, because they fail independently:
+
+```
+GET  /grubbery/mcp/api/tools           the full registry
+POST /grubbery/mcp {"method":"tools/list"}   what a client sees
+```
