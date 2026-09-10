@@ -252,6 +252,61 @@ failing to start. That is the precondition for contextual consent ever
 working: you can only ask at the moment of need if the app has a sane
 state before the answer.
 
+### 4.6 Bootstrap: how anyone finds my apps at all
+
+First, the mechanism as I read it, so we are talking about the same
+thing. There is no index and no push — it is follow-a-ship:
+
+- Someone pokes their shell's `peers.json` with `{"add": "~ricsul-bilwyt"}`
+  (`shell.hoon:184-201`).
+- That makes one grub, `/peers/~ricsul-bilwyt.json`, whose fiber opens a
+  `keep` on
+  `/sys/ames/ships/~ricsul-bilwyt/root/apps/shell.shell/share/public`,
+  grub `desks.json` (`+peer-pub-road`). Live: what I publish later shows
+  up without them acting again. Each mirror owns its own traffic, so an
+  unreachable ship blocks nobody.
+- On my side the road is readable because it is in the `public.grp`
+  usergroup's weir, and `public.json` is *derived from the live grants*,
+  so the listing cannot advertise something I did not actually share.
+- `+gather-peers` then renders the cards the "add apps" browser shows.
+
+Two consequences, one of which I think is a blocker for the migration.
+
+**The lesser one: a stranger's only path to my software is a dojo poke.**
+Reach is exactly the set of ships that have typed my @p. That is fine as
+a trust model and I am not asking you to build a store — but "open the
+dojo and poke this" is a wall in front of every person who is not
+already comfortable, and it is the single step between someone hearing
+about Lattice and having it. If there is an intended path from a *link*
+to that poke, I would like to know what it is; if there is not, I think
+it is worth one.
+
+**The greater one: every current user of mine already has this
+relationship, and the migration would silently drop it.** People running
+Lattice today installed `%grubbery` from `~ricsul-bilwyt`, and kiln syncs
+my whole desk to them. That *is* a software-source relationship — a
+broader one than peering, since kiln puts my files in their ball
+wholesale. If the migration does not carry it across, they do not merely
+lose discovery: they stop receiving Lattice updates, silently, and the
+only fix is to tell every one of them to type a poke they have never
+heard of. That is exactly the perceivable change the migration exists to
+avoid.
+
+**So: the ship you got grubbery from should be a peer by default.**
+
+I want to be clear that I am not asking for a favour to my ship. It is
+true by construction for anyone who distributes grubbery, it *encodes a
+relationship that already exists* rather than creating one, and it grants
+strictly less than what that relationship already grants — a keep on one
+public listing, against kiln syncing an entire desk. A user who does not
+want it removes the peer, which is a thing the shell already supports.
+
+If you would rather not make that the rule, the fallback is mine to own:
+I ship a one-time migration that pokes the shell once and records that it
+did. I would rather it were the rule, because every distributor is going
+to hit this the first time they move an installed base, and a silent loss
+of updates is a bad failure for a user to discover months later.
+
 ## 5. What I want to do, and my fallback
 
 **Preferred: make Auspex the first non-lattice app on the code-nexus
@@ -335,3 +390,6 @@ value is that it exists and has been wrong a few times already.
    you would rather it stay mine.
 5. §4.5 — whether "ambient vs consequential" is a distinction the shell
    wants to draw. I will build the graceful-degradation half either way.
+6. §4.6 — whether the ship you got grubbery from is a peer by default.
+   This is the one I think blocks a clean migration of an installed
+   base, and it is not specific to me.
