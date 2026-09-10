@@ -13,16 +13,20 @@
 // the ring because the word beside it already says what it means.
 export default function Loading({ what = 'Loading' }: { what?: string }) {
   return (
-    <div
-      role="status"
-      className="flex flex-1 items-center gap-2 p-3 text-ink-faint"
-    >
-      <span
-        aria-hidden="true"
-        className="size-3.5 shrink-0 animate-spin rounded-full border-2
-          border-line border-t-ink-faint"
-      />
-      {what}…
+    // `flex-1` on the OUTER box and the row nested inside it: the box has
+    // to claim the pane's height the way the list it stands in for does,
+    // but a spinner centred in that height would sit halfway down an empty
+    // column and then jump to the top when the rows arrive. The message
+    // this replaces starts at the top, so this starts in the same place.
+    <div role="status" className="flex-1 p-3 text-ink-faint">
+      <span className="flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className="size-3.5 shrink-0 animate-spin rounded-full border-2
+            border-line border-t-ink-faint"
+        />
+        {what}…
+      </span>
     </div>
   )
 }
