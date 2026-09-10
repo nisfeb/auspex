@@ -528,7 +528,33 @@ export const markRead = (ids: string[]) =>
 // again, forever.
 const BEACON = '/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev'
 
+// Retry policy, and it is not a detail. A FIXED delay is what this had,
+// and a fixed delay is the shape that saturated ~ricsul-bilwyt for most of
+// a day on 2026-09-09: a pier restart drops every client at the same
+// instant, so they all come back on the same tick, for ever, while the
+// ship is least able to answer. A ship runs its events one at a time, so a
+// handful of clients on a timer can consume the whole thing while every
+// metric you would check looks healthy. So: double to a cap, and jitter,
+// which is what breaks up a synchronised herd.
+//
+// The reset rule is the subtle half. Resetting whenever an attempt
+// REGISTERED would mean a ship that accepts a connection and drops it at
+// once never backs off at all, because registration is the first thing
+// that happens. So the reset is on DURATION: a stream that held for
+// LIVED_MS was a working one whose keep expired on schedule, and the next
+// attempt starts from the floor. Anything shorter is a failure, whatever
+// it managed to send first.
+const RETRY_MIN_MS = 3_000
+const RETRY_MAX_MS = 30_000
+const LIVED_MS = 10_000
+const jitter = (ms: number) => Math.round(ms * (0.5 + Math.random()))
+
 // Subscribe to that stream. Returns a teardown.
+//
+// `onResume` is called when the tab comes back from hidden, where the
+// stream was deliberately not held: whatever changed in the meantime
+// arrived on a connection nobody was reading, so the caller catches up
+// once. It is the full refresh; `onEvent` is the cheap one.
 //
 // EventSource cannot set an Accept header and grubbery keys the SSE
 // response off it, so this is a plain fetch whose body is read as a
@@ -536,12 +562,42 @@ const BEACON = '/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev'
 // carries the whole /beacon directory, hence the ' /rev' filter, and the
 // first event ('old ...') is the current value rather than a change, so
 // acting on it would refetch everything on every mount.
-export const subscribeChanges = (onChange: () => void) => {
+export const subscribeChanges = (onEvent: () => void, onResume?: () => void) => {
   let stopped = false
   let ac: AbortController | null = null
+  let wait = RETRY_MIN_MS
+
+  const hidden = () => typeof document !== 'undefined' && document.hidden
+
+  // A HIDDEN TAB HOLDS NOTHING. Vere serves HTTP/1.1 and browsers cap
+  // about six connections per origin, so a parked tab's held stream is a
+  // connection the tab you are actually looking at cannot have. Lattice
+  // drops its stream while hidden for exactly this reason. Coming back
+  // costs one request, and the catch-up is `onResume` — which also covers
+  // the one failure a stream can never report: a connection that dies
+  // silently, with no FIN and no error, leaving the reader blocked for
+  // ever. A NAT timeout or a closed laptop lid is the realistic trigger.
+  const onVis = () => { if (document.hidden) ac?.abort() }
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis)
+
+  const untilVisible = () => new Promise<void>((r) => {
+    const wake = () => {
+      if (document.hidden) return
+      document.removeEventListener('visibilitychange', wake)
+      r()
+    }
+    document.addEventListener('visibilitychange', wake)
+  })
 
   const read = async () => {
     while (!stopped) {
+      if (hidden()) {
+        await untilVisible()
+        if (stopped) return
+        onResume?.()
+        wait = RETRY_MIN_MS
+      }
+      const began = Date.now()
       ac = new AbortController()
       try {
         const res = await fetch(BEACON, {
@@ -561,21 +617,36 @@ export const subscribeChanges = (onChange: () => void) => {
           buf = frames.pop() ?? ''
           for (const f of frames) {
             const ev = f.split('\n').find((l) => l.startsWith('event: '))?.slice(7)
-            if (ev && ev.endsWith(' /rev') && !ev.startsWith('old')) onChange()
+            // `old …` is the current revision replayed at registration,
+            // not a change. Ignoring it is what makes a reconnect cost
+            // exactly one request and do no work.
+            if (ev && ev.endsWith(' /rev') && !ev.startsWith('old')) onEvent()
           }
         }
       } catch {
-        // A dropped stream is normal (a ship bounce, a sleeping laptop).
-        // Retry rather than going quiet: the alternative is a tab that
-        // looks live and is not.
+        // A dropped stream is normal (a ship bounce, a sleeping laptop, a
+        // tab going hidden). Retry rather than going quiet: the
+        // alternative is a tab that looks live and is not. There is no
+        // staleness watchdog here and there must not be one — a healthy
+        // connection to a quiet ship sends nothing for minutes, so a
+        // watchdog fires on connections that are perfectly fine, and each
+        // firing costs a reconnect the ship pays for.
       }
       if (stopped) return
-      await new Promise((r) => setTimeout(r, 3000))
+      const lived = Date.now() - began >= LIVED_MS
+      if (lived) wait = RETRY_MIN_MS
+      // Hidden: no sleep, because the loop parks on visibility at the top.
+      if (!hidden()) await new Promise((r) => setTimeout(r, jitter(wait)))
+      if (!lived) wait = Math.min(wait * 2, RETRY_MAX_MS)
     }
   }
 
   read()
-  return () => { stopped = true; ac?.abort() }
+  return () => {
+    stopped = true
+    ac?.abort()
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis)
+  }
 }
 
 // ── the mail-client layer ───────────────────────────────────────────

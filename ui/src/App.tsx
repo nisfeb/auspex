@@ -239,6 +239,19 @@ export default function App() {
     setThreadUpdate((prev) => (prev ?? 0) + 1)
   }, [refresh, refreshSidebar])
 
+  // What a BEACON event costs. The beacon moves only when stored mail
+  // moves, and everything else the sidebar shows — labels, archive,
+  // drafts, filters, lists — is local state that never travels and
+  // deliberately never bumps it. So a remote change cannot have altered
+  // any of them, and refetching them anyway made one delivery cost five
+  // requests in every open tab (~3s of ship time, measured on ~wex);
+  // now it costs one. Every local path that DOES change them refreshes
+  // the sidebar itself.
+  const onBeacon = useCallback(() => {
+    refresh()
+    setThreadUpdate((prev) => (prev ?? 0) + 1)
+  }, [refresh])
+
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { refreshSidebar() }, [refreshSidebar])
 
@@ -273,8 +286,10 @@ export default function App() {
     // subscribeChanges is synchronous and hands back its own teardown, so
     // there is no window in which an unmount (or StrictMode's dev-only
     // double effect) can race an in-flight subscribe and leak a stream.
-    return subscribeChanges(onChange)
-  }, [onChange])
+    // The cheap handler for a change; the full one for coming back from
+    // a hidden tab, where anything may have moved unobserved.
+    return subscribeChanges(onBeacon, onChange)
+  }, [onBeacon, onChange])
 
   // Debounce the search box. A search is a read and runs on its own
   // request fiber, so it never queues behind the writer — but it is

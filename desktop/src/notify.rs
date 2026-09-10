@@ -51,6 +51,26 @@ pub const CAP: usize = 3;
 const BACKOFF_MIN: std::time::Duration = std::time::Duration::from_secs(1);
 const BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Spread a retry over 0.5–1.5× its delay.
+///
+/// Doubling alone is not enough. A pier restart drops every client it has at
+/// the same instant, so an undithered backoff — however well shaped — brings
+/// them all back on the same tick, and keeps doing it, while the ship is
+/// least able to answer. A briefing written after ~ricsul-bilwyt spent most
+/// of 2026-09-09 saturated by exactly this names it as a rule: double to a
+/// cap, AND jitter.
+///
+/// The wall clock's sub-second bits are the randomness, because this needs no
+/// more than that and a dependency for it would be silly.
+fn jittered(d: std::time::Duration) -> std::time::Duration {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|t| t.subsec_nanos())
+        .unwrap_or(0);
+    let f = 0.5 + f64::from(n % 1_000) / 1_000.0;
+    std::time::Duration::from_secs_f64(d.as_secs_f64() * f)
+}
+
 /// One row of the listing, cut down to what a notification needs.
 ///
 /// Deliberately NOT the client's whole `InboxEntry`. Every field here is one
@@ -295,7 +315,7 @@ fn run(app: AppHandle) {
                 // thread as new and replay the whole backlog.
                 Err(e) => {
                     dlog(&format!("notify: snapshot failed: {e}"));
-                    std::thread::sleep(backoff);
+                    std::thread::sleep(jittered(backoff));
                     backoff = (backoff * 2).min(BACKOFF_MAX);
                     continue;
                 }
@@ -336,7 +356,7 @@ fn run(app: AppHandle) {
             }
             Err(e) => dlog(&format!("notify: beacon failed: {e}")),
         }
-        std::thread::sleep(backoff);
+        std::thread::sleep(jittered(backoff));
         backoff = (backoff * 2).min(BACKOFF_MAX);
     }
 }
@@ -354,6 +374,22 @@ mod tests {
             forged: false,
             unread,
         }
+    }
+
+    #[test]
+    fn a_retry_is_spread_around_its_delay() {
+        //  Every retry lands inside 0.5–1.5x, and several in a row do not
+        //  all land on the same value — which is the whole point: an
+        //  undithered backoff returns a whole fleet on one tick.
+        let d = std::time::Duration::from_secs(8);
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let j = jittered(d);
+            assert!(j >= d / 2 && j <= d * 3 / 2, "{j:?} outside 0.5-1.5x of {d:?}");
+            seen.insert(j.as_millis());
+            std::thread::sleep(std::time::Duration::from_micros(300));
+        }
+        assert!(seen.len() > 1, "every retry landed on the same delay");
     }
 
     #[test]
