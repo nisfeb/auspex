@@ -105,6 +105,22 @@ Two hashes nearby that are **not** ids:
   addressing means the hash is the authority and the courier is irrelevant, so
   a blob may be fetched from any ship that has it.
 
+### `subj` or `subject`
+
+Both appear, and the split is a rule rather than an accident: **`subj` is the
+frozen wire name, `subject` is everything else.**
+
+`subj` is the field in `$unsigned` and nothing else. It cannot be renamed —
+the face is part of the noun a signature covers, so changing it changes every
+message id and makes every message in existence read as forged. `docs/protocol.md`
+fixes it at field 4, and the names derived from it (`max-subj`,
+`+fits-subjects`) belong to that spec too.
+
+`subject` is the name everywhere a person or a client sees it: the local HTTP
+API in **both** directions, every marc's JSON, the filter type (`$rule` is
+user-authored, never signed, never on the wire) and drafts. The API is strict
+about it — a request carrying `subj` is a 400, not an alias.
+
 The wire-level definitions live in `docs/protocol.md`, with conformance
 vectors under `protocol/vectors/`; `grubbery-overlay/lib/auspex-chain.hoon` is
 the implementation.

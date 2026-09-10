@@ -159,7 +159,7 @@
 +$  action
   $%  $:  %send
           to=(set ship)
-          subj=@t
+          subject=@t
           body=@t
           body-mime=@t
           prev=(unit msg-id)
@@ -184,7 +184,7 @@
     ::  nexus signs what it stores.
       $:  %send-ref
           to=(set ship)
-          subj=@t
+          subject=@t
           body=@t
           body-mime=@t
           prev=(unit msg-id)
@@ -511,7 +511,7 @@
   $:  %0
       id=@uv
       to=(set ship)
-      subj=@t
+      subject=@t
       body=@t
       prev=(unit msg-id)
       at=@da
@@ -1629,7 +1629,7 @@
   |=  d=draft
   ^-  ?
   ?&  (lte (met 3 body.d) max-body)
-      (lte (met 3 subj.d) max-subj)
+      (lte (met 3 subject.d) max-subj)
       (lte ~(wyt in to.d) max-to)
   ==
 ::

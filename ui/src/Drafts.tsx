@@ -39,7 +39,7 @@ export default function Drafts({
             </span>
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
               <span className="truncate text-ink">
-                {d.subj || <span className="text-ink-faint">(no subject)</span>}
+                {d.subject || <span className="text-ink-faint">(no subject)</span>}
               </span>
               <span className="truncate text-ink-faint">{d.body}</span>
             </span>
@@ -47,7 +47,7 @@ export default function Drafts({
           <button
             type="button"
             onClick={() => onDelete(d.id)}
-            aria-label={`Delete draft ${d.subj || '(no subject)'}`}
+            aria-label={`Delete draft ${d.subject || '(no subject)'}`}
             title="Delete this draft. Nothing was ever signed, so nothing is lost but the text."
             className="btn btn-danger shrink-0"
           >

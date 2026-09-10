@@ -19,12 +19,12 @@
 ::
 ::  a compose: recipients, a subject, a body, and a null prev.
 ++  test-de-send-compose
-  =/  got  (de-send:web (jo '{"to":["~zod","~nec"],"subj":"hi","body":"there","prev":null}'))
+  =/  got  (de-send:web (jo '{"to":["~zod","~nec"],"subject":"hi","body":"there","prev":null}'))
   ;:  weld
     %+  expect-eq
       !>  `(unit (set ship))`[~ (sy ~[~zod ~nec])]
       !>  ?~(got ~ `to.u.got)
-    %+  expect-eq  !>(`(unit @t)`[~ 'hi'])  !>(?~(got ~ `subj.u.got))
+    %+  expect-eq  !>(`(unit @t)`[~ 'hi'])  !>(?~(got ~ `subject.u.got))
     %+  expect-eq  !>(`(unit @t)`[~ 'there'])  !>(?~(got ~ `body.u.got))
   ::  a compose has no prev, and that is a successful parse with ~ in it,
   ::  not a failed one.
@@ -33,7 +33,7 @@
 ::
 ::  a reply: the same body with a prev naming a message.
 ++  test-de-send-reply
-  =/  jon  (jo '{"to":["~zod"],"subj":"re: hi","body":"yes","prev":"0v3"}')
+  =/  jon  (jo '{"to":["~zod"],"subject":"re: hi","body":"yes","prev":"0v3"}')
   %+  expect-eq
     !>  `(unit (unit @uv))`[~ [~ 0v3]]
   =/  got  (de-send:web jon)
@@ -46,7 +46,7 @@
 ++  test-de-send-no-recipients
   %+  expect-eq
     !>  `(unit (set ship))`[~ ~]
-  =/  got  (de-send:web (jo '{"to":[],"subj":"s","body":"b","prev":null}'))
+  =/  got  (de-send:web (jo '{"to":[],"subject":"s","body":"b","prev":null}'))
   !>  ?~(got ~ `to.u.got)
 ::
 ::  ── send, refused ───────────────────────────────────────────────────
@@ -54,24 +54,24 @@
 ::  a missing field is ~, not a crash.
 ++  test-de-send-missing-body
   %+  expect-eq  !>(`(unit send-req:web)`~)
-  !>  (de-send:web (jo '{"to":["~zod"],"subj":"s","prev":null}'))
+  !>  (de-send:web (jo '{"to":["~zod"],"subject":"s","prev":null}'))
 ::
 ::  a recipient that is not a @p is ~. This is the one field a user types
 ::  by hand, so it is the one that is malformed in ordinary use.
 ++  test-de-send-bad-recipient
   %+  expect-eq  !>(`(unit send-req:web)`~)
-  !>  (de-send:web (jo '{"to":["not a ship"],"subj":"s","body":"b","prev":null}'))
+  !>  (de-send:web (jo '{"to":["not a ship"],"subject":"s","body":"b","prev":null}'))
 ::
 ::  a prev that is not a @uv is ~, rather than a send that silently
 ::  becomes a compose and starts a new thread.
 ++  test-de-send-bad-prev
   %+  expect-eq  !>(`(unit send-req:web)`~)
-  !>  (de-send:web (jo '{"to":["~zod"],"subj":"s","body":"b","prev":"nope"}'))
+  !>  (de-send:web (jo '{"to":["~zod"],"subject":"s","body":"b","prev":"nope"}'))
 ::
 ::  a body that is a number, not a string.
 ++  test-de-send-wrong-type
   %+  expect-eq  !>(`(unit send-req:web)`~)
-  !>  (de-send:web (jo '{"to":["~zod"],"subj":"s","body":7,"prev":null}'))
+  !>  (de-send:web (jo '{"to":["~zod"],"subject":"s","body":7,"prev":null}'))
 ::
 ::  an array where an object belongs - what a client sending the wrong
 ::  route's payload produces.
@@ -236,7 +236,7 @@
 ::  `attachments` key at all.
 ++  test-de-refs-absent-is-empty
   %+  expect-eq  !>(`(unit (list up-ref:web))`[~ ~])
-  !>  (de-refs:web (jo '{"to":[],"subj":"s","body":"b","prev":null}') 16)
+  !>  (de-refs:web (jo '{"to":[],"subject":"s","body":"b","prev":null}') 16)
 ::
 ++  test-de-refs-decodes-one-ref
   =/  got

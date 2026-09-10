@@ -1154,7 +1154,7 @@
 ++  test-draft-ok-applies-the-send-caps
   =/  ok=draft:sur   [%0 0v1 (sy ~[~palnet-sampel]) 'subject' 'body' ~ ~2026.1.1]
   =/  fat=draft:sur  ok(body (crip (reap 100.001 'a')))
-  =/  loud=draft:sur  ok(subj (crip (reap 1.001 'a')))
+  =/  loud=draft:sur  ok(subject (crip (reap 1.001 'a')))
   ;:  weld
     (expect !>((draft-ok:auspex ok)))
     (expect !>(!(draft-ok:auspex fat)))

@@ -417,7 +417,7 @@ export const send = async (
   attachments: AttachRef[] = [],
 ): Promise<SendResult> => {
   const res = await post('/api/send', {
-    to, subj: subject, body, prev,
+    to, subject, body, prev,
     ...(attachments.length ? { attachments } : {}),
   })
   return { refused: asRefusals(res) }
@@ -712,7 +712,7 @@ export interface Page {
 export interface Draft {
   id: string
   to: string[]
-  subj: string
+  subject: string
   body: string
   prev: string | null
   at: number
@@ -810,7 +810,7 @@ export const newId = (): string => {
 }
 
 export const saveDraft = (d: Omit<Draft, 'at'>) =>
-  post('/api/draft', { id: d.id, to: d.to, subj: d.subj, body: d.body, prev: d.prev })
+  post('/api/draft', { id: d.id, to: d.to, subject: d.subject, body: d.body, prev: d.prev })
 
 export const deleteDraft = (id: string) => post('/api/draft-delete', { id })
 

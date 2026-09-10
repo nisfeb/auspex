@@ -59,7 +59,7 @@ export default function Compose({
   const [to, setTo] = useState<string[]>(resume ? resume.to : [])
   const [pending, setPending] = useState('')
   const [subject, setSubject] = useState(
-    resume ? resume.subj : forward ? `fwd: ${forward.subject}` : '',
+    resume ? resume.subject : forward ? `fwd: ${forward.subject}` : '',
   )
   const [body, setBody] = useState(resume ? resume.body : '')
   const [sending, setSending] = useState(false)
@@ -128,7 +128,7 @@ export default function Compose({
       await saveDraft({
         id: draftId.current,
         to: named,
-        subj: s,
+        subject: s,
         body: b,
         prev: forward ? forward.prev : resume ? resume.prev : null,
       })
@@ -221,7 +221,7 @@ export default function Compose({
         await saveDraft({
           id: draftId.current,
           to: list,
-          subj: subject,
+          subject,
           body,
           prev: forward ? forward.prev : resume ? resume.prev : null,
         })

@@ -1211,14 +1211,14 @@
     ::  the writer refused.
       %send
     ;<  *  bind:m
-      (do-send root to.a subj.a body.a body-mime.a prev.a files.a bcc.a)
+      (do-send root to.a subject.a body.a body-mime.a prev.a files.a bcc.a)
     (pure:m |)
   ::  the same send, naming blobs the store already holds instead of
   ::  carrying bytes. The web surface's only send path.
   ::
       %send-ref
     ;<  *  bind:m
-      (do-send-refs root to.a subj.a body.a body-mime.a prev.a refs.a bcc.a)
+      (do-send-refs root to.a subject.a body.a body-mime.a prev.a refs.a bcc.a)
     (pure:m |)
   ::
     %read           (do-read root ids.a)
@@ -1283,7 +1283,7 @@
 ++  do-send
   |=  $:  root=path
           to=(set ship)
-          subj=@t
+          subject=@t
           body=@t
           body-mime=@t
           prev=(unit msg-id:uc)
@@ -1301,7 +1301,7 @@
   ;<  fresh=(list file:uc)  bind:m  (unheld-files root files)
   ::  the metadata is derived FROM THE BYTES IN HAND, which is what
   ::  makes `size` and `hash` agree with what a fetcher re-measures.
-  (do-send-core root to subj body body-mime prev (turn files describe:uc) fresh bcc)
+  (do-send-core root to subject body body-mime prev (turn files describe:uc) fresh bcc)
 ::
 ::  +do-send-refs: the same send, naming blobs the store already holds.
 ::
@@ -1327,7 +1327,7 @@
 ++  do-send-refs
   |=  $:  root=path
           to=(set ship)
-          subj=@t
+          subject=@t
           body=@t
           body-mime=@t
           prev=(unit msg-id:uc)
@@ -1340,7 +1340,7 @@
   ?~  as  (reject root 'unknown attachment')
   ::  nothing to store: the bytes are already in the tree and already
   ::  published, which is what the upload route did.
-  (do-send-core root to subj body body-mime prev u.as ~ bcc)
+  (do-send-core root to subject body body-mime prev u.as ~ bcc)
 ::
 ::  +resolve-refs: each named blob's SIGNED metadata, or ~ if any is
 ::  missing.
@@ -1375,7 +1375,7 @@
 ++  do-send-core
   |=  $:  root=path
           to=(set ship)
-          subj=@t
+          subject=@t
           body=@t
           body-mime=@t
           prev=(unit msg-id:uc)
@@ -1408,7 +1408,7 @@
     (reject root 'this ship cannot sign mail: Auspex has not been granted the key road')
   ?.  (lte (met 3 body) max-body:uc)
     (reject root 'body too long')
-  ?.  (lte (met 3 subj) max-subj:uc)
+  ?.  (lte (met 3 subject) max-subj:uc)
     (reject root 'subject too long')
   ?.  (lte (add ~(wyt in to) ~(wyt in bcc)) max-to:uc)
     (reject root 'too many recipients')
@@ -1448,7 +1448,7 @@
   ::  is what BCC means. Nothing about them is signed, and no hashed
   ::  commitment to them is signed either - that would leak that a BCC
   ::  exists while staying testable against any guessed ship.
-  =/  u=unsigned:uc  [our lyf to subj body body-mime now prev as]
+  =/  u=unsigned:uc  [our lyf to subject body body-mime now prev as]
   =/  mg=msg:uc     [u (sign-with:uc rng (digest:uc u))]
   ::  `full` is the whole stored thread, every branch of it; `old` is the
   ::  ONE PATH this message answers, root to `prev`. The difference
@@ -1732,7 +1732,7 @@
   ^-  form:m
   ;<  d=(unit draft:uc)  bind:m  (read-draft root i)
   ?~  d  (reject root 'unknown draft')
-  ;<  sent=?  bind:m  (do-send root to.u.d subj.u.d body.u.d '' prev.u.d ~ ~)
+  ;<  sent=?  bind:m  (do-send root to.u.d subject.u.d body.u.d '' prev.u.d ~ ~)
   ?.  sent
     ::  +do-send has already written its own reason to /tr/last. The
     ::  draft survives.
@@ -3974,7 +3974,7 @@
   %-  pairs:enjs:format
   :~  ['id' [%s (scot %uv id.d)]]
       ['to' [%a (turn ~(tap in to.d) |=(w=@p `json`[%s (scot %p w)]))]]
-      ['subj' [%s subj.d]]
+      ['subject' [%s subject.d]]
       ['body' [%s body.d]]
       ['prev' ?~(prev.d ~ [%s (scot %uv u.prev.d)])]
       ['at' (time:enjs:format at.d)]
@@ -4334,7 +4334,7 @@
   =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
   ::  the list view is the surface a user scans fastest, and every field
   ::  on it is attacker-chosen: anyone may poke a one-message chain
-  ::  claiming from=~zod, subj='Password reset' with a `sent` far in the
+  ::  claiming from=~zod, subject='Password reset' with a `sent` far in the
   ::  future, and `sent` is what orders the chain. Two things follow.
   ::
   ::  One: the summary is drawn from the newest NON-%forged copy, not from
@@ -4469,7 +4469,7 @@
   ::    writer will overwrite would be the drift this shares arms to
   ::    avoid.
   =/  one=chain:uc
-    ~[[[*@p 0 to.u.req subj.u.req body.u.req '' *@da prev.u.req ~] 0x0]]
+    ~[[[*@p 0 to.u.req subject.u.req body.u.req '' *@da prev.u.req ~] 0x0]]
   ?.  (fits-bodies:uc one max-body:uc)
     (send-err eyre-id 400 'body too long')
   ?.  (fits-subjects:uc one max-subj:uc)
@@ -4530,7 +4530,7 @@
   ::    So this refuses what we KNOW will be refused and never guesses.
   ;<  now=@da  bind:m  bowl-now
   =/  probe=chain:uc
-    :~  :-  :*  *@p  0  to.u.req  subj.u.req  body.u.req  ''  *@da
+    :~  :-  :*  *@p  0  to.u.req  subject.u.req  body.u.req  ''  *@da
                 prev.u.req
                 %+  turn  refs
                 |=(r=attach-ref:uc `attachment:uc`[name.r 0 mime.r hash.r])
@@ -4557,7 +4557,7 @@
     ::  not vanish behind a 200 with nobody to carry it to.
     (send-err eyre-id 400 (refusal-line bad))
   ;<  ~  bind:m
-    (poke-writer [%send-ref to.u.req subj.u.req body.u.req '' prev.u.req refs ~])
+    (poke-writer [%send-ref to.u.req subject.u.req body.u.req '' prev.u.req refs ~])
   (send-refused eyre-id bad)
 ::
 ::  +refusal-line: the whole refusal, on one line, for the case where
@@ -4869,7 +4869,7 @@
   ?~  r  (send-err eyre-id 400 'bad draft')
   ;<  now=@da  bind:m  bowl-now
   =/  d=draft:uc
-    [%0 id.u.r to.u.r subj.u.r body.u.r prev.u.r now]
+    [%0 id.u.r to.u.r subject.u.r body.u.r prev.u.r now]
   ?.  (draft-ok:uc d)
     (send-err eyre-id 400 'draft too long')
   ;<  ~  bind:m  (poke-writer [%save-draft d])
@@ -5010,7 +5010,7 @@
   ::  writer will overwrite would be the drift this shares arms to
   ::  avoid.
   =/  one=chain:uc
-    ~[[[*@p 0 to.u.d subj.u.d body.u.d '' *@da prev.u.d ~] 0x0]]
+    ~[[[*@p 0 to.u.d subject.u.d body.u.d '' *@da prev.u.d ~] 0x0]]
   ?.  (fits-bodies:uc one max-body:uc)
     (send-err eyre-id 400 'body too long')
   ?.  (fits-subjects:uc one max-subj:uc)

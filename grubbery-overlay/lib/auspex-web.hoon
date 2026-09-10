@@ -32,7 +32,7 @@
 ::
 +$  send-req
   $:  to=(set ship)
-      subj=@t
+      subject=@t
       body=@t
       prev=(unit @uv)
   ==
@@ -56,7 +56,7 @@
     %.  jon
     %-  ot:dejs:format
     :~  to+(as:dejs:format (se:dejs:format %p))
-        subj+so:dejs:format
+        subject+so:dejs:format
         body+so:dejs:format
       ::  the client sends `null` for a compose. `mu` is what makes that
       ::  a missing prev rather than a parse failure.
@@ -111,7 +111,7 @@
 ::  that never answers. The nexus checks +label-ok before it stores.
 ::
 +$  label-req  [thread-id=@uv label=@t add=?]
-+$  draft-req  [id=@uv to=(set @p) subj=@t body=@t prev=(unit @uv)]
++$  draft-req  [id=@uv to=(set @p) subject=@t body=@t prev=(unit @uv)]
 +$  rule-req   [id=@uv from=(unit @p) subject=(unit @t) add=(list @t) archive=?]
 ::
 ++  de-label
@@ -160,7 +160,7 @@
     %-  ot:dejs:format
     :~  id+(se:dejs:format %uv)
         to+(as:dejs:format (se:dejs:format %p))
-        subj+so:dejs:format
+        subject+so:dejs:format
         body+so:dejs:format
         prev+(mu:dejs:format (se:dejs:format %uv))
     ==

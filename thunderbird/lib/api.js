@@ -264,9 +264,9 @@ class Api {
 
   //  `attachments` is omitted entirely when there are none, so a send with
   //  nothing attached is byte-for-byte the request the web client makes.
-  send(to, subj, body, prev, attachments = []) {
+  send(to, subject, body, prev, attachments = []) {
     return this.post('/api/send', {
-      to, subj, body, prev,
+      to, subject, body, prev,
       ...(attachments.length ? { attachments } : {}),
     })
   }

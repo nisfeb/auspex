@@ -25,7 +25,7 @@
     %-  pairs:enjs:format
     :~  ['id' [%s (scot %uv id.d)]]
         ['to' [%a (turn ~(tap in to.d) |=(s=@p `^json`[%s (scot %p s)]))]]
-        ['subj' [%s subj.d]]
+        ['subject' [%s subject.d]]
         ['body' [%s body.d]]
         ['prev' ?~(prev.d ~ [%s (scot %uv u.prev.d)])]
         ['at' (time:enjs:format at.d)]

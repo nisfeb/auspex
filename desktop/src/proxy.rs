@@ -604,7 +604,7 @@ mod tests {
         // saw a 200 — a mail client that reports sent and sends nothing.
         with_session(Some("urbauth-~wex=0v1.session"));
         let ship = Stub::new(|_| (200, "sent".to_string()));
-        let body = r#"{"to":["~feb"],"subj":"hi","body":"bytes that must survive the hop","prev":null}"#;
+        let body = r#"{"to":["~feb"],"subject":"hi","body":"bytes that must survive the hop","prev":null}"#;
         let req = format!(
             "POST /apps/auspex/api/send HTTP/1.1\r\nhost: 127.0.0.1:{PORT_BASE}\r\n\
              cookie: webview-junk=1\r\ncontent-length: {}\r\n\
