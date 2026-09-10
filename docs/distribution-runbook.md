@@ -557,12 +557,6 @@ directories with no compiling parent — `claw/`, `explorer/`, `git/`,
 `github/`, `web-test/`, about 80 KB. They are inert (no `.hoon` reaches
 them) and deleting them is a branch change nobody needs before a meeting.
 
-**One thing to settle before the meeting:** the five gap issues are filed
-on `gwbtc/drive` (#3–#7), while every grubbery issue we have filed before
-went to `gwbtc/grubbery`, which is where a core dev looks. They read as
-grubbery-core questions — weir expressiveness, the desk nexus, shell
-prompts, `/sys/scry` granularity. `gh issue transfer` moves them.
-
 ## 10. What the rehearsal on `~wex` actually taught — 2026-09-10
 
 The merge, the trim, the cull and the deploy were all run end to end on
