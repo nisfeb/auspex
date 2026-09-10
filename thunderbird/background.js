@@ -7,6 +7,7 @@
 //  be read rather than to be short.
 
 import { Api, ApiError, UnreachableError, MAX_BLOB, MAX_ATTACH } from './lib/api.js'
+import { isChange, framesIn, nextDelay, nextAttempt } from './lib/beacon.js'
 import {
   addressToShip, shipToAddress, describeRecipient, DOMAIN,
 } from './lib/address.js'
@@ -18,7 +19,18 @@ import {
 
 const PARENT = 'Auspex'
 const SUBFOLDERS = ['Inbox', 'Sent', 'Archived']
-const SYNC_MINUTES = 1
+
+//  THE FALLBACK, and it is a fallback: the beacon is what syncs this
+//  extension. Fifteen minutes rather than one, and it exists for exactly
+//  one case the briefing names — a connection that dies SILENTLY, with no
+//  FIN and no error, so the reader blocks for ever and the stream neither
+//  delivers nor fails. A NAT timeout and a laptop sleep both do it.
+//
+//  It is an alarm rather than a setInterval so it survives a background
+//  page the browser decided to suspend, and it SYNCS rather than
+//  reconnecting: silence is not death, and tearing down a quiet stream is
+//  the bug this whole change is here to avoid.
+const FALLBACK_MINUTES = 15
 
 //  ── state ───────────────────────────────────────────────────────────
 //
@@ -50,6 +62,11 @@ let lastNotifiedStatus = null
 async function setStatus(status, lastError = '') {
   const prev = (await getState()).status
   await setState({ status, lastError })
+  //  SIGNED OUT IS NOT A RETRY LOOP. A 403 is the session, and no amount
+  //  of reconnecting fixes it — so the stream stops here, with everything
+  //  else that stops, and only a successful connect from the options page
+  //  starts it again.
+  if (status === 'signed-out') stopBeacon()
   if (status === prev || status === lastNotifiedStatus) return
   lastNotifiedStatus = status
   if (status === 'signed-out') {
@@ -221,6 +238,15 @@ async function headerFor(auspexId, rec) {
 
 let syncing = false
 
+//  A change that arrives WHILE a sync is running is not lost.
+//
+//  The listing walk takes seconds against a large mailbox, and mail
+//  landing inside that window would otherwise wait for the fifteen-minute
+//  fallback. Set here, read in the `finally` below: one more sync, once,
+//  however many changes arrived — the sync reads the whole listing, so
+//  coalescing them is not an approximation, it is the same answer.
+let pendingChange = false
+
 async function syncNow() {
   if (syncing) return { skipped: true }
   syncing = true
@@ -346,7 +372,127 @@ async function syncNow() {
     return { error: e && e.message ? e.message : String(e) }
   } finally {
     syncing = false
+    if (pendingChange) { pendingChange = false; syncNow() }
   }
+}
+
+//  ── the change beacon ───────────────────────────────────────────────
+//
+//  WHAT THIS REPLACED, and why. Until now the mirror ran on a
+//  sixty-second alarm: a whoami plus a paged inbox walk plus a fetch per
+//  changed thread, 1,440 times a day, whatever the user was doing and
+//  whether or not anything had moved. Measured against ~wex with 42
+//  threads that is about 1.2 seconds of ship time per idle sync, and the
+//  nexus's listing is O(total stored messages), so it gets worse with
+//  every message the mailbox holds. A ship runs its events ONE AT A TIME.
+//
+//  So: subscribe, don't poll. One connection, held open, and a sync only
+//  when the ship says something a reader can see has changed. The rules
+//  it obeys are in lib/beacon.js next to the functions that enforce them;
+//  what is left here is the loop, which is the part a test cannot reach.
+
+//  ONE STREAM, EVER. Two readers would be two held connections and two
+//  syncs per change — and Vere serves HTTP/1.1, where a wasted connection
+//  is one the rest of the client does not get.
+let streaming = false
+let stopStream = false
+let streamAbort = null
+
+//  Diagnostics, bounded. The last few attempts, so the popup and a
+//  selftest can say what the stream has actually been doing rather than
+//  only whether it is up.
+const beaconLog = []
+const logAttempt = (entry) => {
+  beaconLog.push({ at: Date.now(), ...entry })
+  if (beaconLog.length > 20) beaconLog.shift()
+}
+
+//  Read frames until the stream ends. Returns when it does; throws only
+//  if the read itself does.
+async function readStream(res, onFrame) {
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return
+    buf += dec.decode(value, { stream: true })
+    const { frames, rest } = framesIn(buf)
+    buf = rest
+    for (const f of frames) onFrame(f)
+  }
+}
+
+//  THE LOOP. Open the beacon, read until it drops, wait, open it again.
+//
+//  Three things it deliberately does NOT do:
+//
+//    - it does not sync on connect. Registration replays the current
+//      revision as an `old /rev` frame, which lib/beacon.js does not call
+//      a change, so a reconnect costs exactly ONE request and mirrors
+//      nothing. That is the briefing's third rule and it is the whole
+//      reason a reconnect is allowed to be ordinary.
+//    - it does not watch for staleness. A healthy connection to a quiet
+//      ship sends nothing for minutes; the only thing that acts on
+//      silence is the fifteen-minute fallback alarm, and it syncs rather
+//      than reconnecting.
+//    - it does not retry a 403. That is the session, not the request.
+async function runBeacon() {
+  let attempt = 0
+  while (!stopStream) {
+    const { origin, status } = await getState()
+    if (!origin || status === 'signed-out') return
+    const startedAt = Date.now()
+    let why = 'ended'
+    try {
+      const api = new Api(origin)
+      streamAbort = new AbortController()
+      const res = await api.beacon(streamAbort.signal)
+      await readStream(res, (frame) => {
+        if (!isChange(frame)) return
+        logAttempt({ change: true })
+        //  THE ONE ACTION. Nothing else in this file syncs except the
+        //  fallback alarm and a user pressing Sync.
+        if (syncing) pendingChange = true
+        else syncNow()
+      })
+    } catch (e) {
+      why = e && e.message ? e.message : String(e)
+      if (e instanceof ApiError && e.signedOut) {
+        logAttempt({ lived: Date.now() - startedAt, why })
+        await setStatus('signed-out', e.message)
+        return
+      }
+    } finally {
+      streamAbort = null
+    }
+    const lived = Date.now() - startedAt
+    if (stopStream) return
+    //  RESET ON A STREAM THAT LIVED, not on one that registered: see
+    //  nextAttempt in lib/beacon.js for the trap that hides there.
+    const delay = nextDelay(attempt)
+    attempt = nextAttempt(attempt, lived)
+    logAttempt({ lived, why, delay, attempt })
+    await new Promise((r) => setTimeout(r, delay))
+  }
+}
+
+//  Start it, once. Called at startup with a configured origin, and again
+//  after a successful connect — which for a fresh install is the first
+//  moment there is anything to watch.
+function startBeacon() {
+  if (streaming) return false
+  streaming = true
+  stopStream = false
+  runBeacon().finally(() => { streaming = false })
+  return true
+}
+
+//  Stop it: a disconnect, or a 403. `abort` is what unblocks a reader
+//  sitting on a stream that will never send anything again.
+function stopBeacon() {
+  stopStream = true
+  try { if (streamAbort) streamAbort.abort() } catch { /* already gone */ }
 }
 
 //  ── read state, local → ship ────────────────────────────────────────
@@ -621,6 +767,7 @@ browser.runtime.onMessage.addListener(async (msg) => {
   if (msg.kind === 'sync') return syncNow()
   if (msg.kind === 'connect') return connect(msg.origin, msg.code)
   if (msg.kind === 'disconnect') {
+    stopBeacon()
     await setState({ ...DEFAULTS })
     return { ok: true }
   }
@@ -639,7 +786,12 @@ async function connect(rawOrigin, code) {
     lastNotifiedStatus = 'connected'
     await ensureFolders()
     await ensureIdentity(ship)
+    //  THE SEED, and the only sync this extension asks for by itself. Not
+    //  the same thing as a stream reconnect, which mirrors nothing: this
+    //  is a person pressing Connect on a mailbox nothing has mirrored
+    //  yet, and it happens once.
     syncNow()
+    startBeacon()
     return { ok: true, ship, origin: api.origin }
   } catch (e) {
     await classify(e)
@@ -653,8 +805,27 @@ try { dump('AUSPEX background: start\n') } catch { /* no dump outside the shell 
 
 //  ── the clock ───────────────────────────────────────────────────────
 
-browser.alarms.create('auspex-sync', { periodInMinutes: SYNC_MINUTES })
-browser.alarms.onAlarm.addListener((a) => { if (a.name === 'auspex-sync') syncNow() })
+//  THE FALLBACK, not the clock. The beacon is what syncs this extension;
+//  this fires only for the case the beacon cannot see — a stream that
+//  died silently, so the reader blocks for ever and nothing errors.
+//
+//  It skips when the stream is running AND has proved itself since the
+//  last time this fired, because a stream that delivered a change is a
+//  stream that is demonstrably alive and syncing it again would be the
+//  sixty-second poll back in slower clothes.
+browser.alarms.create('auspex-sync', { periodInMinutes: FALLBACK_MINUTES })
+browser.alarms.onAlarm.addListener(async (a) => {
+  if (a.name !== 'auspex-sync') return
+  const { origin, status } = await getState()
+  if (!origin || status === 'signed-out') return
+  //  A loop that has genuinely EXITED is restarted — that is not a
+  //  staleness watchdog, it is noticing there is no reader at all.
+  if (!streaming) startBeacon()
+  const since = Date.now() - FALLBACK_MINUTES * 60000
+  const proved = beaconLog.some((e) => e.change && e.at >= since)
+  if (streaming && proved) return
+  syncNow()
+})
 
 //  On startup, and only if there is something to sync: an unconfigured
 //  install makes no request at all.
@@ -669,12 +840,22 @@ browser.alarms.onAlarm.addListener((a) => { if (a.name === 'auspex-sync') syncNo
     if (res.ok) {
       const cfg = await res.json()
       const { runSelftest } = await import('./selftest.js')
-      runSelftest(cfg, { connect, syncNow, getState, setState, apiFor })
+      runSelftest(cfg, {
+        connect, syncNow, getState, setState, apiFor,
+        beacon: {
+          log: beaconLog, start: startBeacon, stop: stopBeacon,
+          running: () => streaming,
+          abort: () => { try { if (streamAbort) streamAbort.abort() } catch { /* */ } },
+        },
+      })
       return
     }
   } catch { /* no selftest in this build */ }
   const { origin } = await getState()
-  if (origin) syncNow()
+  //  ONE sync at startup — the mailbox may have moved while Thunderbird
+  //  was closed, and the beacon says nothing about what it missed — and
+  //  then the stream, which is what carries everything after it.
+  if (origin) { syncNow(); startBeacon() }
 })()
 
 export { syncNow, connect, htmlToText }
