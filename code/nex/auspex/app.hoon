@@ -1734,7 +1734,7 @@
   ::  is a message the user loses at the last moment, and the whole
   ::  point of a draft is that nothing is lost.
   ?.  (draft-ok:uc d)  (reject root 'bad draft')
-  ;<  ~  bind:m  (ensure-dir (draft-dir root))
+  ;<  ~  bind:m  (ensure-dir root (draft-dir root))
   ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
   ::  the store bound counts only a draft we do not already hold, so
   ::  re-saving an existing draft is never refused for capacity.
@@ -1795,7 +1795,7 @@
   ::  a rule with no condition matches every delivered chain, and with
   ::  `archive` set would empty the inbox permanently and silently.
   ?.  (rule-ok:uc r)  (reject root 'bad rule')
-  ;<  ~  bind:m  (ensure-dir (rule-dir root))
+  ;<  ~  bind:m  (ensure-dir root (rule-dir root))
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
   ::  every rule is evaluated against every delivered chain, ON THE
   ::  WRITER, which is the ship's single serialisation point for mail.
@@ -1844,7 +1844,7 @@
   ?:  (~(has in members) our)  (reject root 'a list may not hold your own ship')
   ::  a list larger than a send may carry is a list that cannot be used.
   ?.  (lte ~(wyt in members) max-to:uc)  (reject root 'too many members')
-  ;<  ~  bind:m  (ensure-dir (list-dir root))
+  ;<  ~  bind:m  (ensure-dir root (list-dir root))
   ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
   ::  the store bound counts only a list we do not already hold, so
   ::  overwriting an existing list is never refused for capacity - which
@@ -2504,7 +2504,7 @@
   |=  [root=@ud c=chain:uc who=ship now=@da]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  ~  bind:m  (ensure-dir (probe-dir root))
+  ;<  ~  bind:m  (ensure-dir root (probe-dir root))
   ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
   =/  nex=probe-req:uc
     ?~  rq  [%0 who now ~[c] ~ 0]
@@ -2688,7 +2688,7 @@
   |=  [root=@ud r=probe-req:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (ensure-dir (peer-dir root))
+  ;<  ~  bind:m  (ensure-dir root (peer-dir root))
   ;<  ~  bind:m
     %^  put-file  (peer-rail root who.r)  [/auspex %peer]
     `peer-rec:uc`[%0 who.r answer.r asked.r]
