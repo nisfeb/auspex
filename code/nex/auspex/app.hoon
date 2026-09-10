@@ -3059,9 +3059,9 @@
     |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
   =/  dead=(list path)  (minimal-dirs:uc stale)
   ;<  ~  bind:m  (ensure-nodes root dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
-  ;<  ~  bind:m  (put-slots dir puts)
+  ;<  ~  bind:m  (put-slots root dir puts)
   ;<  ~  bind:m  (cull-dirs root dir dead)
-  ;<  ~  bind:m  (cull-slots dir gone)
+  ;<  ~  bind:m  (cull-slots root dir gone)
   ::  the answer +deliver needs: did this emit a single dart? A
   ::  redelivery of a chain we already hold emits none, and must not be
   ::  allowed to look like new mail.
@@ -3079,23 +3079,23 @@
   (cull-dirs up dir t.ps)
 ::
 ++  cull-slots
-  |=  [dir=path ps=(list path)]
+  |=  [up=@ud dir=path ps=(list path)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ps  (pure:m ~)
-  ;<  *  bind:m  (cull-soft:io (rf root (weld dir (snip i.ps)) (rear i.ps)))
-  (cull-slots dir t.ps)
+  ;<  *  bind:m  (cull-soft:io (rf up (weld dir (snip i.ps)) (rear i.ps)))
+  (cull-slots up dir t.ps)
 ::
 ++  put-slots
-  |=  [dir=path xs=(list [pk=path st=stored-msg:uc])]
+  |=  [up=@ud dir=path xs=(list [pk=path st=stored-msg:uc])]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
   ;<  ~  bind:m
-    %^  put-file  (rf root (weld dir (snip pk.i.xs)) (rear pk.i.xs))
+    %^  put-file  (rf up (weld dir (snip pk.i.xs)) (rear pk.i.xs))
       [/auspex %msg]
     st.i.xs
-  (put-slots dir t.xs)
+  (put-slots up dir t.xs)
 ::
 ::  ── the pre-tree migration ──────────────────────────────────────────
 ::
