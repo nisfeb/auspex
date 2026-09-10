@@ -5,6 +5,40 @@ script on that date; where something is a decision still to be made it says
 so. The production ship is `~ricsul-bilwyt`. **Nothing in this document is
 executed on it until an explicit go, one step at a time.**
 
+---
+
+## 0. Read this first — 2026-09-10
+
+**This route is now the fallback, not the plan.** Reading grubbery
+`develop@68ca752` (36 commits past the base this fork sits on) turned up
+the distribution mechanism this runbook works around, already built:
+
+- `gub/nex/desk.hoon` mirrors a **code directory** from anywhere in the
+  namespace (`~ship/apps/foo/desk/code`, or a checked-out repo), gated by
+  an opaque `version.*` tag, snapshotting `/code` and `/data` before new
+  code lands. Guests resolve marcs against their own `/desk/code` and
+  distribute the marcs they use, content-addressed.
+- `gub/nex/shell.hoon` is the permission manager: it reads each nexus's
+  `alias.json` and `weir.json`, records consent, writes weirs. It also
+  owns the launcher grid, and its `/book` — one grub per alias holding
+  the current claimants and their locations — is the `/sys/name` idea
+  already standing up.
+
+Two consequences for what follows:
+
+1. **The launcher restoration in §2 and §4 should not ship.** It is 629
+   lines of pre-split `tiles.hoon` plus a docket rewrite visible to every
+   existing lattice user, carried so a second app has somewhere to
+   appear — and the shell owns that now. Ship auspex reachable at
+   `/apps/auspex` with lattice's docket untouched, or wait for the shell.
+2. **The ball trim exists because the desk model ships everything to
+   everyone.** Guest isolation removes the reason for it.
+
+The proposal taken to the grubbery meeting on 2026-09-10 is
+`docs/distribution-proposal.md`. Use this runbook only if that path is
+more than about a week out — and then use the **minimum-surface variant**
+in §5.0.
+
 ## 1. How lattice reaches users today
 
 ### 1.1 Grubbery, in one paragraph
@@ -193,6 +227,26 @@ the roots.
 
 Each step ends with a check. A failed check means stop, not improvise.
 
+### 5.0 The minimum-surface variant — prefer this
+
+If this runbook runs at all, run it without the throwaway parts:
+
+- **Skip** the `tiles.hoon` restoration, its `root.hoon` row, and the
+  docket rewrite. `dist/launcher-restore` stays unmerged.
+- **Vendor only auspex's own sources** and its one `root.hoon` row.
+- Lattice's tile, URL and docket do not change; existing users see
+  nothing move. Auspex is reachable at `/apps/auspex`.
+- Everything else below applies unchanged, minus the launcher checks.
+
+What this costs: no launcher, so two URLs to remember. What it buys: the
+fork gains only the files that later become the published code dir, so
+the migration is the directory re-map `sync-overlay.sh` already does.
+
+The one cost it does NOT avoid: kiln syncs the whole desk, so every
+lattice user receives auspex's ~40 files and their ball compiles a mail
+nexus they did not install. That is the strongest argument for waiting
+for the code-nexus path, and it is why §0 calls this the fallback.
+
 ### 5.1 Rehearse on `~wex` (production-shaped root.hoon)
 
 ```
@@ -347,7 +401,11 @@ commit on the dist branch, then:
 
 Kiln syncs the *desk*, so a user who later points their `%grubbery` at an
 official gwbtc release loses both apps' sources (instances and data persist in
-the ball, BANGed until code returns). The parked plan for that is code in the
-ball's app-local namespace (`[[/project/lattice/code-in-the-ball]]`), waiting
-on upstream's `tools-nexus-refactor`. This runbook is the desk route, which is
-the route that exists today.
+the ball, BANGed until code returns). The parked plan for that was code in the
+ball's app-local namespace, waiting on upstream's `tools-nexus-refactor`.
+
+**That wait is over** — `develop` now has the `desk` nexus that mirrors a
+code directory and the shell that manages the permissions around it. See
+§0 and `docs/distribution-proposal.md`. The desk route below is the route
+that exists on the revision `~ricsul-bilwyt` runs *today*, and nothing
+more than that.
