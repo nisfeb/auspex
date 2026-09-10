@@ -13,7 +13,7 @@ the wire on auspex's behalf.
 ## Install
 
 ```
-npm test          # the three pure libs
+npm test          # the four pure libs
 npm run build     # → dist/auspex-thunderbird-0.1.0.zip
 ```
 
@@ -37,7 +37,8 @@ there is nothing else to do.
    identity `<ship>@auspex.urbit` is created on Local Folders so a compose
    window can be opened at all, and three folders appear under **Local
    Folders → Auspex**: `Inbox`, `Sent`, `Archived`.
-5. Mail is mirrored immediately, and every 60 seconds after that.
+5. Mail is mirrored immediately, and after that whenever the ship says
+   something changed — see **The beacon** below.
 
 A `403` anywhere flips the status to **signed out**, raises one notification,
 and stops syncing until you connect again. That is what an expired session
@@ -72,6 +73,61 @@ compose window, by name.
 
 Thunderbird's own address book works normally: save `~feb@auspex.urbit` as a
 card, put cards in a Thunderbird mailing list, and the composer expands it.
+
+## The beacon
+
+**This extension does not poll.** It holds one connection open —
+`GET /grubbery/api/keep/apps/auspex.auspex_app/beacon/rev` with
+`Accept: text/event-stream`, the ship's change beacon — and syncs when the
+ship says something a reader can see has moved. That is the same stream
+the web client reads (`ui/src/api.ts`) and the desktop app reads
+(`desktop/src/notify.rs`), and all three agree about what a change is:
+the stream carries the whole `/beacon` directory, so a frame counts only
+if its `event:` line ends in ` /rev`, and a frame whose event starts with
+`old` is the **current value replayed at registration** and not news.
+
+**Why, since a 60-second alarm is simpler.** A ship runs its events *one
+at a time*. An idle sync is `GET /api/whoami` plus a paged
+`GET /api/inbox` walk — measured against `~wex`: 0.52 s and 0.72 s, so
+about **1.2 seconds of ship time**, and the nexus's listing is O(total
+stored messages), so it gets worse with every message the mailbox holds.
+At one minute that was 1,440 idle syncs a day for ever, whatever you were
+doing. A briefing written after `~ricsul-bilwyt` spent most of a day
+saturated by exactly this shape of client puts it as: *judge cost, not
+rate.* Measured with the beacon, in a three-minute idle window with the
+extension connected: **zero requests, one held connection.**
+
+**A reconnect is cheap, so a reconnect is allowed to be ordinary.** A ship
+bounce, a laptop waking, a network coming back — the stream re-registers,
+sees `old … /rev`, and mirrors **nothing**. One request, no sync. Measured:
+one request, zero API calls.
+
+**A dead ship is backed off, not drummed on.** 3 seconds doubling to 30,
+every wait spread over 0.5–1.5× itself — because a pier restart drops every
+client at the same instant, and an undithered delay however well shaped
+brings them all back on the same tick. The count resets on a stream that
+*lived*, not on one that merely registered: a ship that accepts the
+connection and immediately drops it would otherwise never back off at all.
+Measured against a dead port: seven attempts in 130 seconds, gaps of 4.5,
+9.0, 8.1, 25.4, 42.9, 23.5 s. A fixed 3-second retry would have been
+forty-three.
+
+**There is no staleness watchdog, deliberately.** A healthy connection to a
+quiet ship sends nothing for minutes; treating that as death is precisely
+the bug that saturated `~ricsul-bilwyt`, and a client that tears down
+healthy streams re-runs its bootstrap on every one. Nothing here reconnects
+because the stream has been quiet.
+
+**A 15-minute alarm is the one thing that acts on silence**, and it *syncs*
+rather than reconnecting. It exists for the case the stream cannot see: a
+connection that dies **silently**, with no FIN and no error, so the reader
+blocks for ever and nothing ever throws. A NAT timeout or a laptop sleep
+does it. It is an `alarms` entry so it survives a suspended background page,
+and it skips when the stream is running and has delivered a change since it
+last fired.
+
+A `403` stops the stream along with everything else — that is the session,
+not the request, and only connecting again on the options page starts it.
 
 ## What is mirrored, and what is not
 
@@ -153,7 +209,7 @@ direction a flag is written locally *only* when it actually differs from
 what is there. That is what stops the two sides echoing a mark back and
 forth forever — `messages.update` fires `messages.onUpdated` whether or not
 it changed anything, so a blind write would put the whole mirror through the
-relay every sixty seconds.
+relay on every change the ship reports.
 
 ## Sending
 
@@ -203,20 +259,23 @@ button on the open message reading `✓`, `○` or `FORGED`.
 - Copies of one id (one genuine, the rest forged) collapse to the
   highest-ranked verdict, with the count in `X-Auspex-Copies`. Mail clients
   have one message per `Message-ID` and no way to show two.
-- No live updates. The ship's change beacon is an SSE stream the web client
-  holds open; this syncs on a 60-second alarm instead.
+- Live updates arrive on the ship's change beacon and nothing else. A sync
+  runs when the ship says something moved; a 15-minute alarm is the only
+  fallback, and it is there for a stream that died silently rather than for
+  the ordinary quiet one.
 - Manifest **v2**, deliberately: `optional_host_permissions`,
   `host_permissions` and `action` are v3-only keys, MV2 host patterns in
   `optional_permissions` do the same job, and a persistent background page is
-  a better fit for a 60-second alarm plus a debounced relay than an event
+  a better fit for a held stream plus a debounced relay than an event
   page that may be unloaded between them. Everything used here is supported
   on Thunderbird 128 through 147.
 
 ## Testing
 
-`npm test` covers the three pure libs (`lib/address.js`, `lib/rfc822.js`,
-`lib/sync.js`) — every rule that a sync loop gets subtly wrong is a function
-in one of them.
+`npm test` covers the four pure libs (`lib/address.js`, `lib/beacon.js`,
+`lib/rfc822.js`, `lib/sync.js`) — every rule that a sync loop gets subtly
+wrong is a function in one of them, the beacon's frame classifier and its
+backoff included.
 
 For an end-to-end run against a live ship there is a selftest build:
 
@@ -228,7 +287,11 @@ whose config names the ship origin, its `+code`, a sink URL to POST results
 to, the messages to send, and the four thread ids the star/flame steps act
 on (`starThread`, `junkThread`, `inboundThread`, `untouchedThread` — the
 third has its label added from outside with `curl` while the test polls for
-it). It packages one extra file, `selftest.json`,
+it). A config with `"mode": "beacon"` runs a different script entirely: it
+counts what the extension *costs* — requests made over a three-minute idle
+window, seconds from a beacon change to mail in the folder, requests a
+reconnect makes, and the gaps between attempts against a `deadOrigin` that
+nothing listens on. It packages one extra file, `selftest.json`,
 which the background fetches at startup; an ordinary build has no such file
 and none of that code is even imported. **Never install a selftest build you
 did not build yourself: it carries an access code.**
@@ -259,7 +322,8 @@ ship you can `curl`, this is the first thing to check.
 2. Sort threaded: a branching thread draws as a tree.
 3. Open a message: the toolbar button shows its verdict.
 4. Reply, send: the compose window closes, and the message appears in
-   `Auspex/Sent` within a minute — and in the web client's thread, in the
-   right place.
+   `Auspex/Sent` within a few seconds — the send bumps the beacon, and the
+   beacon is what mirrors it — and in the web client's thread, in the right
+   place.
 5. Put an ordinary address in To and send: refused, with the address named,
    and the window still open.
