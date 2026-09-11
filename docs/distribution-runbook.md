@@ -911,3 +911,44 @@ This is cheap because the code is already tier-agnostic: `+nexus-up`
 reads `get-here`'s root flag, so one lattice runs at
 `/apps/lattice.lattice_app` and at the desk path both. That was built for
 this window.
+
+### 11.7 A publish path that wedges, and how to unwedge it
+
+Found on `~wex` on 2026-09-11, while verifying the desk install. Not
+migration-specific, but a migration re-publishes every page, so it is the
+workload most likely to trigger it.
+
+`+grow-pub-index` keeps one live `/pub/index/<seq>` manifest in the
+remote-scry farm: grow the successor, cull the predecessor, write the
+counter at `/pub/meta`. If the counter and the farm ever disagree — the
+counter behind a bound spur, or ahead of an unbound one — **every
+subsequent publish answers 500**, and the arm's own comment says why:
+*"A still-bound spur is hit exactly once and never re-culled (which
+cull-farm cannot survive)."*
+
+Worse, the damage is invisible from the app. `POST /pub-regrow`, the
+intended repair, 500s on the same cull.
+
+**The repair:**
+
+```
+:grubbery &grub-cmd
+  [%fix [%make-file /apps/…/lattice.lattice_app/pub %meta %ud 0 %.y]]
+```
+
+Reset the counter to **0**. That is the one value the code guards
+explicitly — *"On the very first publish seq=0 and /pub/index/0 was never
+grown, so this culls as a no-op"* — so publishing restarts cleanly and the
+counter climbs again from 1. Verified: a publish that had 500'd through
+four counter values succeeded immediately after.
+
+A `%poke` will not do it; `/pub/meta` is a plain data grub with no process,
+so a poke is silently a no-op. It takes `%make-file` with `force=%.y`.
+
+**What would actually fix it:** a way to ask which `/pub/index` spurs are
+bound. Then the arm culls what exists rather than what it computes, and the
+invariant stops depending on a counter that can drift. Two reorderings of
+the three writes were tried and neither helped — the event is
+transactional, so grow, cull and counter commit or roll back together,
+which means reordering them cannot repair a disagreement that arises
+anyway. The shipped order stands.
