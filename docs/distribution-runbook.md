@@ -1101,3 +1101,57 @@ it or not.
 The data is intact regardless — consent gates an app's outward reaches, not
 its own tree — but the release notes have to say that the user will be
 asked, or the first thing they will see is an app that serves nothing.
+
+
+### 12.6 The shell provisions it — §11.2's manual sequence is for one-offs
+
+§11.2 lists five calls, of which step 3 (hand-writing `source.json`) is
+marked "not optional" because `create-desk.hoon` pokes `config.json` and
+writes the key `source`. **That applies only to a desk installed by hand.**
+
+A desk in the shell's stock list never goes near `create_desk`. Measured on
+`~wex` with `lattice.desk` culled entirely — no desk, `/apps/lattice`
+unbound, which is the state an upgrading ship is in — one call:
+
+```
+POST /apps/grubbery/desks/sync  {"name":"lattice"}
+```
+
+and 210 seconds later:
+
+```
+source.json  {"code":"/apps/forge.git_forge/repos/lattice.git_repo/data/tree/code"}
+version.json {"version": 15}
+instance     62 grubs
+```
+
+The shell provisioned the git_repo, pointed the desk at the checkout, wrote
+`source.json` **itself and correctly**, `apply-bill` created the instance,
+and `adopt` folded the old one's data in. **51 of 51 data grubs
+byte-identical.** No manual step at any point.
+
+So the release path is the stock entry, and §11.2 is what you use to install
+a desk that is not in the list.
+
+### 12.7 Adopted pages spawn their evaluators immediately
+
+Writing a page's `code` grub spawns that page's evaluator fiber. So an
+adopt writes N pages and starts N fibers at once — into an instance that
+has no consent yet, because `apply-bill` just created it. Every one is
+vetoed:
+
+```
+here=[…/lattice.lattice_app/page/notes/alpha name=~.code] jump=%poke → vetoed
+%lattice /page eval: failed
+```
+
+**They park rather than spin.** Veto count held steady across twenty
+seconds, which is `+rise-wait` doing what auspex's comment describes: a
+restarted process blocks on a poke that never comes instead of reaching
+again.
+
+That is the good outcome and it was not a given. On a store with hundreds
+of pages the difference between parking and looping is the difference
+between a quiet upgrade and a pegged pier during the exact window the user
+is being asked to approve roads. Worth re-checking on a large store before
+release, since four pages is not a load test.
