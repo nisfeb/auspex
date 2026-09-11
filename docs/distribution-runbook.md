@@ -733,3 +733,121 @@ checking after a trim, because they fail independently:
 GET  /grubbery/mcp/api/tools           the full registry
 POST /grubbery/mcp {"method":"tools/list"}   what a client sees
 ```
+
+---
+
+## 11. Publishing an app as a stock desk — the sequence that worked
+
+Written 2026-09-11, after auspex went out this way and lattice followed.
+Every step below was run against `~wex`. This section exists because the
+auspex install lived only in a chat transcript, which is not somewhere a
+runbook step should live.
+
+### 11.1 What the shape is
+
+An app is a **code directory** in its own repo — `lib/`, `mar/`, `nex/`
+and four manifests, nothing else:
+
+```
+code/
+  bill.json      {"<name>.<nexus>": "/<dir>/<nexus>"}   instances to create
+  version.json   {"version": N}                         the opaque upgrade tag
+  tile.json                                             launcher tile
+  icon.svg
+  lib/ mar/ nex/
+```
+
+Grubbery mirrors that directory into
+`/apps/shell.shell/desks/<name>.desk/desk/code`, and `bill.json` creates
+each instance in the **sibling** `/desk/data`. Everything outside `code/`
+in the repo — tests, build sources, CI, the desk-level `mar/` a dojo poke
+resolves — stays behind, because a guest install has no desk for it.
+
+### 11.2 The five calls
+
+```sh
+#  1. the forge checks out the repo into the namespace
+POST /grubbery/forge/api/add
+     {"name":"<n>","repo":"nisfeb/<n>","ref":"master"}
+
+#  2. create the desk instance
+POST /grubbery/mcp
+     {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"call_tool",
+      "arguments":{"tool_name":"create_desk","tool_args":{
+        "name":"<n>",
+        "source":"/apps/forge.git_forge/repos/<n>.git_repo/data/tree/code"}}}}
+
+#  3. write source.json BY HAND, because create_desk gets it wrong twice
+POST /grubbery/api/poke/apps/shell.shell/desks/<n>.desk/source.json?blot=/json
+     {"code":"/apps/forge.git_forge/repos/<n>.git_repo/data/tree/code"}
+
+#  4. consent, in the shell UI — /apps/shell
+
+#  5. thereafter, to ship a change: bump code/version.json, push, then
+POST /grubbery/forge/api/run   {"repo":"<n>.git_repo","command":"pull"}
+```
+
+**Step 3 is not optional.** `create-desk.hoon` pokes `config.json` where
+`desk.hoon` declares `source.json`, and writes the key `source` where the
+reader wants `code`. Two one-word upstream bugs; fix them there and step 3
+disappears.
+
+### 11.3 Replacing an app that used to live at the app tier
+
+Auspex was new, so it just installed. Lattice was already running as
+`/apps/lattice.lattice_app` from grubbery's own `gub/nex/lattice/`, and
+**both bind `/apps/lattice`** — `code/nex/lattice/app.hoon:275`. Two
+instances cannot share an eyre binding, so the old one goes first:
+
+1. Remove its `%fall` row from `lib/root.hoon` and `|commit %grubbery`.
+   A row does not delete an instance, but leaving it in recreates one.
+2. Cull the instance:
+   `:grubbery &grub-cmd [%clean2 [%cull /apps/'<n>.<nexus>' ~]]`
+   Children before parents. **This destroys the instance's data** — see
+   11.5.
+3. Delete `gub/nex/<n>/` and `gub/lib/<n>-*.hoon`, and commit again.
+   Deletions from a mount do reach clay (§10.3).
+4. Then the five calls in 11.2.
+
+Order matters in one direction only: never delete the code while the
+instance is still live, or its next reload bangs on missing source.
+
+### 11.4 The MCP tools know where lattice lives, and it moved
+
+`gub/lib/tool-bundle/lattice-mcp.hoon` has exactly one constant:
+
+```hoon
+++  base  `path`/apps/'shell.shell'/desks/'lattice.desk'/desk/data/'lattice.lattice_app'
+```
+
+Every memory tool — `lattice-list`, `lattice-read`, `lattice-save` and the
+rest — reaches the store through it. A desk install moves the instance, so
+this line moves with it, and **on `~ricsul-bilwyt` this line is what
+decides whether the memory store still answers**.
+
+No weir grant is needed: mcp's own weir is `/`, because it runs arbitrary
+user tools. That is also why an absolute road is right here and nowhere
+else in app code — mcp is reaching into somebody else's install rather
+than addressing itself.
+
+The tool bundle is hermetic (§10.8), so it carries its own copies of
+`lattice-know.hoon` and `lattice-mcp.hoon`. Deleting the outer
+`gub/lib/lattice-*.hoon` does not touch the tools. Verified: nothing
+outside `gub/nex/lattice/` and the bundle imports them.
+
+### 11.5 The data migration is still open
+
+`apply-bill` creates an instance in `/desk/data` with no adoption path for
+data that already exists elsewhere — grubbery issue #5. So a cull is a
+delete, and step 11.3.2 is only safe where the data is disposable:
+
+| ship | lattice data | safe to cull |
+|---|---|---|
+| `~wex` | 16 pages, all `bis-*`/`uimx-*`/`scrolltest` fixtures from the UI matrix scripts | yes |
+| `~ricsul-bilwyt` | the real memory store | **no — not until there is an adoption path** |
+
+Until #5 has an answer, ricsul's route is: grant the new desk instance a
+temporary weir road into the old instance's tree, copy, revoke the road.
+That is the "we ship grubbery too, so we can grant and then revoke"
+plan — it works precisely because we control both tiers during the
+migration and will not afterwards.
