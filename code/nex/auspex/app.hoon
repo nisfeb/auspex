@@ -1182,9 +1182,27 @@
   ;<  ok=?  bind:m  (exists-soft gdir)
   ?.  ok
     (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
-  ;<  ~  bind:m  (reg-register-at:io writer-rail)
-  %+  reg-how:io  /public
-  [make=~ poke=(sy ~[`road:tarball`(rf root / %'main.sig')]) peek=~]
+  ::  SOFT, both of them. A veto is a crashed event, so it rolls back
+  ::  whatever this fiber already wrote - and that is not hypothetical
+  ::  here: /sys/ames/registry was missing from weir.json, the key probe's
+  ::  %set-caps landed, +do-set-caps wrote /caps and then ran rise work
+  ::  that reached this arm, and the veto took the /caps write with it. The
+  ::  app then reported "not granted the key road" on a ship where that
+  ::  road WAS granted.
+  ::
+  ::  The arm already degrades honestly when there is no usergroup; these
+  ::  make it degrade the same way when the ROAD is refused, which is what
+  ::  the weir.json copy above promises.
+  ;<  reg=(unit tang)  bind:m  (reg-register-at-soft:io writer-rail)
+  ?^  reg
+    %-  (slog leaf+"auspex: no registry road, delivery is local only" u.reg)
+    (pure:m ~)
+  ;<  how=(unit tang)  bind:m
+    %+  reg-how-soft:io  /public
+    [make=~ poke=(sy ~[`road:tarball`(rf root / %'main.sig')]) peek=~]
+  ?~  how  (pure:m ~)
+  %-  (slog leaf+"auspex: registry refused the public grant" u.how)
+  (pure:m ~)
 ::
 ::  ── the writer ──────────────────────────────────────────────────────
 ::
@@ -2976,9 +2994,18 @@
     :_  ~
     :-  %leaf
     "auspex: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
-  ;<  ~  bind:m  (reg-register-at:io writer-rail)
-  %+  reg-how:io  grp
-  [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
+  ::  soft for the same reason as +grant-public: a refused registry must
+  ::  not undo the withdrawal this arm has already recorded.
+  ;<  reg=(unit tang)  bind:m  (reg-register-at-soft:io writer-rail)
+  ?^  reg
+    %-  (slog leaf+"auspex: no registry road, blob {<h>} is ungranted" u.reg)
+    (pure:m ~)
+  ;<  how=(unit tang)  bind:m
+    %+  reg-how-soft:io  grp
+    [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
+  ?~  how  (pure:m ~)
+  %-  (slog leaf+"auspex: registry refused the grant for blob {<h>}" u.how)
+  (pure:m ~)
 ::
 ::  ── slot writing ────────────────────────────────────────────────────
 ::
