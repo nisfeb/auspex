@@ -939,43 +939,63 @@ reads `get-here`'s root flag, so one lattice runs at
 `/apps/lattice.lattice_app` and at the desk path both. That was built for
 this window.
 
-### 11.7 A publish path that wedges, and how to unwedge it
+### 11.7 The publish path that wedged — fixed in the fork
 
-Found on `~wex` on 2026-09-11, while verifying the desk install. Not
-migration-specific, but a migration re-publishes every page, so it is the
-workload most likely to trigger it.
+Found on `~wex` on 2026-09-11 while verifying the desk install, and it had
+nothing to do with the migration: any lattice, any tier, could hit it.
 
-`+grow-pub-index` keeps one live `/pub/index/<seq>` manifest in the
-remote-scry farm: grow the successor, cull the predecessor, write the
-counter at `/pub/meta`. If the counter and the farm ever disagree — the
-counter behind a bound spur, or ahead of an unbound one — **every
-subsequent publish answers 500**, and the arm's own comment says why:
-*"A still-bound spur is hit exactly once and never re-culled (which
-cull-farm cannot survive)."*
+**The symptom.** One `/pub/index` publish answers 500, and then every
+publish answers 500 forever. `POST /pub-regrow`, the intended repair, 500s
+on the same path. Reproducible in four calls: save a page, publish it, move
+it, and the move 500s. Moving an *unpublished* page was fine, which is what
+made it look like a data-state problem rather than a kernel one.
 
-Worse, the damage is invisible from the app. `POST /pub-regrow`, the
-intended repair, 500s on the same cull.
+**The cause,** `app/grubbery.hoon` `+farm-top`. It resolved a spur's top
+case by asking `%gt` whether the spur was listed and then `%gw` for the
+case — and its own comment already said that pair cannot be made safe:
 
-**The repair:**
+> *gall keeps an emptied plot after a full cull, so %gt still lists a spur
+> %gw would crash on — callers gate re-culls on their own records.*
+
+A failing `.^` cannot be softened from inside the event (`+mute` hands the
+scry back out to the real namespace, so the crash lands outside the
+simulation). So one re-cull of an already-culled spur crashed the event,
+inside the agent, with a stack trace containing no app code at all.
+
+**The fix** is that "callers gate re-culls on their own records" is the
+wrong division of labour. Every `%grow` and `%cull` in the system is emitted
+by the two handlers beside `+farm-top`, so grubbery can keep the record
+itself: `scry-state` gains `farm=(map path @ud)`, spur to top case, and
+`+farm-top` is a lookup. Both `.^` reads are gone.
+
+Lattice was the caller doing what the old comment asked — a `/pub/meta`
+counter mirroring the farm — and that is exactly the design that fails:
+two records of one truth, no way to compare them, and no recovery when they
+diverge. One app-level counter fixed in the fork removes the class for every
+app.
+
+`scry-state` gains a `%1`; `+get-scry-state` upgrades `%0` in place, keeping
+keens and starting the ledger empty. A spur grown before the ledger exists
+reads as unbound, so culling it leaks a plot instead of crashing. Leak over
+crash.
+
+**Measured:** lattice's `api-matrix` against the desk install went
+**114/126 → 123/126**, and the two remaining failures are a stale assertion
+(`+mode-arg` deliberately 400s an unknown `?mode=`; the test still pins the
+older fold-to-private-with-200 behaviour).
+
+Fork commit `c6d30b1` on `dist/develop-merge`. Worth upstreaming: nothing in
+it is lattice-specific, and the caveat it removes is upstream's own.
+
+**If you meet a pier that is already wedged** (a counter/farm disagreement
+from before this fix), reset the counter to **0** — the one value
+`+grow-pub-index` guards, so publishing restarts cleanly and climbs again
+from 1:
 
 ```
 :grubbery &grub-cmd
   [%fix [%make-file /apps/…/lattice.lattice_app/pub %meta %ud 0 %.y]]
 ```
 
-Reset the counter to **0**. That is the one value the code guards
-explicitly — *"On the very first publish seq=0 and /pub/index/0 was never
-grown, so this culls as a no-op"* — so publishing restarts cleanly and the
-counter climbs again from 1. Verified: a publish that had 500'd through
-four counter values succeeded immediately after.
-
-A `%poke` will not do it; `/pub/meta` is a plain data grub with no process,
-so a poke is silently a no-op. It takes `%make-file` with `force=%.y`.
-
-**What would actually fix it:** a way to ask which `/pub/index` spurs are
-bound. Then the arm culls what exists rather than what it computes, and the
-invariant stops depending on a counter that can drift. Two reorderings of
-the three writes were tried and neither helped — the event is
-transactional, so grow, cull and counter commit or roll back together,
-which means reordering them cannot repair a disagreement that arises
-anyway. The shipped order stands.
+`%make-file` with `force=%.y`, not `%poke`: `/pub/meta` is a plain data grub
+with no process, so a poke to it is silently nothing.
