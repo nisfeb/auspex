@@ -846,8 +846,68 @@ delete, and step 11.3.2 is only safe where the data is disposable:
 | `~wex` | 16 pages, all `bis-*`/`uimx-*`/`scrolltest` fixtures from the UI matrix scripts | yes |
 | `~ricsul-bilwyt` | the real memory store | **no — not until there is an adoption path** |
 
-Until #5 has an answer, ricsul's route is: grant the new desk instance a
-temporary weir road into the old instance's tree, copy, revoke the road.
-That is the "we ship grubbery too, so we can grant and then revoke"
-plan — it works precisely because we control both tiers during the
-migration and will not afterwards.
+### 11.6 The automatic migration, and why it needs no granted road
+
+Read on 2026-09-11. The grant-then-revoke plan is not needed: every piece
+of this already exists, and the kernel carries a precedent for the exact
+shape.
+
+**The precedent.** `app/grubbery.hoon:576`, `+carry-behn-state`, is a
+one-time rename of a service grub. Its doc comment is the specification we
+want, already satisfied: *"Reads the RAW noun via +sang-noun — no mark, no
+validation — so it works from any past version, even though the old mark
+file is gone and the old grub's view booms... Union-merges into the new
+grub, then culls the old. Idempotent and inert once no pier holds the old
+grub; cheap to keep forever."*
+
+**The data survives losing its code.** `app/grubbery.hoon:4422`: a
+validation failure never drops the write — `+record` stores the raw noun
+and the boom surfaces lazily on read. Confirmed empirically: removing
+lattice's `%fall` row and committing left `/apps/lattice.lattice_app`
+standing on `~wex`; it took an explicit cull to remove it. So an
+installer who upgrades keeps their data, sitting as raw nouns.
+
+**Booms convert cleanly.** `lib/tarball.hoon:567`, `+ball-to-bole`, runs
+`+sang-noun` over every entry unconditionally, and `+sang-noun` handles
+both branches — `%&` valid and `%|` boom. A boom becomes an ordinary
+bask, losing only the error tang. Over-folded or made into a destination
+where the marc DOES compile, it re-validates on write and stops being a
+boom. This works because **the marcs travel with the code directory**:
+the destination can validate what the source no longer can.
+
+**No road is needed.** `sur/grub.hoon` offers `[%peek path name deep=?]`
+and `[%make-file path name mark noun force=?]`, and says plainly that
+*"content validation is the reader's job (mark labels are advisory
+here)"* and *"local privilege is just the absence of a weir on your own
+path."* A host-layer arm in the agent runs as the ship, with root. So the
+migration is a `+carry-lattice-data` arm beside `+carry-behn-state` — not
+a fiber in lattice's code, and not a temporary grant in its `weir.json`.
+
+**What it copies.** Derived from lattice's own on-load block
+(`code/nex/lattice/app.hoon:110-215`), which classifies exhaustively:
+
+| | |
+|---|---|
+| directories | `/legacy` `/know/vault` `/know/trash-vault` `/pub/vault` `/sub/pages` `/page` `/template` `/comments` `/idx/b` |
+| single grubs | `/know/trash` `/pub/index` `/pub/meta` `/sub/follows` `/bookmarks` `/history` `/beacon/rev` `/mirror/cursor` `/mirror/config.json` `/shared` |
+| **never** | the five `sig` fibers (`main` `ui/main` `shares` `comments` `fs` `mirror/mirror`) — processes, and the new instance has its own running; the `%over` UI assets under `/app`, which the new code lays down and whose old copies are stale; `/ui/requests`, transient; `alias.json` `link.json` `manifest.json` `icon.svg` `prism.js`, all declared by the new code |
+
+Not copying the sig fibers is what makes this safe: nothing live is
+overwritten, so there is no respawn question to answer.
+
+That table is an invariant worth checking rather than trusting — any row
+in on-load that appears in none of the three lists is a migration bug.
+
+**Two releases, not one.** One would work, since booms are recoverable,
+but two means the copy moves validated grubs with marcs live on both
+sides, and release N stays a working rollback:
+
+| release | grubbery ships | effect |
+|---|---|---|
+| N | lattice's code and its `%fall` row, plus a `lattice.desk` row sourced from ricsul, plus `+carry-lattice-data` | desk installs, migration runs, both tiers valid |
+| N+1 | lattice out of the ball, row gone; the arm stays (inert, cheap) | old instance culled, one lattice left |
+
+This is cheap because the code is already tier-agnostic: `+nexus-up`
+reads `get-here`'s root flag, so one lattice runs at
+`/apps/lattice.lattice_app` and at the desk path both. That was built for
+this window.
