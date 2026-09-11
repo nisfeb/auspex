@@ -999,3 +999,105 @@ from 1:
 
 `%make-file` with `force=%.y`, not `%poke`: `/pub/meta` is a plain data grub
 with no process, so a poke to it is silently nothing.
+
+
+---
+
+## 12. The migration, built and measured — 2026-09-11
+
+§11.6 designed a migration and §11.3 said what order to run it in. This is
+what happened when it was built and run, and three things the design got
+wrong.
+
+### 12.1 It belongs in `desk.hoon`, not in the agent
+
+§11.6 proposed a `+carry-lattice-data` arm in `app/grubbery.hoon`, beside
+`+carry-behn-state`. That was the wrong home. The agent's write primitives
+are low-level — `+record` will not even create a grub, only revise one —
+while `desk.hoon` is a **host-layer nexus**, so it has no weir, it can read
+any path, and it already contains `+sync-dir`: peek a subtree, convert with
+`+ball-to-bole`, `+over-fold` it into place preserving the destination's
+neck. The copy is that, once.
+
+Putting it there also makes it **generic**, which makes it grubbery issue
+#5 rather than a lattice patch:
+
+```json
+"adopt": {
+  "lattice.lattice_app": {
+    "from": "/apps/lattice.lattice_app",
+    "omit": ["/ui"]
+  }
+}
+```
+
+The desk knows how to copy a subtree; the app's own `bill.json` says what.
+Additive — a bill with no `adopt` behaves exactly as before.
+
+### 12.2 Fold only what the destination LACKS
+
+This took two wrong versions.
+
+The instance's `on-load` runs when `apply-bill` makes it, so by the time
+`adopt` folds, everything the app declares about itself is already there:
+its `.sig` processes, its `%over` assets (`weir.json`, `alias.json`, the UI
+bundle, the tile), its declared empty dirs. **Whatever is absent is the old
+instance's data, and only that.**
+
+Folding everything and trusting `%over` rows to restore themselves on the
+next load leaves the new instance running the **old** app's UI bundle and
+the **old** app's `weir.json` until something reloads it — a window in
+which the shell reads a road set the code never asked for. Filtering only
+`.sig` grubs, as the first version did, is not enough.
+
+The rule also makes the operation idempotent for free: run it twice and the
+second run folds nothing.
+
+### 12.3 An undeclared directory cannot be adopted
+
+First run: **50 of 51** grubs. The miss was
+`/mirror/tr/reconciler-started`.
+
+`/page` and `/know/vault` are declared `%fall %| … empty-dir:loader`, and
+their descendants came across four levels deep. `/mirror/tr` is created at
+runtime by `+ensure-dirs` and declared nowhere, so the fold had nothing to
+land in. Declaring it fixed the migration — and is more honest about the
+layout regardless, since the directory is real and merely relied on being
+made lazily.
+
+**Generalise this before migrating any app:** every directory the source
+holds must be declared in the destination's `on-load`, or descend from one
+that is. A dir that only ever existed because something made it at runtime
+will be silently dropped.
+
+### 12.4 What it copies, measured
+
+An old-tier lattice was rebuilt on `~wex` with real data and adopted into a
+fresh desk install. **51 of 51 data grubs, identical paths and marks**, and
+the destination kept its own `weir.json` (8 pokes, 2 peeks — the new road
+set, not the old six-poke one).
+
+| | |
+|---|---|
+| pages | `code`, `data`, `deps`, `err`, `cmd`, `show`, `wake` per page, nested four deep |
+| knowledge | `/know/vault/<key>/entry` and the trash index |
+| published | `/pub/vault`, `/pub/index`, and `/pub/meta` |
+| the rest | `/comments` `/sub/pages` `/sub/follows` `/template` `/idx/b` `/legacy` `bookmarks` `history` `shared` `/mirror/cursor` `/beacon/rev` |
+| never | the six `.sig` fibers; the six `%over` assets; `/ui` |
+
+`/pub/meta` is the publish counter, and the farm spurs it points at
+(`/pub/index/<n>`) are **ship-level, not instance-level** — both instances
+address the same farm. So copying it is correct, and it is another reason
+the old instance must be dormant rather than merely re-routed: two live
+instances would fight over one farm.
+
+### 12.5 Consent does not survive the move
+
+`apply-bill` creates a **fresh** instance, and a fresh instance has no
+recorded consent. So the migrated app is jailed until the user approves its
+roads again, and the approval prompt is part of the upgrade whether we like
+it or not.
+
+The data is intact regardless — consent gates an app's outward reaches, not
+its own tree — but the release notes have to say that the user will be
+asked, or the first thing they will see is an app that serves nothing.
