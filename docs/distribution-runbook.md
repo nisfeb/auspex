@@ -799,18 +799,33 @@ Auspex was new, so it just installed. Lattice was already running as
 **both bind `/apps/lattice`** — `code/nex/lattice/app.hoon:275`. Two
 instances cannot share an eyre binding, so the old one goes first:
 
+**A migration deletes nothing.** An earlier draft of this section culled
+the old instance here, which is wrong: culling is how you free the eyre
+binding only if you have forgotten that removing the CODE frees it too. An
+instance with no code cannot run, so it cannot bind eyre, and its data sits
+where it is - readable as raw nouns (§11.6), which is exactly the source
+the copy reads from. Leave it.
+
 1. Remove its `%fall` row from `lib/root.hoon` and `|commit %grubbery`.
    A row does not delete an instance, but leaving it in recreates one.
-2. Cull the instance:
-   `:grubbery &grub-cmd [%clean2 [%cull /apps/'<n>.<nexus>' ~]]`
-   Children before parents. **This destroys the instance's data** — see
-   11.5.
-3. Delete `gub/nex/<n>/` and `gub/lib/<n>-*.hoon`, and commit again.
-   Deletions from a mount do reach clay (§10.3).
-4. Then the five calls in 11.2.
+2. Delete `gub/nex/<n>/` and `gub/lib/<n>-*.hoon`, and commit again.
+   Deletions from a mount do reach clay (§10.3). The old instance is now
+   **dormant**: no code, no fibers, no eyre binding, data intact.
+3. Then the five calls in 11.2. The desk instance takes `/apps/<n>` with
+   no contention, because nothing else is holding it.
+4. Copy the data (§11.6), and verify it.
+5. **Later, once the user is satisfied**, cull the dormant instance to
+   reclaim the space. This is a separate, reversible-until-done decision
+   and it is not part of getting the data moved.
 
-Order matters in one direction only: never delete the code while the
-instance is still live, or its next reload bangs on missing source.
+Order matters in one direction only, and it is the opposite of what it
+looks like: the code goes BEFORE the copy, not after. Removing the code is
+what makes the old instance safe to read from - dormant, with nothing
+writing to it while the copy walks it.
+
+`~wex` was culled during the rehearsal, before this was understood. Its
+lattice data was UI-matrix fixtures, so nothing was lost, but the sequence
+above is the one to use and the cull is not in it.
 
 ### 11.4 The MCP tools know where lattice lives, and it moved
 
@@ -838,8 +853,13 @@ outside `gub/nex/lattice/` and the bundle imports them.
 ### 11.5 The data migration is still open
 
 `apply-bill` creates an instance in `/desk/data` with no adoption path for
-data that already exists elsewhere — grubbery issue #5. So a cull is a
-delete, and step 11.3.2 is only safe where the data is disposable:
+data that already exists elsewhere — grubbery issue #5. That is why the
+copy in §11.6 exists. It is NOT a reason to delete the source: the old
+instance goes dormant and keeps its data, so a migration that copies wrong
+can be re-run against an unchanged original.
+
+The table below is what the rehearsal destroyed and what a real ship must
+not:
 
 | ship | lattice data | safe to cull |
 |---|---|---|
@@ -859,6 +879,13 @@ validation — so it works from any past version, even though the old mark
 file is gone and the old grub's view booms... Union-merges into the new
 grub, then culls the old. Idempotent and inert once no pier holds the old
 grub; cheap to keep forever."*
+
+**We take everything from that except the cull.** `+carry-behn-state` culls
+because a service grub is grubbery's own and it knows the merge was
+complete. A user's pages are not ours to delete on their behalf, and the
+whole value of leaving them is that a bad copy is re-runnable against an
+unchanged original. So: copy, leave the source dormant, and let the user
+decide when it goes (§11.3).
 
 **The data survives losing its code.** `app/grubbery.hoon:4422`: a
 validation failure never drops the write — `+record` stores the raw noun
