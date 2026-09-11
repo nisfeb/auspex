@@ -3324,6 +3324,24 @@
           'serve the mail client at /apps/auspex'
           %+  line  '/sys/scry/'
           'verify a signature against the public key of the ship that sent it, sign the mail you send, and fetch attachments from other ships. This one road also carries the private key of this ship: signing needs it, and nothing narrower can be asked for today'
+        ::  The registry WRITE, and it belongs beside the usergroup read
+        ::  below rather than with the four above: same feature, same
+        ::  optionality. +grant-public and +grant-blob register this
+        ::  writer with the usergroup machinery and then lay their grant
+        ::  through its %how action, and both of those are pokes at
+        ::  /sys/ames/registry.
+        ::
+        ::  It was missing, and a sandboxed install showed exactly why
+        ::  that costs more than the feature: the key probe proved the
+        ::  scry road, poked %set-caps, and +do-set-caps wrote /caps and
+        ::  THEN ran the rise work - which pokes the registry, drew a
+        ::  veto, and rolled the whole event back including the /caps
+        ::  write. So auspex reported 'has not been granted the key road'
+        ::  on a ship where that road was granted, and no veto naming
+        ::  auspex was ever logged, because the one that mattered was
+        ::  about a road auspex never asked for.
+          %+  line  '/sys/ames/registry'
+          'publish this ship as somewhere mail can be delivered, and grant a recipient access to one attachment. Refuse this and you can still read and send; people just cannot reach you first'
       ==
     ::  the usergroup roads are READS, and they are OPTIONAL: refuse them
     ::  and auspex still runs, still reads mail, still signs and sends to
