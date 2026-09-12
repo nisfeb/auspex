@@ -1155,3 +1155,148 @@ of pages the difference between parking and looping is the difference
 between a quiet upgrade and a pegged pier during the exact window the user
 is being asked to approve roads. Worth re-checking on a large store before
 release, since four pages is not a load test.
+
+## 13. The carry, working — and the four bugs between here and there — 2026-09-12
+
+§12 left the carry written but unproven. It took four more fixes, and every
+one of them was invisible to all six checkers. What follows is each bug, the
+symptom it actually presented, and the rule that makes it a class rather
+than an incident.
+
+### 13.1 A road's trailing slash decides which lane it is
+
+`weir.json` declared the carry road as `'/apps/lattice.lattice_app'`. The ask
+rendered it, the user granted it, and grubbery applied it — the dump showed it
+in the instance's weir:
+
+```
+peek={[%.y p=[%.y p=[path=/apps name=~.lattice.lattice_app]]] ...}
+```
+
+That is a FILE lane: the grub `lattice.lattice_app` inside the directory
+`/apps`. The peek in `+carry-old-data` asks for a DIRECTORY:
+
+```
+dest=[%.n p=/apps/lattice.lattice_app]
+```
+
+Two different lanes. The grant was real and never matched what was asked, so
+the peek was vetoed with the road visibly granted — the worst kind of veto to
+read, because the weir dump is right there and looks correct.
+
+The rule: a declared road ending in `/` is a directory lane, and one without
+is a grub lane. `/sys/lick/` and `/sys/ames/registry` differ for exactly this
+reason, which is the thing to compare against when a granted road is refused.
+
+### 13.2 A refused road must not mark a migration done
+
+The first version treated `peek-soft` returning `~` as "no old instance" and
+marked itself carried. `+peek-soft` returns `~` ONLY for `[~ %veto *]`; a peek
+that reached the namespace and found nothing comes back `[~ %none]`. So a
+refused road wrote the migration off permanently — and combined with §13.1,
+which guaranteed the refusal, the carry would have been skipped for every
+user while reporting success.
+
+The rule: for anything that runs once and marks itself, a veto and an absence
+are different answers. Absence is final; a veto is "not yet". §12's graceful
+degradation was right about vetoes being survivable and wrong about them
+being conclusive.
+
+### 13.3 A nexus cannot read or write its own root as a directory
+
+This one is structural and worth internalising. `+nearest-governor` in
+grubbery:
+
+```hoon
+%|
+=/  pref=fold:tarball  (prefix:tarball path.here p.u.dest)
+?.  =(pref p.u.dest)
+  [~ pref]
+?~  pref  [~ ~]
+[~ (snip `fold:tarball`pref)]
+```
+
+A directory's entry is owned by its PARENT, so a directory road at-or-above
+`here` is governed by the directory above the destination. For a sandboxed
+nexus asking about its own root, that governor is outside the sandbox, and
+the weir walk then checks the instance's own weir — which never grants a road
+to itself. Vetoed.
+
+So `(rv up /)` is not available to a sandboxed nexus, in either direction:
+neither `(peek:io (rv up /) ~)` nor `(over-fold:io (rv up /) bol)`. The carry
+was written as one fold at the root, which cannot work. `+over-fold` is hard,
+so the writer crash-looped — `%lattice writer failed` on every rise, directly
+after `%sand-applied`, which reads as "the grant broke it".
+
+One level down is fine, and that is the whole fix. For a grub at our root the
+governor is our root; for a directory below it the governor is our root; and
+the walk stops AT the governor without checking its weir. So: the root's
+grubs one write each, and one fold per top-level subtree.
+
+A pleasant consequence — the root keeps its own neck for free, which the root
+fold had to preserve by hand by peeking the root first. That peek was the
+line that crashed.
+
+### 13.4 A fold overwrites a directory, so it deletes what it does not list
+
+With the per-child fold in, the carry ran and landed 61 of 62 grubs. The one
+missing was `/mirror/mirror.sig` — the reconciler this install had already
+spawned. `%over` on a directory removes every grub the bole does not carry,
+and `+carry-bole` strips every `.sig` because processes do not travel. So the
+fold killed a running process.
+
+`+carry-merge` lays the carried tree over the tree that is here: per grub the
+carried copy wins — §12 established that keeping what the destination has is
+what loses data, because a `%fall` row's bunt is indistinguishable from real
+content — but a grub only this install has survives. Directory necks stay
+ours, since a neck is a mark prefix for the code we are running.
+
+The root-level writes never had this problem, because they are one grub at a
+time. It is only directories, and only because a fold is a whole-directory
+overwrite.
+
+### 13.5 How to verify a carry, given the source is boomed
+
+The obvious check — byte-compare every grub against the source — cannot work,
+and the reason is the same reason the carry is possible at all. The release
+removes lattice's code from the ball, so the old instance's marks are gone and
+every typed grub there reads `File is boomed`. 44 of 56 "differed" on first
+comparison for exactly this reason; the 12 that matched were plain `json`.
+
+What does verify it, and what these numbers were:
+
+- **Path and mark parity against the source.** 62/62 present, marks
+  identical. The only extras in the destination were `/carried.json` and
+  `/mirror/tr/reconciler-started` — the second being proof `mirror.sig`
+  survived §13.4's fix and is running.
+- **Zero booms in the destination.** 56/56 typed grubs re-validated against
+  the marks in the desk's own `code/`. This is `+ball-to-bole`'s unconditional
+  `+sang-noun` doing the work the whole design rests on.
+- **Content through the app's own API.** 4 pages with their kinds and share
+  modes (`notes/alpha` still `clearweb`), 3 know entries with their original
+  timestamps, 1 bookmark. One know body reads "memory entry for
+  migration/plan, written to the OLD instance", which is as direct as
+  evidence gets.
+- **The published page still serves publicly.** `/apps/lattice/c/notes/alpha`
+  answers 200 with no cookie from the new install.
+- **The source untouched.** Still 62 grubs afterwards. The migration copies.
+
+### 13.6 What no checker caught
+
+All four bugs shipped past six checkers. Two are reachable by tooling and two
+are not:
+
+- §13.1 is checkable: `weir-check.py` already resolves io-arm to road, so it
+  could compare the declared road's lane shape against the shape the call
+  asks for. It currently reports the carry road as "declared, nothing reaches
+  it" because it cannot see an inline absolute road, which is the same blind
+  spot from the other side.
+- §13.3 is checkable as a flat rule: `(rv up /)` and `(rf up / ...)`-adjacent
+  root directory roads are never valid in a sandboxed nexus.
+- §13.2 and §13.4 are semantic. A checker cannot know that a veto means
+  "later" or that a fold must not remove a process.
+
+The pattern from §12 held again in a fifth and sixth form: the failure never
+appeared where the mistake was. §13.1 presented as a granted road being
+refused, §13.2 as a silent success, §13.3 as the grant breaking the app, and
+§13.4 as a one-grub rounding error.
