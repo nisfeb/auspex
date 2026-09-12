@@ -1398,11 +1398,22 @@ applied. All 17 checks passed:
 Stated plainly, because a passing test that oversells itself is worse than no
 test:
 
-- **The clone was not slow.** It reported `already up to date` — the git
-  objects were still cached on the ship from earlier runs. `+ensure-pairing`
-  queues the pull before the desk on a serial lane, and a slow clone is
-  exactly when that bites (§12's finding, reverted with the rest of core). A
-  genuinely cold ship has not been tested.
+- ~~The clone was not slow.~~ **Corrected.** The lane's log settles it: the
+  clone was cold and it worked.
+
+  ```
+  id=0  pull  ok=True  cloned              ~2026.09.12..15.30.18
+  id=1  pull  ok=True  already up to date  ~2026.09.12..15.33.14
+  ```
+
+  Culling the repo instance removes every object with it — packs, refs and
+  tree all live under `<repo>/data` — so id=0 cloned from nothing. id=1 is
+  `+ensure-pairing`'s follow-up pull, which correctly found nothing new, and
+  reading THAT as the clone is what produced the wrong claim. The desk was
+  created after the clone completed, so the pull-before-desk ordering held
+  against a roughly three-minute cold clone. §12's finding stands as a
+  latent risk for a slower clone, not as something this run failed to
+  exercise.
 - **The live→dormant transition was not re-run.** wex had already made it,
   and the data survived; reconstructing the pre-release ball to re-prove it
   would have cost two full rebuilds. The evidence is historical rather than
@@ -1414,3 +1425,128 @@ test:
   memory store answering "nothing remembered" for the length of that window.
   It argues for moving `+base` in the release AFTER the carry, not the one
   that performs it.
+
+## 15. Run #2: the same test from a real pre-migration ship — 2026-09-12
+
+§14's run had a bug fixed in the middle of it, which means it was not a pass.
+This is the same test from a genuine State A, cold, start to finish.
+
+### 15.1 What made this one real
+
+- **State A was rebuilt and verified live.** Lattice's 52 sources went back
+  into the ball with the `%fall` row, the instance loaded, and `/apps/lattice`
+  served 4 pages with their kinds and share modes, 3 know entries, 1 bookmark,
+  and a public clearweb read with no cookie. That is a real user's ship, not
+  an approximation of one.
+- **The snapshot came from that live instance**, so "before" means the user's
+  own data as their running app served it. 63 grubs.
+- **Cold clone**: desk and forge repo both culled first.
+- **No mid-run fixes.** A pre-flight ran all seven checkers, validated
+  bill.json, and corrected a stale comment BEFORE the release was committed.
+
+Two mistakes of mine surfaced during setup rather than during the run, which
+is the point of having a setup phase:
+
+- The nexus went to `gub/lattice/` when the row's neck `[/lattice %app]`
+  resolves under `gub/nex/`. Nothing looked for it there, so the instance had
+  no code and could not load — and `+reload-changed-nexuses` never saw it,
+  because it scans `/nex` only. Lattice's own repo has the answer in plain
+  sight: `code/nex/lattice/app.hoon`.
+- A watch that grepped the pane for "build-code done" matched output from the
+  PREVIOUS build still in scrollback, and reported a build finished nine
+  seconds after it started. Waiting on the dojo being idle cannot false-positive
+  that way.
+
+### 15.2 The release, and what ran unattended
+
+The release is still one line — the `default-repos` stock entry — plus the
+removal of lattice's code from the ball and its row from root.hoon. That
+removal IS the release.
+
+Committed 12:53:48. Everything below happened with no intervention:
+
+```
+build → stock entry seen → lattice.git_repo provisioned → COLD CLONE
+  → lattice.desk created → code checked out (v24)
+  → [%desk-bill 1] → [%desk-bill-entry ~.lattice.lattice_app /lattice app]
+  → writer rises jailed: bind-http-self: vetoed — binding deferred
+  → ask.json: 11 roads
+        ↓
+   ONE HUMAN ACTION: grant
+        ↓
+  → [%lattice-carrying-old-data /apps/lattice.lattice_app]
+  → carried.json true, /apps/lattice/app 200
+```
+
+### 15.3 Every check passed
+
+`scratchpad/e2e-verify.sh`, against the snapshot from the live State A
+instance, now comparing to a recorded baseline rather than a hardcoded count:
+
+- source still 63 grubs, and every one of them present at the new install
+- zero booms — every typed grub re-validated against the desk's own `code/`
+- pages, kinds and share modes identical; know count identical; bookmarks
+  identical
+- all 3 know bodies and all 4 page bodies byte-for-byte
+- owner reader 200; published page 200 with no cookie
+- `lattice-list` through `/grubbery/mcp` returns all 3 entries with their
+  original timestamps
+
+Destination-only: `/carried.json` and `/mirror/tr/reconciler-started`.
+
+**Losslessness is proven.** The data survives the move intact, and the only
+thing the user does is grant.
+
+### 15.4 The finding that blocks the single release
+
+The uptime probe is the reason this run matters more than §14's.
+
+```
+12:53:46  last 200
+12:53:48  release committed
+12:53:55  first gap — nine seconds later
+          ... nothing serves /apps/lattice until consent is granted
+```
+
+This is structural, not incidental:
+
+- the release removes lattice's code from the ball, so the OLD instance goes
+  dormant and cannot serve
+- the NEW instance is created jailed, and `bind-http-self` is vetoed until
+  its weir is approved
+- therefore nothing answers `/apps/lattice` between the release landing and
+  the user granting
+
+Downtime is bounded below by build-plus-provision and **unbounded above by how
+long the user takes to notice the prompt**. For a ship whose owner is asleep
+that is hours, and the app is simply gone in the meantime.
+
+So the two-release sequence is not an optimisation. Release N adds the stock
+entry AND KEEPS lattice's code in the ball: the old instance serves
+continuously while the new one waits for consent and then carries the data.
+Release N+1 removes the code once `carried.json` reads true. §9's plan was
+right for a reason this run now measures.
+
+### 15.5 Measuring downtime this way causes downtime
+
+The probe polled `/apps/lattice/app` every 5s with a 4s timeout. Once nothing
+was bound there, each sample became a request that never completed: 225 of
+them queued, and the HTTP surface stopped answering anything — including the
+shell's own consent UI, which is the one page the user needs in order to end
+the outage.
+
+The wedge was mine, not the system's; it drained on its own once the probe
+stopped, exactly as §12's spins did. But it means this run's absolute
+downtime figure is contaminated and only the STRUCTURE of §15.4 should be
+quoted. A probe for the two-release test needs a short timeout and to back
+off hard on consecutive failures, so that observing the outage cannot deepen
+it.
+
+### 15.6 Still not established
+
+- **Four pages is not a load test.** Unchanged from §12.7 and §14.5.
+- **The two-release sequence itself is untested.** §15.4 argues it is
+  required; that is a different thing from having run it.
+- **`+base` reads an empty vault between the update landing and consent** —
+  the same window as §15.4, and on ricsul that is the memory store answering
+  "nothing remembered". Moving `+base` in release N+1 rather than N closes it.
