@@ -1300,3 +1300,117 @@ The pattern from §12 held again in a fifth and sixth form: the failure never
 appeared where the mistake was. §13.1 presented as a granted road being
 refused, §13.2 as a silent success, §13.3 as the grant breaking the app, and
 §13.4 as a one-grub rounding error.
+
+## 14. The end-to-end test — 2026-09-12
+
+§13 proved the carry. This proves the whole release, from the shell's
+catalog to verified data, with exactly one human action in the middle.
+
+### 14.1 What was actually run
+
+wex was reset to a real user's starting position: `lattice.desk` culled, the
+forge repo culled, and the old instance left dormant at `/apps/lattice.lattice_app`
+with its 62 grubs — which is precisely where a ship sits once the release has
+removed lattice's code from the ball. The data was snapshotted first, through
+the app's own API, and every later check compares against that snapshot.
+
+The release itself is **one line** — the stock catalog entry in shell.hoon's
+`default-repos`, which is that list's documented purpose:
+
+```hoon
+[%github 'lattice' 'nisfeb/lattice' 'main']
+```
+
+Then `|commit %grubbery`, and nothing else was touched until consent.
+
+### 14.2 The chain, unattended
+
+Every step below happened with no intervention. This is the part §12 and §13
+never tested — the desk was created by hand on every previous run.
+
+```
+default-repos entry
+  → lattice.git_repo provisioned in the forge
+  → clone
+  → lattice.desk created
+  → code checked out into /desk/code
+  → bill.json processed:  [%desk-bill 1]
+  → instance created:     [%desk-bill-entry ~.lattice.lattice_app /lattice app]
+  → ask.json raised: 11 roads
+        ↓
+   ONE HUMAN ACTION: grant
+        ↓
+  → writer rises
+  → [%lattice-carrying-old-data /apps/lattice.lattice_app]
+  → carried.json true
+```
+
+### 14.3 The bug this found, and it is the seventh of its kind
+
+The first attempt got as far as the code checkout and then stopped dead: no
+instance, no ask, `manifest.json` frozen at version 0, and nothing in the log
+to say why. It sat there for ten minutes looking like a slow clone.
+
+`bill.json` still carried the `adopt` block from the generic desk.hoon
+migration that §12 reverted. And `+apply-bill` reads a bill like this:
+
+```hoon
+=/  entries=(list [@t @t])
+  (turn ~(tap by p.u.bill) |=([k=@t v=json] [k (so:dejs:format v)]))
+```
+
+`so:dejs` demands a string for every value in the object. `adopt` holds an
+object, so the gate crashes — and the crash takes the ENTIRE bill with it,
+including the one entry that was valid. A crashed fiber rolls its event back,
+so there is no error to read.
+
+Seventh sighting of the pattern: a hard call early in a sequence, and
+everything after it silently gone. Two things follow from it. The stale block
+was ours to delete when the migration moved into app.hoon — a revert leaves
+debris on the other side of the boundary. And `+apply-bill` should ignore or
+reject a key it does not understand rather than lose the install; an upstream
+finding worth carrying into the PR argument, since any desk with a
+forward-looking bill key hits it.
+
+### 14.4 The verification
+
+`scratchpad/e2e-verify.sh`, against the snapshot taken before the release was
+applied. All 17 checks passed:
+
+- **Namespace parity** — source still 62 grubs; every one of them present at
+  the new install. Destination-only: `/carried.json` and
+  `/mirror/tr/reconciler-started` (the reconciler running, per §13.4).
+- **Zero booms** — every typed grub re-validated against the marks in the
+  desk's own `code/`.
+- **Through the app** — 4 pages with their kinds AND share modes
+  (`notes/alpha` still `clearweb`), 3 know entries, 1 bookmark.
+- **Bodies byte-for-byte** — all 3 know bodies and all 4 page bodies
+  identical to the snapshot.
+- **Serving** — owner reader 200; `/apps/lattice/c/notes/alpha` 200 with no
+  cookie.
+- **The memory store** — `lattice-list` through `/grubbery/mcp` returns all 3
+  entries with their original timestamps, which means `+base` in
+  `tool-bundle/lattice-mcp.hoon` resolves correctly after the move. This is
+  the line the ricsul rollout depends on.
+
+### 14.5 What this test did NOT establish
+
+Stated plainly, because a passing test that oversells itself is worse than no
+test:
+
+- **The clone was not slow.** It reported `already up to date` — the git
+  objects were still cached on the ship from earlier runs. `+ensure-pairing`
+  queues the pull before the desk on a serial lane, and a slow clone is
+  exactly when that bites (§12's finding, reverted with the rest of core). A
+  genuinely cold ship has not been tested.
+- **The live→dormant transition was not re-run.** wex had already made it,
+  and the data survived; reconstructing the pre-release ball to re-prove it
+  would have cost two full rebuilds. The evidence is historical rather than
+  fresh.
+- **Four pages is not a load test.** §12.7's warning stands.
+- **`+base` has a window.** It points at the desk path, so between the
+  update landing and consent being granted, the memory tools read an EMPTY
+  vault rather than failing — honest, but silent. On ricsul that is the
+  memory store answering "nothing remembered" for the length of that window.
+  It argues for moving `+base` in the release AFTER the carry, not the one
+  that performs it.
