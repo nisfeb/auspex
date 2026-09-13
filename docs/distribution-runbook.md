@@ -1804,6 +1804,11 @@ both desks have code
 both desks are shared: SIX peek roads                       §16.3
 
 Landscape shows a Grubbery tile that opens /apps/grubbery
+
+after each grant, the instance's weir is NOT empty — the veto lines stop:
+  (dojo)  a jailed app prints "%<name> writer failed" and
+          "vetoed node operation ... load %poke" on every rise.
+          Silence after the grant is the confirmation.
 ```
 
 Only when every line reads right: `|public %grubbery`, then confirm `%black`.
@@ -1812,6 +1817,23 @@ Only when every line reads right: `|public %grubbery`, then confirm `%black`.
 
 - **desk exists, `/desk/code` empty, no error** — the share. Go to 16.3 and count
   the roads.
+- **an app is jailed (its writer fails, its roads are vetoed) but the
+  Permissions UI shows nothing to approve** — a STALE APPROVAL. The shell keys
+  consent by app path in `permit/approved.json`; if an instance at that path
+  was approved before, removed, and recreated with an unchanged ask, the shell
+  hides the ask as already settled while the new instance's weir is still
+  `[{} {} {}]`. gwbtc/grubbery#65. Recover by sending the grant directly, WITH
+  the full road lists — sending it without `granted` applies an empty weir:
+
+  ```
+  POST /grubbery/tiles/permits
+  {"action":"approve-weir","app":"<app path>","picks":{},
+   "granted":{"peek":[...],"poke":[...],"make":[...]}}
+  ```
+
+  Take the road lists from `/grubbery/ball/apps/shell.shell/desks/<d>.desk/ask.json`.
+  You will not hit this on a first install; you will if you ever cull and
+  re-provision a desk by hand.
 - **repo exists, no desk** — #60 is not in the build.
 - **only one app installable** — #61 is not in the build.
 - **subscriber stuck with an empty desk and never recovers** — #63 is not in the
