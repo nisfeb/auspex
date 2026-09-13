@@ -3369,6 +3369,12 @@
         ::  about a road auspex never asked for.
           %+  line  '/sys/ames/registry'
           'publish this ship as somewhere mail can be delivered, and grant a recipient access to one attachment. Refuse this and you can still read and send; people just cannot reach you first'
+        ::  the peer mirror: another ship's auspex is a writer under
+        ::  /sys/ames/ships/<ship>/root, and delivering mail is a poke at
+        ::  it. Without this road the poke is vetoed at home, before it
+        ::  leaves the ship, and every send reports a failed delivery.
+          %+  line  '/sys/ames/ships/'
+          'deliver the mail you send: a message is a poke at the recipient\'s auspex. Refuse this and you can still read what arrives; you cannot send'
       ==
     ::  the usergroup roads are READS, and they are OPTIONAL: refuse them
     ::  and auspex still runs, still reads mail, still signs and sends to
