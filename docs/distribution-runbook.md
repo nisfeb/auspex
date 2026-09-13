@@ -1640,7 +1640,11 @@ plan rather than by exploring.
 - **PRs merged, or shipped locally.** #60 and #61 are REQUIRED: without #60 a
   user gets a repo and no desk; without #61 two desks cannot hold grants at once,
   so only one app is installable. #62 and #63 are strongly wanted — #63 is what
-  lets a subscriber that catches ricsul offline recover without you.
+  lets a subscriber that catches ricsul offline recover without you. #66 is what
+  makes the permissions page usable (0.4s instead of 10–21s to load, 0.4s
+  instead of 7s per click) and puts pending asks in the bell — without it a
+  subscriber has no prompt to follow, only a page they have to know to visit.
+  `dist/single-release` carries all five.
 - `dist/single-release` audits clean: `scratchpad/h/audit-release.sh`, 23 checks.
 - **lattice's repo is pushed** and `code/version.json` is bumped. Subscribers
   re-sync only on a version change; code alone changes nothing.
@@ -1726,7 +1730,10 @@ release arrives on its own.
 
 Then, unattended: the shell provisions a desk per `+published` entry, each desk
 mirrors the distributor's `/desk/code` cross-ship, `bill.json` creates the
-instance, and a consent prompt appears per app.
+instance, and each app's ask appears in the shell's bell with a count in the
+pip — one item per app, with a **Review** button that opens the permissions page
+on that app. (#66. Before it the bell was dead in this distribution and the only
+way to find the ask was to know the page existed.)
 
 The user grants. lattice then carries their old data on the writer's first rise,
 and their pages, memories and bookmarks are at the new location.
