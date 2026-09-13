@@ -1645,6 +1645,14 @@ plan rather than by exploring.
   instead of 7s per click) and puts pending asks in the bell — without it a
   subscriber has no prompt to follow, only a page they have to know to visit.
   `dist/single-release` carries all five.
+- **#67 is REQUIRED for anything cross-ship.** Without it the registry rejects
+  the relative rail and roads a sandboxed app sends, so a desk-installed lattice
+  or auspex never gets its roads into the public group: peers read a frozen old
+  copy of your pages (or nothing) and mail delivery to auspex is dead, with no
+  error anywhere. Found on ricsul after the release; the rehearsal never read a
+  page cross-ship. `dist/single-release` carries it.
+- **lattice is at v25 or later.** v24 addressed a PEER at the old ball path, so
+  two migrated ships could not read each other. v25 asks the desk path first.
 - `dist/single-release` audits clean: `scratchpad/h/audit-release.sh`, 23 checks.
 - **lattice's repo is pushed** and `code/version.json` is bumped. Subscribers
   re-sync only on a version change; code alone changes nothing.
@@ -1717,6 +1725,22 @@ peek /apps/shell.shell/desks/auspex.desk/version.json
 Fewer than six means a subscriber will get a desk with the right `source.json`,
 an empty `/desk/code`, no instance, and **no error anywhere**. Do not proceed to
 16.4 until you see six.
+
+The same weir must ALSO carry the apps' own cross-ship roads, at the DESK
+path, once both apps have been granted and have risen:
+
+```
+peek /apps/shell.shell/desks/lattice.desk/desk/data/lattice.lattice_app/pub
+peek /apps/shell.shell/desks/lattice.desk/desk/data/lattice.lattice_app/page/<each shared page>/data
+poke /apps/shell.shell/desks/lattice.desk/desk/data/lattice.lattice_app/shares.sig
+poke /apps/shell.shell/desks/lattice.desk/desk/data/lattice.lattice_app/comments.sig
+poke /apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/main.sig
+```
+
+If the only lattice roads you see are under `/apps/lattice.lattice_app/`, those
+are the dormant old instance's, left from before Sept 10, and the new install
+has none: the registry is without #67 (see 16.6). Roads for the old path can
+stay until the old instance is culled; `%gc` sweeps them then.
 
 Poke it through `/grubbery/api/poke/...?blot=/json`, NOT with `&grub-cmd` from the
 dojo: the handler reads the poke with an unwrapped `!<(json ...)`, so an untyped
@@ -1850,6 +1874,12 @@ Only when every line reads right: `|public %grubbery`, then confirm `%black`.
   Take the road lists from `/grubbery/ball/apps/shell.shell/desks/<d>.desk/ask.json`.
   You will not hit this on a first install; you will if you ever cull and
   re-provision a desk by hand.
+- **public group has lattice roads only under `/apps/lattice.lattice_app/`, or
+  none for auspex** — the registry is without #67. Symptom on the registry
+  itself (`/grubbery/ball/sys/ames/registry?blot=/json`): a row `//main.sig -> /`
+  and no row for the desk install's `main.sig`. Ship #67, then reload each app
+  (`POST /apps/grubbery/permits/reload {"app": <path>}`); their rise re-applies
+  the grant.
 - **repo exists, no desk** — #60 is not in the build.
 - **only one app installable** — #61 is not in the build.
 - **subscriber stuck with an empty desk and never recovers** — #63 is not in the
