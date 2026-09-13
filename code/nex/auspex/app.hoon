@@ -3374,7 +3374,7 @@
         ::  it. Without this road the poke is vetoed at home, before it
         ::  leaves the ship, and every send reports a failed delivery.
           %+  line  '/sys/ames/ships/'
-          'deliver the mail you send: a message is a poke at the recipient\'s auspex. Refuse this and you can still read what arrives; you cannot send'
+          'deliver the mail you send: a message is a poke at the auspex on the recipient ship. Refuse this and you can still read what arrives; you cannot send'
       ==
     ::  the usergroup roads are READS, and they are OPTIONAL: refuse them
     ::  and auspex still runs, still reads mail, still signs and sends to
