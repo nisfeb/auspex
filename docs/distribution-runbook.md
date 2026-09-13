@@ -1567,7 +1567,7 @@ Three changes to ricsul's `%grubbery` desk, and nothing else:
 3. `+base` in `tool-bundle/lattice-mcp.hoon` moves to the desk instance.
 
 Everything a user then experiences follows from those three, unattended, except
-one prompt.
+one consent prompt per app — two, for lattice and auspex.
 
 ### 16.0b Unpublish first, republish after you have verified
 
@@ -1646,21 +1646,35 @@ plan rather than by exploring.
   re-sync only on a version change; code alone changes nothing.
 - **auspex's repo is pushed.** Its default branch is `master`, not `main`.
 - ricsul's own data is backed up. The carry copies rather than moves, so the old
-  instance is the backup — but verify it is there rather than assume it.
+  instance is the backup — but COUNT it before and after rather than assume it:
+
+  ```
+  GET /grubbery/api/tree/apps/lattice.lattice_app
+  ```
+
+  and total the `files` entries recursively. The number must be identical after
+  the carry. On the rehearsal ships it was, both times (63 and 251).
 
 ### 16.2 The sequence on ricsul
 
 ```
-1. commit the desk                    |commit %grubbery
-2. wait for the ball to rebuild       expect several minutes
-3. ricsul provisions its OWN desks    lattice + auspex, from its forge
-4. grant lattice's roads              11 roads, in the shell
-5. grant auspex's roads               6 roads — a SEPARATE prompt
-6. lattice carries its data           carried.json flips to true
-7. SHARE BOTH DESKS                   see 16.3 — do not skip this
+ 0. close the desk                    |private %grubbery      (§16.0b, verify it)
+ 1. record the data you are moving    count grubs at /apps/lattice.lattice_app
+ 2. commit the desk                   |commit %grubbery
+ 3. wait for the ball to rebuild      expect several minutes
+ 4. ricsul provisions its OWN desks   lattice + auspex, from its forge — unattended
+ 5. grant lattice's roads             11 roads, in the shell
+ 6. grant auspex's roads              6 roads — a SEPARATE prompt
+ 7. lattice carries its data          carried.json flips to true — unattended
+ 8. SHARE BOTH DESKS, count six       §16.3 — do not skip this
+ 9. verify ricsul                     §16.5b, every line
+10. open the desk                     |public %grubbery       (§16.0b, verify it)
 ```
 
-Steps 3 and 6 need nobody. Steps 4, 5 and 7 are yours.
+Steps 4 and 7 need nobody. Everything else is yours, and 8 must come before
+10: a subscriber that syncs before the share exists gets a desk that mirrors
+nothing, and #63 means it will keep retrying against the missing grant until
+you notice.
 
 ### 16.3 Share both desks, or every subscriber silently gets nothing
 
@@ -1747,7 +1761,52 @@ What actually proves it, and what the rehearsal measured:
 | memory store from the new location | answers | — |
 
 `scratchpad/h/p3-verify.sh` runs all of it against a snapshot taken while the
-pre-migration ship was still serving.
+pre-migration ship was still serving — on the rehearsal ships. It is wired to
+their cookies and ports and it needs a snapshot from BEFORE the release, so it
+is not a tool for ricsul on the day. Use §16.5b.
+
+### 16.5b The ricsul checklist — every line, before `|public`
+
+Read each of these by hand. A poke returning 200 proves nothing; only the read
+does.
+
+```
+carried.json is true
+  GET /grubbery/ball/apps/shell.shell/desks/lattice.desk/desk/data/lattice.lattice_app/carried.json?raw=1
+
+the old instance still has every grub it had at step 1
+  GET /grubbery/api/tree/apps/lattice.lattice_app          -> same count as step 1
+
+the new instance has at least that many
+  GET /grubbery/api/tree/apps/shell.shell/desks/lattice.desk/desk/data/lattice.lattice_app
+
+nothing boomed: open a few typed grubs at the new instance and see content
+  GET /grubbery/ball/.../lattice.lattice_app/know/vault/<key>/entry?raw=1
+  (a boom reads "File is boomed" — that means the marks did not travel)
+
+lattice serves, and your pages are there
+  GET /apps/lattice/app                                    -> 200
+  GET /apps/lattice/page-tree                              -> your pages, kinds, share modes
+  GET /apps/lattice/know-list                              -> your memory count
+
+a published page is public, no cookie
+  GET /apps/lattice/c/<a page you share>                   -> 200, no cookie
+
+the memory store answers from the new location
+  POST /grubbery/mcp  {"jsonrpc":"2.0","id":1,"method":"tools/call",
+                       "params":{"name":"lattice-list","arguments":{}}}
+                                                           -> your real count, not 0
+
+both desks have code
+  GET /grubbery/ball/apps/shell.shell/desks/lattice.desk/desk/code/version.json?raw=1
+  GET /grubbery/ball/apps/shell.shell/desks/auspex.desk/desk/code/version.json?raw=1
+
+both desks are shared: SIX peek roads                       §16.3
+
+Landscape shows a Grubbery tile that opens /apps/grubbery
+```
+
+Only when every line reads right: `|public %grubbery`, then confirm `%black`.
 
 ### 16.6 If something goes wrong
 
@@ -1757,9 +1816,13 @@ pre-migration ship was still serving.
 - **only one app installable** — #61 is not in the build.
 - **subscriber stuck with an empty desk and never recovers** — #63 is not in the
   build. Poking its `source.json` restarts the subscription by hand.
-- **`carried.json` is `true` but no data came** — the carry hit a refused road and
-  said so with `%lattice-carry-road-refused`; it does not mark itself done on a
-  veto, so granting the road and reloading re-runs it.
+- **`carried.json` stays `false` after the grant, and the log shows
+  `%lattice-carry-road-refused`** — the carry road `/apps/lattice.lattice_app/`
+  was not granted. The carry deliberately does NOT mark itself done on a
+  refusal (an earlier version did, and would have skipped the migration for
+  good), so grant the road and the next writer rise re-runs it. If
+  `carried.json` is `true` the carry ran; a missing grub then is a bug, not a
+  refusal.
 - **nothing installed, `manifest.json` at 0, no error** — a bill entry it could
   not read. #62 makes this report the key instead of losing the install.
 
