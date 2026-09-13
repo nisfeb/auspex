@@ -1838,6 +1838,15 @@ Only when every line reads right: `|public %grubbery`, then confirm `%black`.
    "granted":{"peek":[...],"poke":[...],"make":[...]}}
   ```
 
+  then reboot the app so its jailed fibers come back holding the grant (the
+  permissions page sends this itself after every approval; a hand-sent
+  approval must send it too, or the app stays jailed until its next reload):
+
+  ```
+  POST /grubbery/tiles/permits/reload
+  {"app":"<app path>"}
+  ```
+
   Take the road lists from `/grubbery/ball/apps/shell.shell/desks/<d>.desk/ask.json`.
   You will not hit this on a first install; you will if you ever cull and
   re-provision a desk by hand.
