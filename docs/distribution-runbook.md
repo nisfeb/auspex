@@ -1569,6 +1569,72 @@ Three changes to ricsul's `%grubbery` desk, and nothing else:
 Everything a user then experiences follows from those three, unattended, except
 one prompt.
 
+### 16.0b Unpublish first, republish after you have verified
+
+The release reaches every subscriber the moment ricsul commits, because kiln
+follows the desk. To get ricsul into the new shape and CHECK it before anyone
+else sees it, close the desk first.
+
+**Before you begin, on ricsul:**
+
+```
+|private %grubbery
+```
+
+Confirm it took, rather than assuming:
+
+```
+.^([r=dict:clay w=dict:clay] %cp /=grubbery=)
+```
+
+Private is an empty WHITELIST — nobody is on the list, so nobody may read:
+
+```
+[r=[src=/ rul=[mod=%white who=[p={} q={}]]] w=[...]]
+                    ^^^^^^
+```
+
+**After you have verified everything, to release:**
+
+```
+|public %grubbery
+```
+
+which is an empty BLACKLIST — nobody is excluded, so everybody may read:
+
+```
+[r=[src=/ rul=[mod=%black who=[p={} q={}]]] w=[...]]
+                    ^^^^^^
+```
+
+Only the `r` (read) rule matters here; `w` stays `%white` and should not be
+touched. Both commands and both outputs above were run and read back on a live
+ship, not written from memory.
+
+#### These are NOT the same "publish" as sharing the desks
+
+Two independent mechanisms, and the release needs both. Confusing them will cost
+you an afternoon:
+
+| | controls | set by | checked with |
+|---|---|---|---|
+| **clay desk permission** | whether a subscriber can kiln-sync `%grubbery` **at all** | `\|public` / `\|private` | `.^(... %cp /=grubbery=)` |
+| **grubbery usergroup share** | whether a subscriber can read lattice's and auspex's **desk code** out of the namespace | `share.usergroups` ← `/public` (§16.3) | six peek roads in `public.grp/how.weir` |
+
+A ship can be clay-private while still serving grubbery-namespace reads to peers
+— that is how the two-ship rehearsal ran, with the publisher's desk private the
+whole time. So `|private` does not protect you from forgetting §16.3, and §16.3
+does not gate the release. Do both.
+
+#### What a subscriber experiences while you are private
+
+kiln's `%next` treats a refused read as a failed download: it drops the sync and
+re-runs `init`, which means subscribers RETRY rather than break permanently, and
+they pick the release up when you go public. That is the behaviour you want, but
+it also means they are retrying in a loop the whole time — keep the private
+window as short as your verification allows, and do the verification with a
+plan rather than by exploring.
+
 ### 16.1 Preconditions — all must be true before you commit anything
 
 - **PRs merged, or shipped locally.** #60 and #61 are REQUIRED: without #60 a
