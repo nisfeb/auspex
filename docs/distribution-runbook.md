@@ -1550,3 +1550,156 @@ it.
 - **`+base` reads an empty vault between the update landing and consent** —
   the same window as §15.4, and on ricsul that is the memory store answering
   "nothing remembered". Moving `+base` in release N+1 rather than N closes it.
+
+## 16. THE RELEASE PROCEDURE — run this on ricsul
+
+Everything above is how we got here. This section is the procedure. It was
+rehearsed on two ships end to end, and every step below either passed there or
+is a step the rehearsal proved we had forgotten.
+
+### 16.0 What the release is
+
+Three changes to ricsul's `%grubbery` desk, and nothing else:
+
+1. lattice's sources and its `root.hoon` row **leave the ball**. That removal is
+   the release.
+2. the stock catalog gains two `+published` entries, lattice and auspex.
+3. `+base` in `tool-bundle/lattice-mcp.hoon` moves to the desk instance.
+
+Everything a user then experiences follows from those three, unattended, except
+one prompt.
+
+### 16.1 Preconditions — all must be true before you commit anything
+
+- **PRs merged, or shipped locally.** #60 and #61 are REQUIRED: without #60 a
+  user gets a repo and no desk; without #61 two desks cannot hold grants at once,
+  so only one app is installable. #62 and #63 are strongly wanted — #63 is what
+  lets a subscriber that catches ricsul offline recover without you.
+- `dist/single-release` audits clean: `scratchpad/h/audit-release.sh`, 23 checks.
+- **lattice's repo is pushed** and `code/version.json` is bumped. Subscribers
+  re-sync only on a version change; code alone changes nothing.
+- **auspex's repo is pushed.** Its default branch is `master`, not `main`.
+- ricsul's own data is backed up. The carry copies rather than moves, so the old
+  instance is the backup — but verify it is there rather than assume it.
+
+### 16.2 The sequence on ricsul
+
+```
+1. commit the desk                    |commit %grubbery
+2. wait for the ball to rebuild       expect several minutes
+3. ricsul provisions its OWN desks    lattice + auspex, from its forge
+4. grant lattice's roads              11 roads, in the shell
+5. grant auspex's roads               6 roads — a SEPARATE prompt
+6. lattice carries its data           carried.json flips to true
+7. SHARE BOTH DESKS                   see 16.3 — do not skip this
+```
+
+Steps 3 and 6 need nobody. Steps 4, 5 and 7 are yours.
+
+### 16.3 Share both desks, or every subscriber silently gets nothing
+
+**This is the step most likely to be forgotten, and its failure is silent.**
+
+A desk's share list is per-desk state and it does NOT survive the desk being
+recreated. The release creates BRAND NEW desks on ricsul, so their share state
+starts empty — whatever ricsul shared before the release is gone.
+
+For each of `lattice` and `auspex`:
+
+```
+POST /grubbery/api/poke/apps/shell.shell/desks/<name>.desk/share.usergroups?blot=/json
+     {"add":"/public"}
+```
+
+`/public` is the group every foreign ship belongs to automatically.
+
+Then CHECK it, because a poke returning 200 is not evidence the grant landed:
+
+```
+GET /grubbery/ball/sys/ames/usergroups/public.grp/how.weir?blot=/json
+```
+
+You want **six** peek roads — two per desk plus the shell's own two:
+
+```
+peek /apps/shell.shell/public.json
+peek /apps/shell.shell/share/public/desks.json
+peek /apps/shell.shell/desks/lattice.desk/desk/code
+peek /apps/shell.shell/desks/lattice.desk/version.json
+peek /apps/shell.shell/desks/auspex.desk/desk/code
+peek /apps/shell.shell/desks/auspex.desk/version.json
+```
+
+Fewer than six means a subscriber will get a desk with the right `source.json`,
+an empty `/desk/code`, no instance, and **no error anywhere**. Do not proceed to
+16.4 until you see six.
+
+Poke it through `/grubbery/api/poke/...?blot=/json`, NOT with `&grub-cmd` from the
+dojo: the handler reads the poke with an unwrapped `!<(json ...)`, so an untyped
+noun crashes the fiber and the share silently never applies.
+
+### 16.4 What a subscriber does, and what they see
+
+Nothing, until they are asked. kiln syncs each revision in order (`%sing %w
+ud+let`, then `%merg` that exact revision — it does not collapse to head), so the
+release arrives on its own.
+
+Then, unattended: the shell provisions a desk per `+published` entry, each desk
+mirrors the distributor's `/desk/code` cross-ship, `bill.json` creates the
+instance, and a consent prompt appears per app.
+
+The user grants. lattice then carries their old data on the writer's first rise,
+and their pages, memories and bookmarks are at the new location.
+
+**Between the release landing and that grant, lattice is DOWN on their ship.** The
+old instance is dormant the moment its code leaves the ball, and the new one
+cannot bind until its weir is approved. That gap is as long as the user takes to
+notice, and it is accepted: downtime pending user action is tolerable, data loss
+is not.
+
+During the same window the MCP memory tools report an EMPTY vault rather than an
+error, because `+base` points at an instance with no data yet. Also accepted, and
+also worth saying out loud to anyone who asks.
+
+### 16.5 Verifying a migration
+
+Grub-level byte comparison against the old instance is IMPOSSIBLE and that is by
+design: the release takes lattice's marks out of the ball with its code, so every
+typed grub at the old instance reads `File is boomed`. An earlier run reported 44
+of 56 grubs "differing" for exactly that reason and the comparison meant nothing.
+
+What actually proves it, and what the rehearsal measured:
+
+| check | wex | feb |
+|---|---|---|
+| grubs carried | 63/63 | **251/251** |
+| booms at the new install | 0 | 0 (245 typed) |
+| source untouched afterwards | yes | yes, 251 |
+| pages, kinds, share modes, know, bookmarks | identical | — |
+| page and know bodies | 7/7 byte-for-byte | — |
+| owner reader / published page, no cookie | 200 / 200 | 200 |
+| memory store from the new location | answers | — |
+
+`scratchpad/h/p3-verify.sh` runs all of it against a snapshot taken while the
+pre-migration ship was still serving.
+
+### 16.6 If something goes wrong
+
+- **desk exists, `/desk/code` empty, no error** — the share. Go to 16.3 and count
+  the roads.
+- **repo exists, no desk** — #60 is not in the build.
+- **only one app installable** — #61 is not in the build.
+- **subscriber stuck with an empty desk and never recovers** — #63 is not in the
+  build. Poking its `source.json` restarts the subscription by hand.
+- **`carried.json` is `true` but no data came** — the carry hit a refused road and
+  said so with `%lattice-carry-road-refused`; it does not mark itself done on a
+  veto, so granting the road and reloading re-runs it.
+- **nothing installed, `manifest.json` at 0, no error** — a bill entry it could
+  not read. #62 makes this report the key instead of losing the install.
+
+### 16.7 The old instance is the rollback
+
+The carry copies. `/apps/lattice.lattice_app` keeps every grub it had, and the
+rehearsal confirmed the count unchanged afterwards on both ships. Rolling back is
+putting lattice's sources and its `root.hoon` row back in the ball; the data never
+moved.
