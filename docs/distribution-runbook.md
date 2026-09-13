@@ -1651,8 +1651,20 @@ plan rather than by exploring.
   copy of your pages (or nothing) and mail delivery to auspex is dead, with no
   error anywhere. Found on ricsul after the release; the rehearsal never read a
   page cross-ship. `dist/single-release` carries it.
-- **lattice is at v25 or later.** v24 addressed a PEER at the old ball path, so
-  two migrated ships could not read each other. v25 asks the desk path first.
+- **lattice is at v25 or later, auspex at v12 or later.** v24 addressed a PEER
+  at the old ball path, so two migrated ships could not read each other. And
+  neither app's ask named `/sys/ames/ships/`, the peer mirror, so a read of
+  another ship's page (lattice) or a mail delivery (auspex) was vetoed by the
+  sender's own sandbox before it left the ship. v25 and v12 ask for it: lattice
+  asks 12 roads now, auspex 7. A ship upgrading from v24/v11 sees the ask as
+  CHANGED and has to approve it again; until then the app runs on its old
+  grant and only the cross-ship features are missing.
+- **The cross-ship read passed on two ships running this exact build.** Not a
+  rehearsal you can skip: three days of single-ship testing never read a page
+  from another ship, and every one of the three faults above was invisible
+  without that. `scratchpad/h/x-ship.sh` does it for two fake ships; for
+  ricsul the check is a REAL peer (16.5c), since a fake ship cannot reach a
+  real one.
 - `dist/single-release` audits clean: `scratchpad/h/audit-release.sh`, 23 checks.
 - **lattice's repo is pushed** and `code/version.json` is bumped. Subscribers
   re-sync only on a version change; code alone changes nothing.
@@ -1843,6 +1855,21 @@ after each grant, the instance's weir is NOT empty — the veto lines stop:
 ```
 
 Only when every line reads right: `|public %grubbery`, then confirm `%black`.
+
+### 16.5c The real-peer check, after `|public`
+
+A fake ship cannot talk to a real one, so this one runs after the release is
+public and a real subscriber (~martyr-sanryg tracks ricsul through kiln) has
+taken it, migrated, and approved both asks. From that ship:
+
+```
+GET /apps/lattice/fetch?url=urb://~ricsul-bilwyt/retro-profile
+```
+
+200 with the page body means the whole chain holds on real ames: ricsul's
+grant at the desk path, the peer's road to the mirror, and the desk-first
+address. A 000 or a hang is the sender's veto (its ask not re-approved after
+v25) or ricsul's grant missing (16.3, the desk-path roads).
 
 ### 16.6 If something goes wrong
 
