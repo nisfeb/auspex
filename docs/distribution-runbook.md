@@ -528,3 +528,121 @@ restores pre-split `tiles.hoon` (upstream `d839ede`) as a self-contained
 launcher. Post-split, tiles is a pure data store and the shell is the
 view; taking `develop` gives us both, correctly. Merging the old fork
 would carry a launcher we would then have to un-carry.
+
+## 10. The calendar release — prepared 2026-09-14
+
+Ships the calendar desk to `~ricsul-bilwyt` and its subscribers, with the
+kernel batch it needs. Ricsul's kernel is `dist/single-release` at `b52d217`
+(committed by hand on 2026-09-13). The target is `dist/single-release` at
+`e130732`. Rehearsed on `~wex` (distributor) and `~feb` (subscriber); all
+four calendar gates green on version 9.
+
+### 10.1 What the batch contains
+
+Kernel (`git diff --name-status b52d217..e130732` on `dist/single-release`):
+
+| change | file | why |
+|---|---|---|
+| M | `desk/app/grubbery.hoon` | PR #71: a fiber dropping a remote subscription gets its `%fell` (subscribers stopped following version bumps) |
+| M | `desk/gub/nex/shell.hoon` | PR #72: stock mirrors poll github (seeded on every boot); the calendar joins the stock catalog |
+| D | `desk/gub/lib/calendar.hoon`, `desk/gub/lib/pytz.hoon`, `desk/gub/lib/pytz/` (599 files) | the built-in calendar's remnants; the desk carries its own |
+
+Desk: `nisfeb/calendar` main, `code/version.json` = 9. The distributor's
+mirror pulls it from github (polling every 15 min once #72 is on the ship);
+subscribers follow the distributor's desk.
+
+### 10.2 Preconditions
+
+- The runbook's §3 preconditions still hold (weir rows at desk paths on
+  ricsul, `~martyr-sanryg` reads lattice's `/pub`).
+- `docs/caldav.md`, `docs/google.md`, `docs/using.md` in the calendar repo
+  are the user-facing docs; nothing in them assumes ricsul.
+- nginx in front of ricsul: CalDAV clients need the verb rewrite in
+  `docs/caldav.md` (`X-HTTP-Method-Override` for PROPFIND, PROPPATCH, REPORT,
+  MKCALENDAR) and the `/.well-known/caldav` redirect. Without it the calendar
+  works, CalDAV clients do not. This is an nginx change on the VPS, made by
+  hand, before or after the release — it is independent of the kernel.
+
+### 10.3 Stage (foundation → asimov mount), every line typed by a human
+
+```
+RDESK=/home/sneagan/ricsul-bilwyt/_data/ricsul-bilwyt/grubbery
+cd ~/software/groundwire/grubbery && git checkout dist/single-release && git rev-parse --short HEAD   # e130732
+scp -P 4141 desk/app/grubbery.hoon     sneagan@45.33.75.69:$RDESK/app/grubbery.hoon
+scp -P 4141 desk/gub/nex/shell.hoon    sneagan@45.33.75.69:$RDESK/gub/nex/shell.hoon
+ssh -p 4141 sneagan@45.33.75.69 "cd $RDESK && rm -rf gub/lib/pytz gub/lib/pytz.hoon gub/lib/calendar.hoon && ls gub/lib | grep -c pytz"   # expect 0
+ssh -p 4141 sneagan@45.33.75.69 "cd $RDESK && sha256sum app/grubbery.hoon gub/nex/shell.hoon"   # compare with sha256sum desk/app/grubbery.hoon desk/gub/nex/shell.hoon
+```
+
+Backup the mount first, as in §5.3 step 1. The deletions are the part that
+clay refuses if forgotten (a file the new ref dropped and the mount kept
+fails to compile and takes the commit down — §5.3, and the 2026-09-02 log).
+
+### 10.4 Commit and watch (ricsul dojo, tmux `0:2` on asimov)
+
+```
+|commit %grubbery
+```
+
+Expect `build-all`, `reload-changed-nexuses` naming `/shell` and the agent
+reload. `dep failed` / `mint-vain` / `nest-fail` stops the release: restore
+from the backup, no partial state. The ship is unresponsive for a few
+minutes after the commit (memory: `reference/lattice-ops`).
+
+After the reload the shell's bootstrap runs `ensure-polls`: the lattice and
+auspex mirrors' `poll.json` read `minutes: 15` from then on.
+
+### 10.5 The calendar desk appears
+
+1. Tiles page → Desks → **Sync** on `calendar` (or
+   `POST /apps/grubbery/desks/sync {"name":"calendar"}` with the owner
+   cookie). This makes the mirror `calendar.git_repo` (polls github), the
+   desk `calendar.desk` following its checkout, and pulls. Watch for
+   `%desk-sync-release ver=[~ '9']` and the instance
+   `/apps/shell.shell/desks/calendar.desk/desk/data/calendar.calendar_app`.
+2. **Permits page**: approve the calendar's ask — peek `/sys/link/` and
+   `/apps/calendar.calendar/` (the carry; refuse it and the install starts
+   empty), poke `/sys/bowl.sig`, `/sys/eyre/`, `/sys/behn/`, `/sys/push/`,
+   `/sys/iris/`. Then the reload the page offers.
+3. The tile shows (navy, amber page-of-days). `/apps/calendar` renders.
+   The carry copies the dormant `/apps/calendar.calendar` instance's
+   events, reminders and feeds if that instance still exists on ricsul
+   (`carried.json` turns `true`; console `%calendar-carrying-old-data N`).
+4. **Open the desk to subscribers**, exactly as for lattice and auspex:
+   `POST /grubbery/api/poke/apps/shell.shell/desks/calendar.desk/share.usergroups?blot=/json`
+   with `{"add":"/public"}`. Confirm with
+   `GET /grubbery/ball/apps/shell.shell/share/public/desks.json?blot=/json`
+   listing `calendar`.
+
+### 10.6 Retire the old calendar instance (after step 10.5.3, by hand)
+
+Only once `carried.json` is `true` (or the carry road was refused on
+purpose): cull `/apps/calendar.calendar` the way the other app-tier
+instances were culled on 2026-09-13 (§7 log). Its data has been copied; the
+kernel no longer carries its code. This removes the old tile. Nothing else
+deletes it.
+
+### 10.7 Subscribers
+
+`~martyr-sanryg` (and any other follower) gets the kernel through clay as
+before; its shell then lists `calendar` under stock desks (source
+`~ricsul-bilwyt/apps/shell.shell/desks/calendar.desk/desk/code`), pulls once
+the share above is in place, and asks the same roads on its own permits
+page. With PR #71 in the kernel a follower keeps following version bumps;
+before it, a follower stuck after any Sync and needed its desk nexus
+reloaded.
+
+### 10.8 Checks
+
+- `GET /apps/calendar/calendars.json` on ricsul → the default calendar.
+- `scripts/roundtrip.sh https://urbit.sneagan.com <jar>` from foundation
+  with a browser cookie jar: `ROUNDTRIP PASSED`.
+- Mint a CalDAV password on ricsul (Settings → Sharing) and, once nginx
+  rewrites the verbs, `scripts/dav-matrix.py https://urbit.sneagan.com/apps/calendar/dav/ ~ricsul-bilwyt <pw> https://urbit.sneagan.com <jar>`.
+- The lattice and auspex mirrors' `poll.json` on ricsul read `minutes: 15`.
+
+### 10.9 Rollback
+
+Restore the mount from the backup and `|commit %grubbery` (§6). The
+calendar desk, its mirror and its instance are data under `/apps/...`; a
+kernel rollback leaves them dormant, it does not delete them.
