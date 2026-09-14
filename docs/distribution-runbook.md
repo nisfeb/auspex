@@ -628,9 +628,21 @@ auspex mirrors' `poll.json` read `minutes: 15` from then on.
    (`carried.json` turns `true`; console `%calendar-carrying-old-data N`).
 4. **Open the desk to subscribers**, exactly as for lattice and auspex:
    `POST /grubbery/api/poke/apps/shell.shell/desks/calendar.desk/share.usergroups?blot=/json`
-   with `{"add":"/public"}`. Confirm with
+   with `{"add":"/public"}`. Then `POST /apps/grubbery/permits/refresh {}`:
+   the shell rebuilds `/share/<group>/desks.json` only on its rise, on
+   permits news, or on that refresh, so without it the list stays stale
+   (seen on ricsul 2026-09-14). Confirm with
    `GET /grubbery/ball/apps/shell.shell/share/public/desks.json?blot=/json`
    listing `calendar`.
+
+Expect four `%weir-veto-at` traces on `/sys/bowl.sig` from the calendar's
+first rise, before step 2's grant; they stop after the reload. The
+calendar's own log lines after the reload are `%sand-applied` and
+`%calendar-carrying-old-data N`.
+
+Done on ricsul 2026-09-14: kernel e130732, calendar v12, lattice v27
+(auspex was already at master). Steps 10.6 (cull), the nginx verb rewrite
+and `|public` remain sneagan's.
 
 ### 10.6 Retire the old calendar instance (after step 10.5.3, by hand)
 
