@@ -535,8 +535,8 @@ Ships the calendar desk to `~ricsul-bilwyt` and its subscribers, with the
 kernel batch it needs. Ricsul's kernel is `dist/single-release` at `b52d217`
 (committed by hand on 2026-09-13). The target is `dist/single-release` at
 `e130732`. Rehearsed on `~wex` (distributor) and `~feb` (subscriber); all
-six calendar gates green on version 11 (v10 added sharing a calendar
-with a ship by name, v11 tasks/VTODO; both on `nisfeb/calendar` main).
+seven calendar gates green on version 12 (v10 added sharing a calendar
+with a ship by name, v11 tasks/VTODO, v12 two review rounds; all on `nisfeb/calendar` main).
 
 ### 10.1 What the batch contains
 
@@ -548,7 +548,7 @@ Kernel (`git diff --name-status b52d217..e130732` on `dist/single-release`):
 | M | `desk/gub/nex/shell.hoon` | PR #72: stock mirrors poll github (seeded on every boot); the calendar joins the stock catalog |
 | D | `desk/gub/lib/calendar.hoon`, `desk/gub/lib/pytz.hoon`, `desk/gub/lib/pytz/` (599 files) | the built-in calendar's remnants; the desk carries its own |
 
-Desk: `nisfeb/calendar` main, `code/version.json` = 11. The distributor's
+Desk: `nisfeb/calendar` main, `code/version.json` = 12. The distributor's
 mirror pulls it from github (polling every 15 min once #72 is on the ship);
 subscribers follow the distributor's desk.
 
@@ -609,7 +609,7 @@ auspex mirrors' `poll.json` read `minutes: 15` from then on.
    `POST /apps/grubbery/desks/sync {"name":"calendar"}` with the owner
    cookie). This makes the mirror `calendar.git_repo` (polls github), the
    desk `calendar.desk` following its checkout, and pulls. Watch for
-   `%desk-sync-release ver=[~ '11']` and the instance
+   `%desk-sync-release ver=[~ '12']` and the instance
    `/apps/shell.shell/desks/calendar.desk/desk/data/calendar.calendar_app`.
 2. **Permits page**: approve the calendar's ask — peek `/sys/link/` and
    `/apps/calendar.calendar/` (the carry; refuse it and the install starts
