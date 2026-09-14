@@ -574,9 +574,19 @@ ssh -p 4141 sneagan@45.33.75.69 "cd $RDESK && rm -rf gub/lib/pytz gub/lib/pytz.h
 ssh -p 4141 sneagan@45.33.75.69 "cd $RDESK && sha256sum app/grubbery.hoon gub/nex/shell.hoon"   # compare with sha256sum desk/app/grubbery.hoon desk/gub/nex/shell.hoon
 ```
 
-Backup the mount first, as in §5.3 step 1. The deletions are the part that
-clay refuses if forgotten (a file the new ref dropped and the mount kept
-fails to compile and takes the commit down — §5.3, and the 2026-09-02 log).
+Backup the mount first, as in §5.3 step 1.
+
+Deletions on the mount do not reach clay on this kernel (seen on ricsul on
+2026-09-13 and on wex and feb in the rehearsal: `|commit` picks up changes,
+not removals). The two hoon files are removed in the dojo, after the
+commit (§10.4):
+```
+|rm /=grubbery=/gub/lib/pytz/hoon
+|rm /=grubbery=/gub/lib/calendar/hoon
+```
+The 599 zone data files under `gub/lib/pytz/` are `%txt`, never compiled;
+they can stay in clay as inert data, or go later one `|rm` at a time. They
+are not on the mount any more, so nothing re-adds them.
 
 ### 10.4 Commit and watch (ricsul dojo, tmux `0:2` on asimov)
 
