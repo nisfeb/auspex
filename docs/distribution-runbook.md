@@ -535,7 +535,8 @@ Ships the calendar desk to `~ricsul-bilwyt` and its subscribers, with the
 kernel batch it needs. Ricsul's kernel is `dist/single-release` at `b52d217`
 (committed by hand on 2026-09-13). The target is `dist/single-release` at
 `e130732`. Rehearsed on `~wex` (distributor) and `~feb` (subscriber); all
-four calendar gates green on version 9.
+six calendar gates green on version 11 (v10 added sharing a calendar
+with a ship by name, v11 tasks/VTODO; both on `nisfeb/calendar` main).
 
 ### 10.1 What the batch contains
 
@@ -547,7 +548,7 @@ Kernel (`git diff --name-status b52d217..e130732` on `dist/single-release`):
 | M | `desk/gub/nex/shell.hoon` | PR #72: stock mirrors poll github (seeded on every boot); the calendar joins the stock catalog |
 | D | `desk/gub/lib/calendar.hoon`, `desk/gub/lib/pytz.hoon`, `desk/gub/lib/pytz/` (599 files) | the built-in calendar's remnants; the desk carries its own |
 
-Desk: `nisfeb/calendar` main, `code/version.json` = 9. The distributor's
+Desk: `nisfeb/calendar` main, `code/version.json` = 11. The distributor's
 mirror pulls it from github (polling every 15 min once #72 is on the ship);
 subscribers follow the distributor's desk.
 
@@ -608,12 +609,19 @@ auspex mirrors' `poll.json` read `minutes: 15` from then on.
    `POST /apps/grubbery/desks/sync {"name":"calendar"}` with the owner
    cookie). This makes the mirror `calendar.git_repo` (polls github), the
    desk `calendar.desk` following its checkout, and pulls. Watch for
-   `%desk-sync-release ver=[~ '9']` and the instance
+   `%desk-sync-release ver=[~ '11']` and the instance
    `/apps/shell.shell/desks/calendar.desk/desk/data/calendar.calendar_app`.
 2. **Permits page**: approve the calendar's ask — peek `/sys/link/` and
    `/apps/calendar.calendar/` (the carry; refuse it and the install starts
    empty), poke `/sys/bowl.sig`, `/sys/eyre/`, `/sys/behn/`, `/sys/push/`,
-   `/sys/iris/`. Then the reload the page offers.
+   `/sys/iris/`. Since v10 the ask also carries the sharing-with-ships
+   roads: poke `/sys/gall/`, `/sys/ames/registry`, `/sys/ames/usergroups/`;
+   peek `/sys/ames/usergroups/`, `/sys/ames/ships/`; make
+   `/sys/ames/usergroups/`. Refuse them and everything else still works;
+   only sharing with ships is off. Then the reload the page offers.
+   Approve only from an ask the reloaded instance wrote (a grant applied
+   over a stale ask drops the roads it does not list); the instance lays
+   its offer inbox road on `/public` on the next sync pass by itself.
 3. The tile shows (navy, amber page-of-days). `/apps/calendar` renders.
    The carry copies the dormant `/apps/calendar.calendar` instance's
    events, reminders and feeds if that instance still exists on ricsul
