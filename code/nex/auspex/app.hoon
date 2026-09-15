@@ -4091,7 +4091,7 @@
     ==
   =/  c=chain:uc  (chain-of ss)
   ?&  ?+  view  |
-        %inbox     (in-inbox:uc our (participants:uc c) archived.mt direct.mt)
+        %inbox     (in-inbox:uc our c archived.mt direct.mt)
         %sent      (in-sent:uc our c)
         %archived  archived.mt
         %all       &

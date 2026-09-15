@@ -1095,22 +1095,37 @@
   =/  m  (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
   (expect !>(?=(~ (newest-match:auspex '' ~[m]))))
 ::
-::  INBOX IS PARTICIPANT OR DIRECT. The direct flag is what makes a BCC'd
-::  recipient's mail visible at all: they are in neither `from` nor `to`
-::  of any message in the chain they were handed.
-++  test-inbox-is-participant-or-direct
-  =/  us  ~sampel-palnet
-  =/  ps  (sy ~[~palnet-sampel ~marbud-marbud])
+::  INBOX IS ADDRESSED-TO-US OR FROM-SOMEONE-ELSE OR DIRECT. It asked the
+::  participant set, which includes our own `from`, so every thread we
+::  sent sat in our own Inbox as well as in Sent. The direct flag is
+::  still what makes a BCC'd recipient's mail visible at all: they are in
+::  neither `from` nor `to` of any message in the chain they were handed,
+::  so no test over the messages can find them.
+++  test-inbox-is-addressed-to-us-or-from-another
+  =/  us     ~sampel-palnet
+  =/  them   ~palnet-sampel
+  ::  we wrote to a peer, and nobody has answered yet
+  =/  ours   (forge us (sy ~[them]) 'a' 'b' ~2026.1.1 ~)
+  ::  the peer answered
+  =/  reply  (forge them (sy ~[us]) 'a' 'c' ~2026.1.2 ~)
+  ::  we wrote to ourselves
+  =/  self   (forge us (sy ~[us]) 'a' 'b' ~2026.1.1 ~)
   ;:  weld
-    ::  not a participant, not direct: not our inbox
-    (expect !>(!(in-inbox:auspex us ps | |)))
-    ::  the BCC case: not a participant, but it arrived here
-    (expect !>((in-inbox:auspex us ps | &)))
-    ::  an ordinary participant
-    (expect !>((in-inbox:auspex us (~(put in ps) us) | |)))
-    ::  archived beats both
-    (expect !>(!(in-inbox:auspex us (~(put in ps) us) & |)))
-    (expect !>(!(in-inbox:auspex us ps & &)))
+    ::  our own outgoing message, alone, is Sent and NOT Inbox
+    (expect !>(!(in-inbox:auspex us ~[ours] | |)))
+    ::  a message from us TO us belongs in the Inbox
+    (expect !>((in-inbox:auspex us ~[self] | |)))
+    ::  the reply brings the thread back
+    (expect !>((in-inbox:auspex us ~[ours reply] | |)))
+    ::  the BCC case: nothing addressed to us and nothing from another
+    ::  that we can see, but it arrived here
+    (expect !>((in-inbox:auspex us ~[ours] | &)))
+    ::  archived beats every one of them
+    (expect !>(!(in-inbox:auspex us ~[self] & |)))
+    (expect !>(!(in-inbox:auspex us ~[ours reply] & |)))
+    (expect !>(!(in-inbox:auspex us ~[ours] & &)))
+    ::  an empty chain is nobody's inbox
+    (expect !>(!(in-inbox:auspex us ~ | |)))
   ==
 ::
 ++  test-sent-is-threads-we-authored

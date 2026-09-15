@@ -1580,18 +1580,42 @@
   =/  hits=chain  (skim c |=(m=msg (matches q unsigned.m)))
   ?~(hits ~ `(rear hits))
 ::
-::  +in-inbox: PARTICIPANT OR DIRECT, and not archived.
+::  +in-inbox: ADDRESSED TO US, OR FROM SOMEONE ELSE, OR DIRECT — and
+::  not archived.
 ::
-::    `direct` is set when a chain arrived through a delivery poke, and
-::    it is what makes BCC work at all: a blind-copied recipient is in
-::    neither `from` nor `to` of any message in the chain, so a
-::    participant-only Inbox would hide their mail completely. The flag
-::    has existed since the BCC decision and nothing read it until now.
+::    This asked the PARTICIPANT set, and participants is the union of
+::    every `from` and `to` in the chain, so our own `from` put every
+::    thread we had ever sent into our own Inbox. One message to one peer
+::    was filed under Inbox and Sent at once, which is not what either
+::    view means.
+::
+::    So ask the messages instead. A thread reaches the Inbox when
+::    somebody wrote TO us, or when somebody other than us wrote in it at
+::    all. Every case falls out of that without a second stored record:
+::
+::      me -> peer       nothing to us, nothing from another: Sent only
+::      me -> me         our own `to` carries us: Inbox, and Sent
+::      peer replies     a message not from us: back in the Inbox
+::      forwarded chain  somebody else's messages: Inbox
+::
+::    `direct` stays the override, and it is still the whole reason BCC
+::    works: a blind-copied recipient is in neither `from` nor `to` of
+::    any message in the chain they were handed, so no test over the
+::    messages can see them. It has existed since the BCC decision.
+::
+::    $unsigned is frozen, so this reads `from` and `to` and nothing
+::    else — the two fields a signature already covers.
 ::
 ++  in-inbox
-  |=  [our=ship ps=(set ship) archived=? direct=?]
+  |=  [our=ship c=chain archived=? direct=?]
   ^-  ?
-  &(!archived ?|((~(has in ps) our) direct))
+  ?:  archived  |
+  ?:  direct    &
+  %+  lien  c
+  |=  m=msg
+  ?|  (~(has in to.unsigned.m) our)
+      !=(from.unsigned.m our)
+  ==
 ::
 ::  +in-sent: did we write any message in this thread?
 ::
