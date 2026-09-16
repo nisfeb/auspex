@@ -5,6 +5,14 @@ script on that date; where something is a decision still to be made it says
 so. The production ship is `~ricsul-bilwyt`. **Nothing in this document is
 executed on it until an explicit go, one step at a time.**
 
+**This document is the ONE-TIME migration** that made auspex a stock desk:
+unpublishing, the carry, the road grants, the ghost tiles, §16's release
+procedure. For the **ongoing** path — what makes ricsul update, what makes its
+subscribers update, and why `code/version.json` is the only thing that triggers
+either — see [`releasing.md`](releasing.md). Note in particular that auspex's
+forge tracks **`master`** while lattice and calendar track `main`; pushing a
+release to the wrong branch is a silent no-op.
+
 ---
 
 ## 0. Read this first — 2026-09-10
