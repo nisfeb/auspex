@@ -22,8 +22,6 @@ the source named in that desk's `source.json`, `data` created from
   too ("Guests distribute every marc they use" — `desk.hoon`). Run it before
   publishing; the bar is closed. `--fill <grubbery-desk>` vendors what is
   missing and repeats until it closes.
-- **`codedir-check.py`** — the older, source-only check. Superseded by
-  `code-closure.py`, which also resolves marcs.
 
 ## weir-check.py — does this nexus declare every road it reaches?
 
