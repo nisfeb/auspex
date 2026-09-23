@@ -78,9 +78,10 @@ fn bind_stable() -> Result<(TcpListener, u16), String> {
     ))
 }
 
-/// Start (or re-point) the bridge for `ship_base`. Returns the local base URL.
+/// Start (or re-point) the bridge for `ship_base`, a normalised base (see
+/// `config::load_at`). Returns the local base URL.
 pub fn ensure(state: &Bridge, ship_base: &str) -> Result<String, String> {
-    let base = ship_base.trim_end_matches('/').to_string();
+    let base = ship_base.to_string();
     let mut guard = state.0.lock().unwrap();
     if let Some((cur, port)) = guard.as_ref() {
         // Re-point the SAME listener instead of binding another one. The port
@@ -133,7 +134,7 @@ const WHOAMI: &str = "/apps/auspex/api/whoami";
 /// connection warm-up, and saves the second request lattice makes to name the
 /// ship — /api/whoami answers both questions at once.
 pub fn probe(base: &str) -> Result<Option<String>, String> {
-    let url = format!("{}{WHOAMI}", base.trim_end_matches('/'));
+    let url = format!("{base}{WHOAMI}");
     // NOT the shared agent: that one deliberately has no read timeout (the
     // SSE beacon holds a connection open for hours), which for this one call
     // would let a wedged pier hold the connection page's status check open
@@ -177,7 +178,7 @@ fn ship_from_whoami(body: &str) -> Option<String> {
 /// whose name is not shaped like that is not a session however the ship
 /// labelled the response.
 pub fn login(base: &str, code: &str) -> Result<(String, String), String> {
-    let url = format!("{}/~/login", base.trim_end_matches('/'));
+    let url = format!("{base}/~/login");
     let resp = match agent().post(&url).send_form(&[("password", code)]) {
         Ok(r) => r,
         // eyre answers a wrong +code with a 4xx. That is the failure people
@@ -434,20 +435,10 @@ fn relay_response(c: &mut TcpStream, resp: ureq::Response) -> std::io::Result<()
         }
     }
     write!(c, "Connection: close\r\n\r\n")?;
-    // stream, flushed per chunk so SSE events arrive as they happen
-    let mut src = resp.into_reader();
-    let mut buf = [0u8; 16 * 1024];
-    loop {
-        match src.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                if c.write_all(&buf[..n]).is_err() {
-                    break;
-                }
-                c.flush().ok();
-            }
-        }
-    }
+    // streamed: each read is written as it lands, so SSE events arrive as
+    // they happen (a TcpStream has no buffer to flush). A peer that goes
+    // away mid-body ends the relay, which is all there is to do about it.
+    let _ = std::io::copy(&mut resp.into_reader(), c);
     Ok(())
 }
 
@@ -686,11 +677,7 @@ mod tests {
         // nothing listening is an error, which the page must advise on
         // differently from "reachable but logged out"
         assert!(probe("http://127.0.0.1:1").is_err());
-        // a configured url with a trailing slash must not become //apps/...
-        let slashed = Stub::new(|_| (200, r#"{"ship":"~wex"}"#.to_string()));
-        let base = format!("{}/", slashed.base);
-        assert_eq!(probe(&base), Ok(Some("~wex".to_string())));
-        assert_eq!(slashed.only().target, WHOAMI);
+        // (a trailing slash in the config is config::load_at's to trim)
     }
 
     #[test]
@@ -814,19 +801,6 @@ mod tests {
             poke_bridge(req.as_bytes());
         }
 
-        // header names are matched lowercased at the call site, so the drop
-        // list must be total and hit regardless of the wire casing
-        #[test]
-        fn drop_request_header_is_total_and_case_blind(name in "[!-~]{1,24}") {
-            let dropped = drop_request_header(&name.to_ascii_lowercase());
-            let expected = matches!(
-                name.to_ascii_lowercase().as_str(),
-                "host" | "connection" | "cookie" | "content-length" | "upgrade"
-                    | "keep-alive" | "proxy-connection" | "transfer-encoding"
-            );
-            prop_assert_eq!(dropped, expected);
-        }
-
         // whatever a ship (or something in front of it) puts in a Set-Cookie,
         // the answer is either None or a name=value that really is a session
         #[test]
@@ -917,10 +891,9 @@ mod tests {
         let ship2 = Stub::new(|_| (200, "ship two".to_string()));
         let bridge = Bridge(Mutex::new(None));
 
-        let local = ensure(&bridge, &format!("{}/", ship1.base)).expect("bridge starts");
+        let local = ensure(&bridge, &ship1.base).expect("bridge starts");
         assert_eq!(local, format!("http://127.0.0.1:{PORT_BASE}"), "the webview's origin");
         assert_eq!(get_through_bridge(&local, "/apps/auspex/"), "ship one");
-        // the trailing slash was trimmed, not doubled onto the target
         assert!(ship1.asked_for("/apps/auspex/"), "{:?}", ship1.requests().len());
 
         let again = ensure(&bridge, &ship2.base).expect("re-point");

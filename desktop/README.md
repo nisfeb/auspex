@@ -9,8 +9,8 @@ new mail**. That is the whole reason this exists.
 Prereqs: Rust, `cargo install tauri-cli --locked`, and Tauri v2's platform deps
 (<https://v2.tauri.app/start/prerequisites/>). On Linux that is the
 webkit2gtk-4.1 development package — `libwebkit2gtk-4.1-dev` on Debian/Ubuntu,
-`lib64webkit4.1-devel` on OpenMandriva — plus gtk3, librsvg2, libsoup3 and
-libayatana-appindicator3. Nothing needs fuse: this app mounts nothing.
+`lib64webkit4.1-devel` on OpenMandriva — plus gtk3, librsvg2 and libsoup3.
+No appindicator (there is no tray) and no fuse (this app mounts nothing).
 
     cd desktop
     cargo tauri build        # bundles in target/release/bundle/
@@ -80,8 +80,10 @@ successful connect otherwise.
    goes unread again later is news again — which it is.
 
 A dropped stream reconnects with backoff, 1s doubling to 30s, reset on a whole
-frame received. The frame classifier and the diff are pure functions with unit
-tests; the thread around them is plumbing.
+frame received. The reconnected stream's first frame is compared with the last
+revision seen: if it differs, mail moved while the stream was down, and that
+counts as a change. The frame classifier, the revision reader and the diff are
+pure functions with unit tests; the thread around them is plumbing.
 
 ### Ceilings, stated rather than discovered
 

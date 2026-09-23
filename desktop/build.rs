@@ -2,9 +2,9 @@ fn main() {
     // Opting ANY command into the app manifest gates them ALL. An unlisted
     // command is denied everywhere ("connect not allowed"), which reads at
     // runtime like anything except what it is. So every command is listed
-    // here, local windows get all of them via capabilities/local.json, and
-    // the ship-served page gets only the two it can justify
-    // (capabilities/workspace-remote.json).
+    // here and local windows get all of them via capabilities/local.json.
+    // The ship-served page gets none: it never invokes a command, and a
+    // grant to it is a grant to whatever the configured ship serves.
     //
     // scripts/desktop-commands.mjs cross-checks this list against the invoke
     // handler and the capabilities. It comes from lattice, where the same
@@ -13,11 +13,9 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "connect",
             "connection_status",
-            "get_config",
             "go_home",
-            "open_external_url",
-            // the page reports its colour scheme so the GTK menubar and
-            // native scrollbars follow it (both pages: manager + ship UI)
+            // the manager reports its colour scheme so the GTK menubar and
+            // native scrollbars follow it
             "set_theme",
         ]),
     ))

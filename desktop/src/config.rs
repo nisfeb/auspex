@@ -39,11 +39,16 @@ pub fn normalise_url(raw: &str) -> String {
     }
 }
 
+/// The stored URL comes back normalised, so every caller holds a base it can
+/// append a route to without trimming it again: connect writes one already,
+/// but config.json is a file a person can edit.
 pub fn load_at(p: &Path) -> Config {
-    std::fs::read_to_string(p)
+    let mut c: Config = std::fs::read_to_string(p)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    c.url = normalise_url(&c.url);
+    c
 }
 
 pub fn save_at(p: &Path, c: &Config) -> Result<(), String> {
@@ -182,6 +187,15 @@ mod tests {
     }
 
     #[test]
+    fn a_hand_edited_url_loads_as_a_base() {
+        // every route is appended to the loaded url without trimming it again
+        let p = tmp("edited");
+        std::fs::write(&p, br#"{"url":" localhost:8081/ ","ship":"~wex"}"#).unwrap();
+        assert_eq!(load_at(&p).url, "http://localhost:8081");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
     fn the_url_normaliser_makes_a_base_out_of_what_people_type() {
         // a trailing slash would make every route //apps/auspex/...
         assert_eq!(normalise_url("http://localhost:8081/"), "http://localhost:8081");
@@ -215,7 +229,8 @@ mod tests {
         }
 
         // save -> load is the identity for any field content (quotes,
-        // backslashes, unicode — everything JSON escaping must survive)
+        // backslashes, unicode — everything JSON escaping must survive),
+        // except that the url comes back normalised
         #[test]
         fn config_roundtrips(url in ".{0,32}", ship in ".{0,32}") {
             let c = Config { url: url.clone(), ship: ship.clone() };
@@ -223,7 +238,7 @@ mod tests {
             save_at(&p, &c).unwrap();
             let back = load_at(&p);
             std::fs::remove_file(&p).ok();
-            prop_assert_eq!(back.url, url);
+            prop_assert_eq!(back.url, normalise_url(&url));
             prop_assert_eq!(back.ship, ship);
         }
 

@@ -1,14 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-shell",
-  "description": "The shell's own pages (the manager window) get every app command. No remote context here — ship-served content is covered by workspace-remote only. notification:default is the notification plugin's own permission set; the notifier raises everything from Rust, but the plugin's permission is what carries the OS-level authorisation (on macOS the request prompt), and granting it to the shell's page rather than to the ship-served one keeps the decision about what pops up on this machine entirely in this binary.",
+  "description": "The shell's own pages (the manager window) get every app command. No remote context here, and no capability for ship-served content at all: the client never invokes a command. notification:default is the notification plugin's own permission set; the notifier raises everything from Rust, but the plugin's permission is what carries the OS-level authorisation (on macOS the request prompt), and granting it to the shell's page rather than to the ship-served one keeps the decision about what pops up on this machine entirely in this binary.",
   "windows": ["workspace"],
   "permissions": [
     "allow-connect",
     "allow-connection-status",
-    "allow-get-config",
     "allow-go-home",
-    "allow-open-external-url",
     "allow-set-theme",
     "notification:default"
   ]

@@ -68,9 +68,9 @@ pub fn show_manager(app: &AppHandle) -> Result<(), String> {
     // Tauri judges every invoke local or remote from the origin the webview
     // reports. On macOS, after navigating from the ship page to
     // tauri://localhost, that origin can still be the ship page's, so the
-    // manager falls under the ship page's capability — which here grants only
-    // open_external_url and set_theme, so connect, get_config and
-    // connection_status would all be refused with "not allowed by acl" and
+    // manager falls under the ship page's capability — which grants nothing,
+    // so connect, connection_status and set_theme would all be refused with
+    // "not allowed by acl" and
     // the connect page would be a dead form. A window BORN on manager.html is
     // the one state that provably works on every platform, and the window is
     // born there anyway, so: destroy it, wait for the label to free (destroy
@@ -140,9 +140,12 @@ pub static REBUILDING: AtomicBool = AtomicBool::new(false);
 /// Is the window showing one of the shell's own pages (the manager) rather
 /// than the ship-served app?
 pub fn on_shell_page(w: &tauri::WebviewWindow) -> bool {
-    w.url()
-        .map(|u| u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost"))
-        .unwrap_or(false)
+    w.url().map(|u| is_shell_url(&u)).unwrap_or(false)
+}
+
+/// The shell's own pages: tauri:// (macOS) or http://tauri.localhost (Linux).
+fn is_shell_url(u: &tauri::Url) -> bool {
+    u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost")
 }
 
 /// The single window is always BORN on manager.html. The app-page protocol
@@ -154,11 +157,6 @@ fn ensure_workspace(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), Str
         Some(w) => Ok((w, false)),
         None => Ok((new_workspace(app)?, true)),
     }
-}
-
-#[tauri::command]
-pub fn get_config(app: AppHandle) -> config::Config {
-    config::load(&app)
 }
 
 #[derive(serde::Serialize)]
@@ -265,12 +263,6 @@ pub fn open_external(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The webview's route to the same policy.
-#[tauri::command]
-pub fn open_external_url(url: String) -> Result<(), String> {
-    open_external(&url)
-}
-
 /// Open (or reuse) the workspace on the localhost bridge. The webview only
 /// ever talks to 127.0.0.1. The bridge relays to the ship with the session
 /// attached Rust-side, so no webkit cookie behaviour (site pinning,
@@ -326,8 +318,7 @@ fn nav_decision(
     bridge: impl FnOnce() -> Option<u16>,
     ship_url: impl FnOnce() -> String,
 ) -> Nav {
-    // local shell pages: tauri:// (macOS) or http://tauri.localhost (Linux)
-    if u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost") {
+    if is_shell_url(u) {
         return Nav::Allow;
     }
     // in-page pseudo-navigations. Never route these to the system opener:

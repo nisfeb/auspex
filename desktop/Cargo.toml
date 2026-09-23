@@ -1,6 +1,6 @@
 [package]
 name = "auspex-desktop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 #  Never goes to crates.io: the desktop app ships as bundles and nothing here
 #  is a library anyone else consumes. Saying so keeps `cargo publish` from

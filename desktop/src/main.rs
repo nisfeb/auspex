@@ -123,9 +123,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::connection_status,
-            commands::get_config,
             commands::go_home,
-            commands::open_external_url,
             commands::set_theme,
         ])
         .build(tauri::generate_context!())

@@ -7,14 +7,13 @@
 //! that is not also a daemon.
 //!
 //! Why a Rust thread rather than the page's own `subscribeChanges`: the
-//! webview is the ship-served client, and the client is not granted any
-//! command that could raise a notification (see
-//! capabilities/workspace-remote.json). Keeping the beacon read here means the
+//! webview is the ship-served client, and the client is granted no command
+//! at all (see build.rs). Keeping the beacon read here means the
 //! ship-served page has no say at all in what this machine pops up.
 //!
 //! Everything that decides ANYTHING is a pure function below `run`:
-//! `is_change` reads a frame, `diff` reads a listing. The thread is the
-//! plumbing around them, and the plumbing is what a test cannot reach.
+//! `is_change` and `rev_in` read a frame, `diff` reads a listing. The thread
+//! is the plumbing around them, and the plumbing is what a test cannot reach.
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
@@ -141,6 +140,22 @@ pub fn is_change(frame: &str) -> bool {
         .is_some_and(|ev| ev.ends_with(" /rev") && !ev.starts_with("old"))
 }
 
+/// The revision a ` /rev` frame carries, or None if it is not one.
+///
+/// It matters on the frame `is_change` deliberately ignores. Every reconnect
+/// replays the CURRENT revision as an `old` frame, so comparing it with the
+/// last one seen answers "did mail land while the stream was down?" for the
+/// price of the reconnect itself. Without it, mail that arrived during an
+/// outage was announced only when something else changed. `revIn` in
+/// `thunderbird/lib/beacon.js` is the same rule.
+pub fn rev_in(frame: &str) -> Option<&str> {
+    let ev = frame.lines().find_map(|l| l.strip_prefix("event:"))?;
+    if !ev.trim().ends_with(" /rev") {
+        return None;
+    }
+    frame.lines().find_map(|l| l.strip_prefix("data:")).map(str::trim)
+}
+
 /// Take the current unread set without notifying about any of it.
 ///
 /// The launch snapshot. An inbox with forty unread threads in it at startup
@@ -237,7 +252,7 @@ pub fn spawn(app: AppHandle) {
 
 /// GET the inbox listing through the shared agent, with the session attached.
 fn fetch_inbox(base: &str) -> Result<Vec<Row>, String> {
-    let url = format!("{}{INBOX}", base.trim_end_matches('/'));
+    let url = format!("{base}{INBOX}");
     let body = proxy::with_cookie(proxy::agent().get(&url))
         .call()
         .map_err(|e| e.to_string())?
@@ -263,12 +278,8 @@ fn raise(app: &AppHandle, n: &Note) {
 fn on_change(app: &AppHandle, base: &str, seen: &mut HashSet<String>) {
     match fetch_inbox(base) {
         Ok(rows) => {
-            let before = seen.len();
             let notes = diff(seen, &rows);
-            //  rows.len() and the notes are both capped views; the honest
-            //  "new" is how many unread ids the snapshot did not hold
-            let fresh = rows.iter().filter(|r| r.unread).count().saturating_sub(before.min(rows.len()));
-            dlog(&format!("notify: change — {} row(s), {} note(s), ~{} new", rows.len(), notes.len(), fresh));
+            dlog(&format!("notify: change — {} row(s), {} note(s)", rows.len(), notes.len()));
             for n in &notes {
                 raise(app, n);
             }
@@ -290,6 +301,9 @@ fn run(app: AppHandle) {
     let mut seen: HashSet<String> = HashSet::new();
     let mut seeded = false;
     let mut backoff = BACKOFF_MIN;
+    // across reconnects, not per stream: it is what the next stream's
+    // replayed `old` frame is compared with
+    let mut last_rev: Option<String> = None;
     loop {
         let base = config::load(&app).url;
         // Defensive only. This thread is started from exactly two places and
@@ -321,7 +335,7 @@ fn run(app: AppHandle) {
                 }
             }
         }
-        let url = format!("{}{BEACON}", base.trim_end_matches('/'));
+        let url = format!("{base}{BEACON}");
         // the shared agent has a CONNECT timeout and no read timeout, which is
         // exactly what a stream held open for hours needs
         match proxy::with_cookie(proxy::agent().get(&url).set("accept", "text/event-stream")).call()
@@ -344,7 +358,17 @@ fn run(app: AppHandle) {
                         // connection and immediately drops it would otherwise
                         // never back off at all.
                         backoff = BACKOFF_MIN;
-                        if is_change(&frame) {
+                        // a revision unlike the last one seen is a change
+                        // even on an `old` frame: the stream was down while
+                        // the ship moved. The very first frame has nothing
+                        // to differ from, so it is still not a change.
+                        let rev = rev_in(&frame);
+                        let missed =
+                            rev.is_some() && last_rev.is_some() && rev != last_rev.as_deref();
+                        if let Some(r) = rev {
+                            last_rev = Some(r.to_string());
+                        }
+                        if is_change(&frame) || missed {
                             on_change(&app, &base, &mut seen);
                         }
                         frame.clear();
@@ -399,6 +423,21 @@ mod tests {
         // change means every reconnect re-reads the inbox, which on a bad
         // network is a notification storm.
         assert!(!is_change("id: 2\nevent: old /rev\ndata: 17014118450815222\n"));
+    }
+
+    #[test]
+    fn a_reconnect_reads_the_revision_it_replays() {
+        // The replayed `old` frame is not a change, but its revision is what
+        // tells a reconnect whether mail landed while the stream was down.
+        let old = "id: 2\nevent: old /rev\ndata: 170141184508152222032218166984159176687\n";
+        assert_eq!(rev_in(old), Some("170141184508152222032218166984159176687"));
+        assert_eq!(rev_in("event: new /rev\r\ndata: 9\r\n"), Some("9"));
+        // other leaves of the /beacon directory carry no mail revision
+        assert_eq!(rev_in("event: new /other\ndata: 12\n"), None);
+        assert_eq!(rev_in("event: new /revision\ndata: 12\n"), None);
+        // a /rev frame with no data line, and a data line with no event
+        assert_eq!(rev_in("event: old /rev\n"), None);
+        assert_eq!(rev_in("data: 12\n"), None);
     }
 
     #[test]
@@ -565,6 +604,7 @@ mod tests {
         #[test]
         fn is_change_is_total(s in ".{0,120}") {
             let _ = is_change(&s);
+            let _ = rev_in(&s);
         }
 
         // Whatever the listing says, diff never announces more than CAP + 1
