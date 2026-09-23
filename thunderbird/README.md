@@ -237,6 +237,15 @@ before it is signed. That is not a renderer: a table comes out as its cells
 run together. The identity this extension creates composes in plain text, and
 that is the shape auspex actually has.
 
+### Forwarding between ordinary mail and auspex
+
+Both directions work. The From field picks the road: a send from your `~ship@auspex.urbit` identity goes through the ship, and a send from any other identity goes out through that account's own SMTP.
+
+- **Ordinary mail to auspex.** Forward the message, set From to your `~ship@auspex.urbit` identity, and put the `~ship@auspex.urbit` recipients in To. Everything above applies: To only, a plain-text body (an HTML original is reduced to text), and the original's attachments are uploaded within the attachment limits. The original is not an auspex message, so the forward has `prev: null` and starts a new thread.
+- **Auspex to ordinary mail.** Forward the message from `Auspex/Inbox` or `Auspex/Sent` and set From to your ordinary account before sending. Thunderbird may preselect the auspex identity, since that is who the message was addressed to, and a send from it to an ordinary address is refused. What arrives is ordinary email: the text and attachments, with no signature the recipient can check.
+
+Check From before you send. A send from an ordinary identity is never intercepted, even when a recipient is `~ship@auspex.urbit`, so it goes to your SMTP server and bounces, because `.urbit` is not a real domain. One message cannot go to both kinds of recipient, so send it twice.
+
 ## Verdicts
 
 The verdict is **per message**, never per thread: a thread holding one
