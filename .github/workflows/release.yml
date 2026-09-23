@@ -21,11 +21,13 @@ jobs:
   # ship "auspex 0.1.0" from a tag called v0.4.0. Wrong in the filename, the
   # About box and the .deb metadata, and invisible until someone reports it.
   # Fail before spending matrix build time.
-  verify:
-    name: version + tests
+  version:
+    name: tag matches tauri.conf.json
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # a step condition, not a job one: a skipped job skips everything that
+      # needs it, and a release dispatched by hand has no tag to check
       - name: tag matches tauri.conf.json
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -36,24 +38,13 @@ jobs:
             echo "::error::tag v$tag does not match desktop/tauri.conf.json version $conf — bump the config, or retag" >&2
             exit 1
           fi
-      # Tag pushes do not run ci.yml (it gates on branches), so a release could
-      # otherwise ship code no test ever saw.
-      - name: build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
-            pkg-config
-      - name: cargo test — desktop
-        working-directory: desktop
-        run: cargo test
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: the served UI artifact is current
-        run: |
-          (cd ui && npm ci && npm run build)
-          git diff --exit-code code/nex/auspex/ui-app
+
+  # Tag pushes do not trigger ci.yml (it gates on branches), so a release could
+  # otherwise ship code no test ever saw. CALLED rather than copied: the copy
+  # that used to live here had already lost clippy, the command-registration
+  # check and the build cache.
+  verify:
+    uses: ./.github/workflows/ci.yml
 
   # ONE release, made once. In lattice each build job used to run "find the
   # draft release for this tag, or create it" concurrently, and one tag came
@@ -64,7 +55,7 @@ jobs:
   # Creating it here and handing the builders an id removes the race instead
   # of narrowing it.
   create-release:
-    needs: verify
+    needs: [version, verify]
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.mk.outputs.id }}
@@ -105,7 +96,7 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: [verify, create-release]
+    needs: create-release
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -151,8 +142,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
-            libxdo-dev libssl-dev pkg-config file
+            librsvg2-dev libsoup-3.0-dev libxdo-dev libssl-dev pkg-config file
 
       - name: build and upload
         uses: tauri-apps/tauri-action@v0
