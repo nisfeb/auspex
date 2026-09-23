@@ -29,7 +29,10 @@ use crate::proxy;
 
 /// The beacon: the same stream the web client reads (`ui/src/api.ts`). It
 /// carries the whole `/beacon` directory, hence the ` /rev` filter below.
-const BEACON: &str = "/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev";
+/// The desk install's path, the convention `+remote-install` in the nexus
+/// names too: the old `/apps/auspex.auspex_app` path answers nothing on a
+/// desk install, so the stream hung without a frame and nothing notified.
+const BEACON: &str = "/grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev";
 
 /// The listing, exactly as the client's inbox view asks for it. `limit=20`
 /// because this is a notification source, not a mail reader: a change that

@@ -77,7 +77,7 @@ card, put cards in a Thunderbird mailing list, and the composer expands it.
 ## The beacon
 
 **This extension does not poll.** It holds one connection open —
-`GET /grubbery/api/keep/apps/auspex.auspex_app/beacon/rev` with
+`GET /grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev` with
 `Accept: text/event-stream`, the ship's change beacon — and syncs when the
 ship says something a reader can see has moved. That is the same stream
 the web client reads (`ui/src/api.ts`) and the desktop app reads

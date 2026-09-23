@@ -69,7 +69,7 @@ test('this is the same stream the other two clients read', () => {
   //  ui/src/api.ts and desktop/src/notify.rs hold the same URL. Three
   //  clients that disagreed about what a change is would be three clients
   //  with different ideas of when mail arrived.
-  assert.equal(BEACON_PATH, '/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev')
+  assert.equal(BEACON_PATH, '/grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev')
 })
 
 //  ── the reader's buffer ─────────────────────────────────────────────

@@ -24,7 +24,10 @@
 //  (`desktop/src/notify.rs`); all three must agree, because a filter that
 //  drifted would leave one of them syncing on things the others do not
 //  call changes.
-const BEACON_PATH = '/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev'
+//  The path is the desk install's, the convention +remote-install in the
+//  nexus names too: the old /apps/auspex.auspex_app path answers nothing on
+//  a desk install, and the stream hung there without a single frame.
+const BEACON_PATH = '/grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev'
 
 //  Backoff: 3 seconds doubling to 30, jittered 0.5–1.5×.
 //

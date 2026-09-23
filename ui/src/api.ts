@@ -579,7 +579,15 @@ export const markRead = (threadId: string, ids: string[]) =>
 // thread marks several messages read at once; if those bumped the beacon
 // this subscription would refetch the thread, which would mark it read
 // again, forever.
-const BEACON = '/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev'
+//
+// THE DESK INSTALL'S PATH, which is where auspex runs: the stock desk
+// installs it at /apps/shell.shell/desks/auspex.desk, the same convention
+// +remote-install in the nexus names for delivery. A sandboxed nexus
+// cannot learn its own absolute path to tell a client, so both sides name
+// the conventional one. The old /apps/auspex.auspex_app path answered
+// nothing on a desk install - the fetch hung, and no tab ever heard a
+// change - so it is the one thing all three clients must not drift on.
+const BEACON = '/grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev'
 
 // Retry policy, and it is not a detail. A FIXED delay is what this had,
 // and a fixed delay is the shape that saturated ~ricsul-bilwyt for most of

@@ -64,7 +64,7 @@ One thread, started at launch when a session already exists and after a
 successful connect otherwise.
 
 1. It holds open the ship's change beacon —
-   `/grubbery/api/keep/apps/auspex.auspex_app/beacon/rev`, the same stream the
+   `/grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev`, the same stream the
    web client reads. The first event is the current value rather than a change
    and is ignored; the stream carries the whole `/beacon` directory, so only
    ` /rev` events count.

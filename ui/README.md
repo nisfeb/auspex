@@ -17,7 +17,7 @@ ship who it is.
 | `POST /apps/auspex/api/send` | compose, reply and forward — all one action |
 | `POST /apps/auspex/api/read` | mark messages read, naming their thread |
 | `POST /apps/auspex/api/delete-thread` | remove a thread from this ship |
-| `GET /grubbery/api/keep/apps/auspex.auspex_app/beacon/rev` | grubbery's keep-SSE stream over the nexus's change beacon |
+| `GET /grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev` | grubbery's keep-SSE stream over the nexus's change beacon |
 
 Every route is owner-gated and every response is JSON, errors included, so the
 client has one shape to parse and one failure to render.
