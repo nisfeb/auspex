@@ -30,14 +30,8 @@
   ++  noun  n
   ++  json
     ^-  ^json
-    ::  the shape ladder, newest first. A %0 blob (no arrival time) is
-    ::  upgraded rather than refused: a blob's shape is covered by no
-    ::  signature, so supplying a default misrepresents nothing.
-    =/  o=(unit octs)
-      =/  r1  (mule |.(;;(stored-blob:uc n)))
-      ?:  ?=(%& -.r1)  `octs.p.r1
-      =/  r0  (mule |.(;;(stored-blob-0:uc n)))
-      ?:(?=(%| -.r0) ~ `octs.p.r0)
+    ::  the nexus's own ladder, which upgrades a %0 blob in place.
+    =/  o=(unit octs)  (bind (blob-from-noun:uc n) |=(b=stored-blob:uc octs.b))
     ?~  o  [%s 'unreadable']
     %-  pairs:enjs:format
     :~  ['size' (numb:enjs:format p.u.o)]

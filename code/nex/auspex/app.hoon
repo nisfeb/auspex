@@ -45,9 +45,6 @@
 ::                                 courier is irrelevant, so a blob whose
 ::                                 bytes do not hash to the name they came
 ::                                 under is discarded without comment.
-::    /mail/blobvis                per-blob permission: %public (the
-::                                 default, in the farm) or %restricted
-::                                 (withdrawn from it, weir-gated).
 ::    /fetch/<id>                  ONE EPHEMERAL FIBER PER BLOB FETCH.
 ::                                 A keen is a network round trip and
 ::                                 the writer serialises MUTATIONS; a
@@ -162,23 +159,8 @@
               image+s+'/grubbery/tiles/icon/auspex'
               href+s+'/apps/auspex'
           ==
-          ::  alias.json: WHO THIS NEXUS CLAIMS TO BE. The shell reads it
-          ::  and enters the claim in its alias book, which is what lets a
-          ::  peer resolve the name `auspex` to wherever this instance
-          ::  actually lives in that ship's namespace. Several nexuses may
-          ::  claim one alias; the book keeps the claimants and their
-          ::  locations, and the user decides. Inert until the shell is
-          ::  there to read it, which is why it costs nothing to declare
-          ::  now: it is one grub, and it is the whole of what this app has
-          ::  to say about its own identity.
-          :^  %over  %&  [/ %'alias.json']
-          :-  [/ %json]
-          %-  pairs:enjs:format
-          :~  name+s+'auspex'
-              description+s+'Signed mail, verified end to end'
-          ==
-          ::  link.json: the same claim, in the form the shell actually
-          ::  SCANS. +read-app-aliases walks /apps and each desk's data
+          ::  link.json: WHO THIS NEXUS CLAIMS TO BE, in the form the
+          ::  shell SCANS. +read-app-aliases walks /apps and each desk's data
           ::  children reading link.json, not alias.json, and folds what it
           ::  finds into the /sys/link registry as @name -> {path,
           ::  description, source}. Without this grub auspex claims @auspex
@@ -271,10 +253,6 @@
           ::  subtree, and this row is what CREATES the directory on a
           ::  first load, since +store-blob only writes leaves into it.
           [%fall %| /mail/blob empty-dir:loader]
-          ::  /mail/blobvis: one small grub for every blob's visibility,
-          ::  deliberately not a field beside the bytes: changing who may
-          ::  read a quarter-megabyte file must not rewrite the file.
-          [%fall %& [/mail %blobvis] [[/auspex %blobvis] *blob-index:uc]]
           ::  /mail/draft and /mail/rule: NEW PERSISTENT PATHS, and an
           ::  uncovered persistent path is lost data - spin rebuilds the
           ::  bole from scratch and drops whatever no row names. The
@@ -375,7 +353,11 @@
         ::  is restarted, and the restart would reach again.
         ;<  ~  bind:m  (republish-all root)
         ;<  ~  bind:m  (publish-proto root)
-        ;<  ~  bind:m  (migrate-flat root)
+        ::  the blob-restriction record, from before restriction was
+        ::  removed. The %fall row on /mail copies it forward as a grub
+        ::  whose marc is gone. ponytail: one peek per rise; delete this
+        ::  line once every released ship has risen past it.
+        ;<  ~  bind:m  (cull-if-there (rf root mail-dir %blobvis))
         |-
         ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
         ::  +apply answers whether the tree actually changed, and that
@@ -482,40 +464,37 @@
 ::
 ++  rf  |=([up=@ud p=path n=@ta] ^-(road:tarball [%| up [%& p n]]))
 ++  rv  |=([up=@ud p=path] ^-(road:tarball [%| up [%| p]]))
-::  The dir arms keep their `root` argument although the path no longer
-::  needs it: every call site reads (tdir root t) today, and a signature
-::  that still takes it is a diff in this block instead of a diff in 117
-::  arms and hundreds of calls.
+::  The directories are CONSTANTS: nexus-relative paths that need no
+::  depth. Only a road needs `up`, so only the rails take it.
 ::
-++  mail-dir    |=(root=@ud ^-(path /mail))
-++  thread-dir  |=(root=@ud ^-(path /mail/thread))
-++  tdir        |=([root=@ud t=thread-id:uc] ^-(path (weld (thread-dir root) /[(scot %uv t)])))
-++  mdir        |=([root=@ud t=thread-id:uc] ^-(path (weld (tdir root t) /msg)))
-++  blob-dir    |=(root=@ud ^-(path /mail/blob))
-++  blob-rail   |=([root=@ud h=@uv] ^-(road:tarball (rf root (blob-dir root) (scot %uv h))))
-++  vis-rail    |=(root=@ud ^-(road:tarball (rf root (mail-dir root) %blobvis)))
-++  draft-dir   |=(root=@ud ^-(path /mail/draft))
-++  rule-dir    |=(root=@ud ^-(path /mail/rule))
-++  list-dir    |=(root=@ud ^-(path /mail/list))
-++  draft-rail  |=([root=@ud i=@uv] ^-(road:tarball (rf root (draft-dir root) (scot %uv i))))
-++  rule-rail   |=([root=@ud i=@uv] ^-(road:tarball (rf root (rule-dir root) (scot %uv i))))
+++  mail-dir    ^-(path /mail)
+++  thread-dir  ^-(path /mail/thread)
+++  tdir        |=(t=thread-id:uc ^-(path (weld thread-dir /[(scot %uv t)])))
+++  mdir        |=(t=thread-id:uc ^-(path (weld (tdir t) /msg)))
+++  blob-dir    ^-(path /mail/blob)
+++  blob-rail   |=([root=@ud h=@uv] ^-(road:tarball (rf root blob-dir (scot %uv h))))
+++  draft-dir   ^-(path /mail/draft)
+++  rule-dir    ^-(path /mail/rule)
+++  list-dir    ^-(path /mail/list)
+++  draft-rail  |=([root=@ud i=@uv] ^-(road:tarball (rf root draft-dir (scot %uv i))))
+++  rule-rail   |=([root=@ud i=@uv] ^-(road:tarball (rf root rule-dir (scot %uv i))))
 ::  +list-rail: the grub for one list. The NAME IS THE SEGMENT, cast
 ::  straight to a knot rather than scotted: +list-name-ok:uw has already
 ::  refused everything a knot cannot hold - anything but a-z, 0-9 and
 ::  '-', an empty name, and anything over 64 bytes - and it is checked
 ::  at the route AND again at the writer, so this cast never sees a
 ::  name that was not admitted by both.
-++  list-rail   |=([root=@ud n=@t] ^-(road:tarball (rf root (list-dir root) `@ta`n)))
-++  meta-rail   |=([root=@ud t=thread-id:uc] ^-(road:tarball (rf root (tdir root t) %meta)))
+++  list-rail   |=([root=@ud n=@t] ^-(road:tarball (rf root list-dir `@ta`n)))
+++  meta-rail   |=([root=@ud t=thread-id:uc] ^-(road:tarball (rf root (tdir t) %meta)))
 ::  +caps-rail: the one grub every jael reach is gated on, at the nexus
 ::  root. See the /caps row in +on-load and $caps:uc.
 ++  caps-rail   |=(root=@ud ^-(road:tarball (rf root / %caps)))
 ::  the discovery cache and the ephemeral probe that fills it. Two roads,
 ::  one $peer-rec shape - see mar/auspex/peer.hoon for why.
-++  peer-dir    |=(root=@ud ^-(path /mail/peer))
-++  peer-rail   |=([root=@ud who=ship] ^-(road:tarball (rf root (peer-dir root) (scot %p who))))
-++  probe-dir   |=(root=@ud ^-(path /probe))
-++  probe-rail  |=([root=@ud who=ship] ^-(road:tarball (rf root (probe-dir root) (scot %p who))))
+++  peer-dir    ^-(path /mail/peer)
+++  peer-rail   |=([root=@ud who=ship] ^-(road:tarball (rf root peer-dir (scot %p who))))
+++  probe-dir   ^-(path /probe)
+++  probe-rail  |=([root=@ud who=ship] ^-(road:tarball (rf root probe-dir (scot %p who))))
 ::  +slot: the grub name of one SIGNED COPY.
 ::
 ::    (sham [id sig]), not a positional index. The spec writes this leaf as
@@ -583,9 +562,9 @@
   |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  ~  bind:m  (ensure-dir root (thread-dir root))
-  ;<  ~  bind:m  (ensure-dir root (tdir root t))
-  ;<  ~  bind:m  (ensure-dir root (mdir root t))
+  ;<  ~  bind:m  (ensure-dir root thread-dir)
+  ;<  ~  bind:m  (ensure-dir root (tdir t))
+  ;<  ~  bind:m  (ensure-dir root (mdir t))
   ::  lay a default meta so EVERY thread has the leaf the tree says it
   ::  has. A delivered thread is never marked read, so nothing else would
   ::  ever create one, and a reader would find the leaf missing rather
@@ -596,13 +575,40 @@
 ::
 ::  ── reads ───────────────────────────────────────────────────────────
 ::
-::  +read-stored / +read-meta / +read-idx: the `;;` ladders.
+::  THE `;;` LADDERS. Each persisted marc is a noun passthrough, so what
+::  comes back is a raw noun and the SHAPE CHECK LIVES HERE, newest shape
+::  first; a later version adds a branch and upgrades in place. Doing it
+::  in the marc instead would re-validate every stored grub against the
+::  live type on read, booming every message the day the type moves.
 ::
-::    Each persisted marc is a noun passthrough, so what comes back is a
-::    raw noun and the SHAPE CHECK LIVES HERE. Newest shape first; a later
-::    version adds a branch above the default and upgrades in place. Doing
-::    it in the marc instead would re-validate every stored grub against
-::    the live type on read, booming every message the day the type moves.
+::  +peek-noun: one grub's noun, ~ when it is absent, not a file, or a
+::  boom. Every single-grub reader below is this and then its ladder.
+::
+++  peek-noun
+  |=  =road:tarball
+  =/  m  (fiber:fiber:nexus ,(unit *))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io road ~)
+  ?.  ?=([%file *] vw)  (pure:m ~)
+  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
+  (pure:m `(sang-noun:tarball sang.vw))
+::
+::  +read-leaves: the nouns of every readable file directly in one
+::  directory, in one peek. A grub that does not clam is DROPPED by the
+::  caller's ladder, never crashed on: these run on the writer and on
+::  request fibers, and neither may fail on one bad grub.
+::
+++  read-leaves
+  |=  [root=@ud dir=path]
+  =/  m  (fiber:fiber:nexus ,(list *))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root dir) ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  ?~  fil.ball.vw  (pure:m ~)
+  %-  pure:m
+  %+  murn  ~(val by contents.u.fil.ball.vw)
+  |=  c=[=sang:tarball gain=? bang=(unit tang)]
+  ?:((is-boom:tarball sang.c) ~ `(sang-noun:tarball sang.c))
 ::
 ::  +read-stored: %2 grubs only. %0 and %1 are REFUSED, not upgraded.
 ::
@@ -627,143 +633,67 @@
 ++  read-stored
   |=  n=*
   ^-  (unit stored-msg:uc)
-  =/  res  (mule |.(;;(stored-msg:uc n)))
-  ?:(?=(%& -.res) `p.res ~)
+  (mole |.(;;(stored-msg:uc n)))
 ::
-::  +read-meta: the local-state ladder, which DOES upgrade in place.
-::
-::    Nothing in meta is covered by a signature, so a %0 meta becomes a
-::    %1 with direct=%.n and no bcc record and misrepresents nothing.
-::    That is the contrast with +read-stored above, and it is the whole
-::    reason local state is kept out of `unsigned`.
+::  +read-meta: the local-state ladder, which DOES upgrade in place - see
+::  +meta-from-noun:uc, which the marc reads through too.
 ::
 ++  read-meta
   |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,meta:uc)
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (meta-rail root t) ~)
-  ?.  ?=([%file *] vw)  (pure:m *meta:uc)
-  ?:  (is-boom:tarball sang.vw)  (pure:m *meta:uc)
-  =/  n  (sang-noun:tarball sang.vw)
-  =/  r1  (mule |.(;;(meta:uc n)))
-  ?:  ?=(%& -.r1)  (pure:m p.r1)
-  =/  r0  (mule |.(;;(meta-0:uc n)))
-  ?:  ?=(%| -.r0)  (pure:m *meta:uc)
-  (pure:m [%1 read.p.r0 archived.p.r0 labels.p.r0 | ~])
-::
-::  +read-drafts / +read-rules: the two new persisted subtrees.
-::
-::    One deep peek each, and the shape ladder is here rather than in the
-::    marc for the reason every other ladder here is: a typed marc
-::    re-validates every stored grub against the live type on read, so
-::    moving the type booms what is on disk. A grub that does not clam is
-::    DROPPED from the list, never crashed on - these run on the writer
-::    and on request fibers, and neither may fail on one bad grub.
+  ;<  n=(unit *)  bind:m  (peek-noun (meta-rail root t))
+  (pure:m (fall (biff n meta-from-noun:uc) *meta:uc))
 ::
 ++  read-drafts
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list draft:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (draft-dir root)) ~)
-  ?.  ?=([%ball *] vw)  (pure:m ~)
-  (pure:m (collect-drafts ball.vw))
-::
-++  collect-drafts
-  |=  b=ball:tarball
-  ^-  (list draft:uc)
-  ?~  fil.b  ~
-  %+  murn  ~(val by contents.u.fil.b)
-  |=  c=[=sang:tarball gain=? bang=(unit tang)]
-  ^-  (unit draft:uc)
-  ?:  (is-boom:tarball sang.c)  ~
-  =/  res  (mule |.(;;(draft:uc (sang-noun:tarball sang.c))))
-  ?:(?=(%| -.res) ~ `p.res)
+  ;<  ns=(list *)  bind:m  (read-leaves root draft-dir)
+  (pure:m (murn ns |=(n=* (mole |.(;;(draft:uc n))))))
 ::
 ++  read-draft
   |=  [root=@ud i=@uv]
   =/  m  (fiber:fiber:nexus ,(unit draft:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (draft-rail root i) ~)
-  ?.  ?=([%file *] vw)  (pure:m ~)
-  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
-  =/  res  (mule |.(;;(draft:uc (sang-noun:tarball sang.vw))))
-  (pure:m ?:(?=(%| -.res) ~ `p.res))
+  ;<  n=(unit *)  bind:m  (peek-noun (draft-rail root i))
+  (pure:m (biff n |=(x=* (mole |.(;;(draft:uc x))))))
 ::
 ++  read-rules
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list rule:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (rule-dir root)) ~)
-  ?.  ?=([%ball *] vw)  (pure:m ~)
-  (pure:m (collect-rules ball.vw))
-::
-++  collect-rules
-  |=  b=ball:tarball
-  ^-  (list rule:uc)
-  ?~  fil.b  ~
-  %+  murn  ~(val by contents.u.fil.b)
-  |=  c=[=sang:tarball gain=? bang=(unit tang)]
-  ^-  (unit rule:uc)
-  ?:  (is-boom:tarball sang.c)  ~
-  =/  res  (mule |.(;;(rule:uc (sang-noun:tarball sang.c))))
-  ?:(?=(%| -.res) ~ `p.res)
+  ;<  ns=(list *)  bind:m  (read-leaves root rule-dir)
+  (pure:m (murn ns |=(n=* (mole |.(;;(rule:uc n))))))
 ::
 ::  +read-lists: every mailing list, as [name members] pairs.
 ::
 ::    The ONE reader here that has to keep the map's KEY, because a
 ::    list's name is its path segment and is deliberately not a field of
-::    the grub. So this taps the contents map rather than walking its
-::    values the way +collect-drafts and +collect-rules do.
-::
-::    Same ladder discipline as those two: a grub that does not clam is
-::    DROPPED rather than crashed on. This runs on the writer and on
-::    request fibers, and neither may fail on one bad grub.
+::    the grub. So this taps the contents map rather than going through
+::    +read-leaves.
 ::
 ++  read-lists
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list [name=@t members=(set @p)]))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (list-dir root)) ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root list-dir) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
-  (pure:m (collect-lists ball.vw))
-::
-++  collect-lists
-  |=  b=ball:tarball
-  ^-  (list [name=@t members=(set @p)])
-  ?~  fil.b  ~
-  %+  murn  ~(tap by contents.u.fil.b)
+  ?~  fil.ball.vw  (pure:m ~)
+  %-  pure:m
+  %+  murn  ~(tap by contents.u.fil.ball.vw)
   |=  [nom=@ta =sang:tarball gain=? bang=(unit tang)]
   ^-  (unit [@t (set @p)])
   ?:  (is-boom:tarball sang)  ~
-  =/  res  (mule |.(;;(mail-list:uc (sang-noun:tarball sang))))
-  ?:(?=(%| -.res) ~ `[`@t`nom members.p.res])
+  %+  bind  (mole |.(;;(mail-list:uc (sang-noun:tarball sang))))
+  |=(l=mail-list:uc [`@t`nom members.l])
 ::
 ++  read-idx
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,mail-idx:uc)
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (rf root (mail-dir root) %idx) ~)
-  ?.  ?=([%file *] vw)  (pure:m *mail-idx:uc)
-  ?:  (is-boom:tarball sang.vw)  (pure:m *mail-idx:uc)
-  =/  res  (mule |.(;;(mail-idx:uc (sang-noun:tarball sang.vw))))
-  (pure:m ?:(?=(%& -.res) p.res *mail-idx:uc))
-::
-::  +read-stored-blob-noun: the blob shape ladder.
-::
-::    Newest first, and unlike +read-stored this one really does upgrade
-::    in place: a %0 blob (bytes, no arrival time) becomes a %1 with
-::    at=0, which sorts it oldest and evicts it first. That is safe here
-::    for the reason it is not safe for a message - a blob's shape is
-::    covered by no signature, so supplying a default misrepresents
-::    nothing.
-::
-++  read-stored-blob-noun
-  |=  n=*
-  ^-  (unit stored-blob:uc)
-  =/  r1  (mule |.(;;(stored-blob:uc n)))
-  ?:  ?=(%& -.r1)  `p.r1
-  =/  r0  (mule |.(;;(stored-blob-0:uc n)))
-  ?:(?=(%| -.r0) ~ `[%1 octs.p.r0 *@da])
+  ;<  n=(unit *)  bind:m  (peek-noun (rf root mail-dir %idx))
+  (pure:m (fall (biff n |=(x=* (mole |.(;;(mail-idx:uc x))))) *mail-idx:uc))
 ::
 ::  +read-blob: one attachment's bytes, ~ when we do not hold them.
 ::
@@ -771,40 +701,8 @@
   |=  [root=@ud h=@uv]
   =/  m  (fiber:fiber:nexus ,(unit octs))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
-  ?.  ?=([%file *] vw)  (pure:m ~)
-  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
-  =/  st  (read-stored-blob-noun (sang-noun:tarball sang.vw))
-  ?~(st (pure:m ~) (pure:m `octs.u.st))
-::
-::  +blob-size: the DECLARED LENGTH of a blob we hold, ~ when we do not.
-::
-::    The size that ends up inside a signature, and the only thing the
-::    send path wants off a stored blob. It reads the grub the same way
-::    +read-blob does and answers p.octs alone, so the bytes never leave
-::    this arm - a send naming sixteen attachments would otherwise carry
-::    four megabytes of octs through the rest of the send for four
-::    numbers.
-::
-++  blob-size
-  |=  [root=@ud h=@uv]
-  =/  m  (fiber:fiber:nexus ,(unit @ud))
-  ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (blob-rail root h) ~)
-  ?.  ?=([%file *] vw)  (pure:m ~)
-  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
-  =/  st  (read-stored-blob-noun (sang-noun:tarball sang.vw))
-  ?~(st (pure:m ~) (pure:m `p.octs.u.st))
-::
-++  read-blobvis
-  |=  root=@ud
-  =/  m  (fiber:fiber:nexus ,blob-index:uc)
-  ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (vis-rail root) ~)
-  ?.  ?=([%file *] vw)  (pure:m *blob-index:uc)
-  ?:  (is-boom:tarball sang.vw)  (pure:m *blob-index:uc)
-  =/  res  (mule |.(;;(blob-index:uc (sang-noun:tarball sang.vw))))
-  (pure:m ?:(?=(%& -.res) p.res *blob-index:uc))
+  ;<  n=(unit *)  bind:m  (peek-noun (blob-rail root h))
+  (pure:m (bind (biff n blob-from-noun:uc) |=(b=stored-blob:uc octs.b)))
 ::
 ::  +read-peer: what we last learned about one ship, ~ when we have never
 ::  asked or the grub is unreadable.
@@ -818,11 +716,8 @@
   |=  [root=@ud who=ship]
   =/  m  (fiber:fiber:nexus ,(unit peer-rec:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (peer-rail root who) ~)
-  ?.  ?=([%file *] vw)  (pure:m ~)
-  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
-  =/  res  (mule |.(;;(peer-rec:uc (sang-noun:tarball sang.vw))))
-  (pure:m ?:(?=(%| -.res) ~ `p.res))
+  ;<  n=(unit *)  bind:m  (peek-noun (peer-rail root who))
+  (pure:m (biff n |=(x=* (mole |.(;;(peer-rec:uc x))))))
 ::
 ::  +known-proto: the record's answer, but only while it is believed.
 ::
@@ -850,11 +745,8 @@
   |=  [root=@ud who=ship]
   =/  m  (fiber:fiber:nexus ,(unit probe-req:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (probe-rail root who) ~)
-  ?.  ?=([%file *] vw)  (pure:m ~)
-  ?:  (is-boom:tarball sang.vw)  (pure:m ~)
-  =/  res  (mule |.(;;(probe-req:uc (sang-noun:tarball sang.vw))))
-  (pure:m ?:(?=(%| -.res) ~ `p.res))
+  ;<  n=(unit *)  bind:m  (peek-noun (probe-rail root who))
+  (pure:m (biff n |=(x=* (mole |.(;;(probe-req:uc x))))))
 ::
 ::  +list-blobs: every blob this ship holds, with its age and weight.
 ::
@@ -863,14 +755,14 @@
 ::    eviction order.
 ::
 ::    Neither bound can be weaponised: bytes only ever enter through a
-::    LOCAL action (%send's files, or %fetch-blob), never through a
+::    LOCAL action (an upload, or %fetch-blob), never through a
 ::    delivered chain, which carries metadata and no bytes at all.
 ::
 ++  list-blobs
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list blob-row:uc))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (blob-dir root)) ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root blob-dir) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   ?~  fil.ball.vw  (pure:m ~)
   %-  pure:m
@@ -880,7 +772,7 @@
   ?:  (is-boom:tarball sang.c)  ~
   =/  hh=(unit @uv)  (slaw %uv nm)
   ?~  hh  ~
-  =/  st  (read-stored-blob-noun (sang-noun:tarball sang.c))
+  =/  st  (blob-from-noun:uc (sang-noun:tarball sang.c))
   ?~  st  ~
   `[u.hh at.u.st p.octs.u.st]
 ::
@@ -917,6 +809,10 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
+  ::  THE FAST PATH FIRST. +shed-for answers [& ~] without looking at
+  ::  the references whenever the store fits, and the references are a
+  ::  walk of every message on the ship - which only a full store needs.
+  ?:  =([& ~] (shed-for:uc held ~ 1 bytes))  (pure:m &)
   ;<  refs=(set @uv)  bind:m  (all-referenced root)
   =/  plan  (shed-for:uc held refs 1 bytes)
   ?.  ok.plan  (pure:m |)
@@ -942,7 +838,7 @@
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map path stored-msg:uc)))
   ^-  form:m
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (thread-dir root)) ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root thread-dir) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   (pure:m (collect-threads ball.vw))
 ::
@@ -964,112 +860,68 @@
 ::    carries the branching, not just the messages.
 ::
 ::    A copy sitting directly under msg/ has a path of length one and is
-::    a PRE-TREE grub, from before this layout. It reads back perfectly
-::    (nothing downstream of here cares where a copy was stored), which
-::    is what lets the migration be a background tidy rather than a gate
-::    on reading the mailbox. See +migrate-flat.
+::    a PRE-TREE grub, from before this layout. It reads back perfectly -
+::    nothing downstream of here cares where a copy was stored - and the
+::    next delivery into its thread re-places it, because +sync-slots
+::    culls what +want-slots does not name.
 ::
 ++  collect-slots
   |=  kid=ball:tarball
   ^-  (map path stored-msg:uc)
-  =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
-  ?~  sub  ~
-  (collect-node ~ u.sub)
+  ss:(slots-of kid)
 ::
-::  +collect-node: one node of the message tree and everything under it.
+::  +slots-of: one thread's copies AND how many of its copies no reader
+::  can produce, out of ONE walk of its msg/ directory.
+::
+::    +read-stored refuses %0 and %1 grubs rather than upgrading them,
+::    and that decision is right and stays. But refusing SILENTLY is a
+::    different thing: every message stored before the body-mime break
+::    would simply vanish from the API while its thread's meta and its
+::    /mail/idx entry survived - a thread that renders short, or empty,
+::    with nothing anywhere saying why. The count is what turns "your
+::    mail is gone" into "this ship cannot read N messages here".
+::
+::    It DIVES INTO msg/, where the copies are: the sibling `meta` leaf is
+::    a $meta, and counting from the thread ball counted it as one
+::    unreadable copy on every ordinary thread on the ship.
+::
+++  slots-of
+  |=  kid=ball:tarball
+  ^-  [ss=(map path stored-msg:uc) lost=@ud]
+  =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
+  ?~  sub  [~ 0]
+  (walk-node ~ u.sub)
+::
+::  +walk-node: one node of the message tree and everything under it.
 ::
 ::    Files are this message's signed copies; subdirectories are its
 ::    replies. A ball keeps those in two separate maps, so the two can
 ::    never collide however the names are chosen - which is the whole
 ::    reason a node can be both a message and a parent.
 ::
-++  collect-node
+::    The file +roll starts from the empty pair, and each child's result
+::    is ADDED to this node's rather than folded from a fresh bunt - the
+::    shape that once made every count here zero.
+::
+++  walk-node
   |=  [base=path b=ball:tarball]
-  ^-  (map path stored-msg:uc)
-  =/  here=(map path stored-msg:uc)
-    ?~  fil.b  ~
-    %-  ~(gas by *(map path stored-msg:uc))
-    %+  murn  ~(tap by contents.u.fil.b)
-    |=  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
-    ^-  (unit [path stored-msg:uc])
-    ?:  (is-boom:tarball sang.c)  ~
-    =/  s=(unit stored-msg:uc)  (read-stored (sang-noun:tarball sang.c))
-    ?~(s ~ `[(snoc base nm) u.s])
+  ^-  [ss=(map path stored-msg:uc) lost=@ud]
+  =/  here=[ss=(map path stored-msg:uc) lost=@ud]
+    ?~  fil.b  [~ 0]
+    %+  roll  ~(tap by contents.u.fil.b)
+    |=  $:  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
+            acc=[ss=(map path stored-msg:uc) lost=@ud]
+        ==
+    =/  s=(unit stored-msg:uc)
+      ?:  (is-boom:tarball sang.c)  ~
+      (read-stored (sang-noun:tarball sang.c))
+    ?~  s  acc(lost +(lost.acc))
+    acc(ss (~(put by ss.acc) (snoc base nm) u.s))
   =/  kids=(list [seg=@ta kid=ball:tarball])  ~(tap by dir.b)
-  |-  ^-  (map path stored-msg:uc)
+  |-  ^-  [ss=(map path stored-msg:uc) lost=@ud]
   ?~  kids  here
-  =.  here  (~(uni by here) (collect-node (snoc base seg.i.kids) kid.i.kids))
-  $(kids t.kids)
-::
-::  +unreadable-in: copies under this node that no reader can produce.
-::
-::    +read-stored refuses %0 and %1 grubs rather than upgrading them,
-::    and that decision is right and stays: msg-id and the signature
-::    both cover the shape, so rewriting an old message into the new
-::    one leaves a message whose signature no longer matches its own
-::    contents, which every peer then reads as %forged. Turning genuine
-::    mail into apparent forgeries is worse than refusing it.
-::
-::    But refusing SILENTLY is a different thing. +collect-node murns
-::    them away, so every message stored before the body-mime break
-::    simply vanishes from the API while its thread's meta and its
-::    /mail/idx entry survive - a thread that renders short, or empty,
-::    with nothing anywhere saying why. Counting them is what turns
-::    "your mail is gone" into "this ship cannot read N messages here",
-::    which is a true statement a user can act on.
-::
-::    A separate walk rather than a second return value from
-::    +collect-node, deliberately: the collector is on the writer's
-::    hot path and is called for every send, read-mark and delivery,
-::    while this is wanted only by the two read routes and once at
-::    rise.
-::
-::    TAKES THE THREAD'S BALL AND DIVES INTO msg/, exactly as
-::    +collect-slots does, and for the same reason: msg/ is where the
-::    copies are, and the sibling `meta` leaf is a $meta and not a
-::    $stored-msg. Counting from the thread ball counted meta too - it
-::    fails +read-stored the way a pre-freeze grub does, because that
-::    ladder answers one question and meta is not an answer to it - so
-::    every ordinary thread on the ship would have reported one
-::    unreadable copy it does not have. The two walks have to agree on
-::    what they are walking or the count is not of the same thing the
-::    listing shows.
-::
-++  unreadable-in
-  |=  kid=ball:tarball
-  ^-  @ud
-  =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
-  ?~  sub  0
-  (unreadable-under u.sub)
-::
-::  +unreadable-under: the recursive half, over one node of the message
-::  tree and everything below it.
-::
-::    `here` and `below` are added. They were not: the recursion was one
-::    +roll whose accumulator starts at the BUNT of its own sample, so
-::    every level computed its own count and then threw it away by
-::    starting the children's fold at 0. The arm therefore answered 0
-::    for every thread on every ship, which made the whole
-::    unreadable-copy report dead: +serve-thread's `lost` was always 0,
-::    so a thread whose every copy is unreadable took the 404 branch
-::    that is meant for a thread that is not there, +inbox-json's
-::    placeholder row was unreachable, and the banner never rendered.
-::    A count that is structurally always zero is worse than no count,
-::    because the surfaces above it read it as good news.
-::
-++  unreadable-under
-  |=  b=ball:tarball
-  ^-  @ud
-  =/  here=@ud
-    ?~  fil.b  0
-    %+  roll  ~(val by contents.u.fil.b)
-    |=  [c=[=sang:tarball gain=? bang=(unit tang)] acc=@ud]
-    ?:  (is-boom:tarball sang.c)  +(acc)
-    ?~((read-stored (sang-noun:tarball sang.c)) +(acc) acc)
-  =/  below=@ud
-    %+  roll  ~(val by dir.b)
-    |=([kid=ball:tarball acc=@ud] (add acc (unreadable-under kid)))
-  (add here below)
+  =/  k  (walk-node (snoc base seg.i.kids) kid.i.kids)
+  $(kids t.kids, here [(~(uni by ss.here) ss.k) (add lost.here lost.k)])
 ::
 ::  +chain-of: a thread's copies as one chain, WHOLE TREE INCLUDED.
 ::
@@ -1093,14 +945,18 @@
   %+  turn  ~(val by ss)
   |=(s=stored-msg:uc [[(id:uc unsigned.msg.s) sig.msg.s] verdict.s])
 ::
-++  threads-of
+::  +key-threads: every thread as the bare, UNSORTED copies +thread-key
+::  compares. It asks one question - is this [id sig] held - so the sort
+::  and dedupe of +chain-of, and participants and last-sent, were paid
+::  on every delivery for fields nothing read.
+::
+++  key-threads
   |=  loaded=(map thread-id:uc (map path stored-msg:uc))
   ^-  (map thread-id:uc thread:uc)
   %-  ~(run by loaded)
   |=  ss=(map path stored-msg:uc)
   ^-  thread:uc
-  =/  c=chain:uc  (chain-of ss)
-  [c (participants:uc c) (last-sent:uc c)]
+  [(turn ~(val by ss) |=(s=stored-msg:uc msg.s)) ~ *@da]
 ::
 ::  ── the trace grub ──────────────────────────────────────────────────
 ::
@@ -1295,32 +1151,17 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?-  -.a
-    ::  +do-send answers WHETHER IT SENT, not whether to bump: it bumps
-    ::  the beacon itself, from before its fan-out, so a local reader
-    ::  never waits on a remote ship. The answer is discarded here and
-    ::  used by %send-draft, which must not delete a draft whose send
-    ::  the writer refused.
-      %send
-    ;<  *  bind:m
-      (do-send root to.a subject.a body.a body-mime.a prev.a files.a bcc.a)
-    (pure:m |)
-  ::  the same send, naming blobs the store already holds instead of
-  ::  carrying bytes. The web surface's only send path.
-  ::
-      %send-ref
-    ;<  *  bind:m
-      (do-send-refs root to.a subject.a body.a body-mime.a prev.a refs.a bcc.a)
-    (pure:m |)
-  ::
-    %read           (do-read root ids.a)
+    ::  +do-send bumps the beacon itself, from before its fan-out, so a
+    ::  local reader never waits on a remote ship - and answers %.n so the
+    ::  writer's loop does not bump a second time.
+    %send           (do-send root to.a subject.a body.a prev.a refs.a)
+    %read           (do-mark root ids.a tid.a &)
     %delete-thread  (do-delete root thread-id.a)
     %fetch-blob     (do-fetch-blob root hash.a from.a)
   ::  %forget-peer drops one discovery record so the next send re-probes.
   ::  %.n like every other local-state action: no message appeared, none
   ::  changed, and the tab that asked for it is the only one waiting.
     %forget-peer    (do-forget-peer root who.a)
-    %restrict-blob  (do-restrict root hash.a ships.a)
-    %publish-blob   (do-publish root hash.a)
   ::  the mail-client layer. EVERY ONE OF THESE ANSWERS %.n, and that is
   ::  not an oversight. The beacon tells OTHER open readers that content
   ::  moved; a label, an archive, an unread mark, a draft and a rule are
@@ -1330,12 +1171,11 @@
   ::  that made the change refetches on its own anyway.
     %label          (do-label root thread-id.a label.a add.a)
     %archive        (do-archive root thread-id.a archived.a)
-    %unread         (do-unread root ids.a)
+    %unread         (do-mark root ids.a tid.a |)
     %save-draft     (do-save-draft root draft.a)
-    %delete-draft   (do-delete-draft root id.a)
-    %send-draft     (do-send-draft root id.a)
+    %delete-draft   (do-delete-leaf root (draft-rail root id.a) 'delete-draft' id.a)
     %save-rule      (do-save-rule root rule.a)
-    %delete-rule    (do-delete-rule root id.a)
+    %delete-rule    (do-delete-leaf root (rule-rail root id.a) 'delete-rule' id.a)
   ::  mailing lists, local state like the rest of this block and %.n for
   ::  the same reason: a list is an address book entry on this ship, no
   ::  peer can observe it, and the tab that saved it refetches its own
@@ -1363,116 +1203,31 @@
 ::    thread root to `prev` is what a recipient needs to verify this
 ::    message and is all it needs; see +path-chain:uc.
 ::
+::    ATTACHMENTS ARE NAMED, NOT CARRIED. The browser uploaded each file
+::    to POST /api/blob first, which hashed and stored it; `refs` names
+::    those addresses. THE SIZE THAT GETS SIGNED IS READ OFF THE STORED
+::    BLOB, never off the request, and the hash is not re-derived: the
+::    store only ever accepted a blob that hashed to its own address, so
+::    re-hashing here would pay for a fact the store already guarantees,
+::    while trusting a client's `size` would let one sign a length the
+::    bytes do not have.
+::
 ::    The bounds +deliver enforces are enforced here too. Every send ships
 ::    the path it is replying into, so one oversized compose would poison
 ::    a thread permanently: every later message on that path rejected by
 ::    every recipient, silently, forever. Failing at compose time is the
 ::    only point where a human can still do something about it.
-::::    ANSWERS WHETHER IT SENT. Not whether to bump: this arm bumps the
-::    beacon itself, from inside, before the fan-out. See the end.
+::
+::    ANSWERS %.n, ALWAYS: this arm bumps the beacon itself, from
+::    inside, before the fan-out. See the end.
 ::
 ++  do-send
   |=  $:  root=@ud
           to=(set ship)
           subject=@t
           body=@t
-          body-mime=@t
-          prev=(unit msg-id:uc)
-          files=(list file:uc)
-          bcc=(set ship)
-      ==
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ?.  (files-ok:uc files)
-    (reject root 'bad attachment')
-  ::  the store bound counts only the files we would actually ADD.
-  ::  +store-blob skips a file we already hold, so counting every
-  ::  attachment against the cap refuses a send that stores nothing -
-  ::  and the commonest attachment in a thread is one already in it.
-  ;<  fresh=(list file:uc)  bind:m  (unheld-files root files)
-  ::  the metadata is derived FROM THE BYTES IN HAND, which is what
-  ::  makes `size` and `hash` agree with what a fetcher re-measures.
-  (do-send-core root to subject body body-mime prev (turn files describe:uc) fresh bcc)
-::
-::  +do-send-refs: the same send, naming blobs the store already holds.
-::
-::    THE WEB SURFACE'S SEND. The browser uploaded each file to
-::    POST /api/blob first, which hashed and stored it and answered the
-::    address; this names those addresses and carries no bytes.
-::
-::    THE SIZE THAT GETS SIGNED IS READ OFF THE STORED BLOB, never off
-::    the request, and the hash is NOT re-derived. The store only ever
-::    accepted a blob that hashed to its own address - +do-web-blob and
-::    +take-blob are the only two writers and both check - so re-hashing
-::    here would pay a quarter-megabyte of +sham for a fact the store
-::    already guarantees, while trusting a client's `size` would let one
-::    sign a length the bytes do not have.
-::
-::    A ref naming no stored blob refuses the WHOLE send: nothing is
-::    signed, nothing is stored, and the route ahead of this one has
-::    already answered 400 with the hash, which is the message a person
-::    can act on. This is the point-of-use half of that pair, and it is
-::    not redundant: this route is not the only caller, and a blob can
-::    be evicted between the route's check and the writer's.
-::
-++  do-send-refs
-  |=  $:  root=@ud
-          to=(set ship)
-          subject=@t
-          body=@t
-          body-mime=@t
           prev=(unit msg-id:uc)
           refs=(list attach-ref:uc)
-          bcc=(set ship)
-      ==
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ;<  as=(unit (list attachment:uc))  bind:m  (resolve-refs root refs)
-  ?~  as  (reject root 'unknown attachment')
-  ::  nothing to store: the bytes are already in the tree and already
-  ::  published, which is what the upload route did.
-  (do-send-core root to subject body body-mime prev u.as ~ bcc)
-::
-::  +resolve-refs: each named blob's SIGNED metadata, or ~ if any is
-::  missing.
-::
-::    Recursion by ARM NAME, not $: a $ with arguments inside a ;<
-::    continuation cannot find the trap.
-::
-::    +blob-size and not +read-blob: the size is the only thing wanted
-::    here and the octs must not travel any further than the arm that
-::    measures it.
-::
-++  resolve-refs
-  |=  [root=@ud rs=(list attach-ref:uc)]
-  =/  m  (fiber:fiber:nexus ,(unit (list attachment:uc)))
-  ^-  form:m
-  ?~  rs  (pure:m `~)
-  ;<  sz=(unit @ud)  bind:m  (blob-size root hash.i.rs)
-  ?~  sz  (pure:m ~)
-  ;<  rest=(unit (list attachment:uc))  bind:m  (resolve-refs root t.rs)
-  ?~  rest  (pure:m ~)
-  (pure:m `[[name.i.rs u.sz mime.i.rs hash.i.rs] u.rest])
-::
-::  +do-send-core: everything both send paths do once the signed
-::  attachment list exists.
-::
-::    `as` is the metadata that goes inside `unsigned`; `store` is the
-::    bytes still to be written, which is every file on the dojo path
-::    and nothing at all on the web path. Splitting there is what keeps
-::    ONE signing path: the two entry points differ in where
-::    [name size mime hash] came from and in nothing else.
-::
-++  do-send-core
-  |=  $:  root=@ud
-          to=(set ship)
-          subject=@t
-          body=@t
-          body-mime=@t
-          prev=(unit msg-id:uc)
-          as=(list attachment:uc)
-          store=(list file:uc)
-          bcc=(set ship)
       ==
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
@@ -1483,17 +1238,12 @@
   ::    binds are a VETO, and a veto is not a nack: it fails the fiber,
   ::    and this fiber is /main.sig, the ship's single serialisation
   ::    point for mail. So the send is refused HERE, at the top, where
-  ::    nothing has been written: no blob stored, no thread made, no
-  ::    copy filed, no beacon moved, and the draft (if this came from
-  ::    one) survives because +reject answers %.n.
+  ::    nothing has been written: no thread made, no copy filed, no
+  ::    beacon moved.
   ::
-  ::    This is the point-of-use half of a pair. +do-web-send refuses
-  ::    the same send at the route with the same words, so the composer
-  ::    stays open with its content instead of being answered 200 by a
-  ::    ship that then quietly declined - but a route check is not a
-  ::    substitute for a check here, because this arm is not the route's
-  ::    alone: a dojo poke and %send-draft both arrive without passing
-  ::    it.
+  ::    +do-web-send refuses the same send at the route with the same
+  ::    words, so the composer stays open - but a route check is not a
+  ::    substitute for this one: a dojo poke arrives without passing it.
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
     (reject root 'this ship cannot sign mail: Auspex has not been granted the key road')
@@ -1501,19 +1251,23 @@
     (reject root 'body too long')
   ?.  (lte (met 3 subject) max-subj:uc)
     (reject root 'subject too long')
-  ?.  (lte (add ~(wyt in to) ~(wyt in bcc)) max-to:uc)
+  ?.  (lte ~(wyt in to) max-to:uc)
     (reject root 'too many recipients')
-  ?.  (text-ok:uc body-mime max-mime:uc)
-    (reject root 'bad body mime')
-  ?.  (attaches-ok:uc as)
+  ::  A ref naming no stored blob refuses the WHOLE send: nothing is
+  ::  signed. The route has already answered 400 with the hash; this is
+  ::  the point-of-use half, for the other callers and for a blob evicted
+  ::  between the route's check and this one.
+  ;<  as=(unit (list attachment:uc))  bind:m  (resolve-refs root refs)
+  ?~  as  (reject root 'unknown attachment')
+  ?.  (attaches-ok:uc u.as)
     (reject root 'bad attachment')
-  ;<  room=?  bind:m  (room-for root store)
-  ?.  room
-    (reject root 'blob store full')
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
   ::  message's full contents, so it names exactly one message and
   ::  therefore exactly one chain.
+  ::
+  ::  ponytail: a walk of every thread per reply, the one writer walk left
+  ::  on the send path; a [msg-id -> thread-id] index grub retires it.
   =/  tid=(unit thread-id:uc)
     ?~  prev  ~
     =/  hits
@@ -1524,27 +1278,32 @@
     ?~(hits ~ `p.i.hits)
   ?:  &(?=(^ prev) ?=(~ tid))
     (reject root 'unknown prev')
+  =/  ss=(map path stored-msg:uc)  ?~(tid ~ (~(gut by loaded) u.tid ~))
+  ::  NOTHING ANSWERS A MESSAGE THAT HAS ONLY FORGED COPIES. `prev` picks
+  ::  the path that travels, so a reply to a forgery would ship a message
+  ::  nobody wrote as the parent of ours - and anyone can poke us a
+  ::  forged copy of an id. The clients refuse to offer it; this is where
+  ::  it is actually refused.
+  =/  honest-prev=?
+    ?~  prev  &
+    %+  lien  ~(val by ss)
+    |=  s=stored-msg:uc
+    &(=((id:uc unsigned.msg.s) u.prev) !=(%forged verdict.s))
+  ?.  honest-prev
+    (reject root 'every copy of the message this answers is forged')
   ;<  our=@p    bind:m  bowl-our
   ;<  now=@da   bind:m  bowl-now
   ;<  lyf=@ud   bind:m  (our-life our)
   ;<  rng=ring  bind:m  (our-ring lyf)
   ::  `as` goes INSIDE `unsigned`, so it is covered by the signature and
-  ::  by msg-id: swapping a file breaks the signature. Every field in it
-  ::  was derived from bytes THIS SHIP HOLDS - measured off the store on
-  ::  the ref path, off the octs in hand on the dojo one - which is what
-  ::  makes `size` and `hash` agree with what a fetcher will re-measure.
-  ::  the chain names `to` and NOTHING ELSE. bcc affects delivery only:
-  ::  the blind-copied ships get the same canonical bytes, the same
-  ::  msg-id and the same thread, and see the visible recipients, which
-  ::  is what BCC means. Nothing about them is signed, and no hashed
-  ::  commitment to them is signed either - that would leak that a BCC
-  ::  exists while staying testable against any guessed ship.
-  =/  u=unsigned:uc  [our lyf to subject body body-mime now prev as]
+  ::  by msg-id: swapping a file breaks the signature. body-mime is '',
+  ::  which is text/plain: every body this nexus signs is one.
+  =/  u=unsigned:uc  [our lyf to subject body '' now prev u.as]
   =/  mg=msg:uc     [u (sign-with:uc rng (digest:uc u))]
   ::  `full` is the whole stored thread, every branch of it; `old` is the
   ::  ONE PATH this message answers, root to `prev`. The difference
   ::  between them is exactly what no longer travels.
-  =/  full=chain:uc  ?~(tid ~ (chain-of (~(gut by loaded) u.tid ~)))
+  =/  full=chain:uc  (chain-of ss)
   =/  old=chain:uc
     ?~  prev  ~
     (with-root:uc full (path-chain:uc full u.prev))
@@ -1572,12 +1331,6 @@
   ::  overlap with another thread would file this send into that thread.
   ::  Nothing here is attacker-supplied, so no identity fixing is needed.
   =/  rid=thread-id:uc  ?^(tid u.tid (id:uc u))
-  ::  store and publish the bytes BEFORE the message goes out. A
-  ::  recipient that fetches the instant the chain lands must find the
-  ::  blob bound, and a keen at an unbound spur PARKS rather than
-  ::  failing, so the ordering is the difference between a fast fetch
-  ::  and a fetch that waits out our deadline.
-  ;<  ~  bind:m  (store-files root store)
   ;<  ~  bind:m  (ensure-thread root rid)
   ::  where this message sits in the tree: its own ancestry, root first.
   ::  Derived from `prev` against the WHOLE thread, not against the path
@@ -1586,70 +1339,82 @@
   =/  place=(list msg-id:uc)  (place-of:uc (merge:uc full ~[mg]) (id:uc u))
   ;<  ~  bind:m  (write-msg root rid place mg %verified)
   ;<  ~  bind:m  (mark-read root rid (sy ~[(id:uc u)]) &)
-  ::  record who we blind-copied, LOCALLY, so our own Sent view is
-  ::  accurate. This never travels and is not part of any signature.
-  ;<  ~  bind:m  (record-bcc root rid (id:uc u) bcc)
   ;<  ~  bind:m  (touch-idx root rid)
   ;<  ~  bind:m  (note root 'send' & (scot %uv rid))
-  ::  BUMP BEFORE THE FAN-OUT. Everything local has landed by here, and
-  ::  the fan-out carries a send-timeout deadline PER RECIPIENT: bumping
-  ::  after it made one unreachable ship delay every open tab on this
-  ::  ship by up to twenty seconds each, for a change already committed.
-  ::  A local reader must never wait on a remote ship. This arm answers
+  ::  BUMP BEFORE THE FAN-OUT. Everything local has landed by here. A
+  ::  local reader must never wait on a remote ship. This arm answers
   ::  %.n below so the writer's loop does not bump a second time, which
   ::  is what keeps a send to exactly one bump.
   ;<  ~  bind:m  (bump-beacon root)
-  ::  ship the PATH to every recipient, visible and blind alike. A ship
-  ::  added at message forty receives the forty on this path, each
-  ::  independently verifiable, and nothing off it.
-  ;<  ~  bind:m  (fan-out root new ~(tap in (~(del in (~(uni in to) bcc)) our)))
-  ::  %.y MEANS "IT SENT", NOT "BUMP THE BEACON". The beacon is already
-  ::  moved, above, and +act discards this answer precisely so the
-  ::  writer's loop does not move it a second time.
-  ::
-  ::  The answer exists for %send-draft, which must not delete a draft
-  ::  whose send this arm refused. Every +reject above returns %.n, so a
-  ::  refused send is distinguishable from a completed one by the one
-  ::  caller that has to be able to tell - and a composed message
-  ::  survives its own rejection instead of being deleted at the moment
-  ::  the ship declines to carry it.
-  (pure:m &)
+  ::  ship the PATH to every recipient. A ship added at message forty
+  ::  receives the forty on this path, each independently verifiable,
+  ::  and nothing off it.
+  ;<  ~  bind:m  (fan-out root new now ~(tap in (~(del in to) our)))
+  ::  %.n: the beacon already moved, above.
+  (pure:m |)
 ::
-::  +do-read: mark a SET of messages read, in one pass.
+::  +resolve-refs: each named blob's SIGNED metadata, or ~ if any is
+::  missing. The size is read off the bytes this ship holds.
 ::
-::    Opening a thread marks every unread message in it, so this used to
-::    be one poke, one writer event and one FULL MAILBOX SCAN per
-::    message - forty messages, forty serialised scans on the ship's
-::    single serialisation point for mail, to record something no peer
-::    will ever see. One scan now covers the whole set: the mailbox is
-::    read once, every id is placed against the thread that holds it,
-::    and each affected thread's meta is rewritten once however many of
-::    its messages were named.
+::    Recursion by ARM NAME, not $: a $ with arguments inside a ;<
+::    continuation cannot find the trap.
 ::
-::    Ids naming nothing are skipped rather than refused. A set is not a
-::    single request that can be wrong; it is a client reporting what it
-::    just rendered, and a thread deleted in another tab between render
-::    and poke would otherwise make the whole batch fail.
+++  resolve-refs
+  |=  [root=@ud rs=(list attach-ref:uc)]
+  =/  m  (fiber:fiber:nexus ,(unit (list attachment:uc)))
+  ^-  form:m
+  ?~  rs  (pure:m `~)
+  ;<  o=(unit octs)  bind:m  (read-blob root hash.i.rs)
+  ?~  o  (pure:m ~)
+  ;<  rest=(unit (list attachment:uc))  bind:m  (resolve-refs root t.rs)
+  ?~  rest  (pure:m ~)
+  (pure:m `[[name.i.rs p.u.o mime.i.rs hash.i.rs] u.rest])
 ::
-++  do-read
-  |=  [root=@ud ids=(set msg-id:uc)]
+::  +do-mark: mark a SET of messages read (`rd` &) or unread (|), in one
+::  pass, with one rewrite of each affected thread's meta however many of
+::  its messages were named.
+::
+::    ONE THREAD IS READ, NOT THE MAILBOX. Opening a thread marks what it
+::    shows and the client knows which thread that is, so finding it again
+::    by walking every thread cost the writer a full mailbox scan per open.
+::
+::    Marking a %forged message unread is a no-op on every surface a user
+::    sees, and no branch here says so: +entry-json never counts a forged
+::    copy as unread, because that is a property of how unread is
+::    COMPUTED and not of what is stored.
+::
+::    %.n ALWAYS, both ways. Read state is not content: lattice learned
+::    this with page history, where every visit bumped and every open
+::    reader reloaded. It is worse here, because a reader answers a bump
+::    by refetching the thread it is showing and that refetch marks it
+::    read again - a loop, not a burst.
+::
+++  do-mark
+  |=  [root=@ud ids=(set msg-id:uc) tid=thread-id:uc rd=?]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?:  =(~ ids)  (pure:m |)
-  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
+  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m
+    (read-one-thread root tid)
   =/  hits  (group-ids loaded ids)
   ?~  hits  (reject root 'unknown message')
-  ;<  ~  bind:m  (mark-read-loop root hits &)
-  ::  %.n ALWAYS. Read state is not content: lattice learned this with
-  ::  page history, where every visit bumped and every open reader
-  ::  reloaded. It is worse here, because a reader answers a bump by
-  ::  refetching the thread it is showing and that refetch marks it read
-  ::  again - a loop, not a burst.
+  ;<  ~  bind:m  (mark-read-loop root hits rd)
   (pure:m |)
+::
+::  +read-one-thread: one thread's copies, in the shape +read-threads
+::  answers, so +group-ids reads either.
+::
+++  read-one-thread
+  |=  [root=@ud t=thread-id:uc]
+  =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map path stored-msg:uc)))
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (tdir t)) ~)
+  ?.  ?=([%ball *] vw)  (pure:m ~)
+  (pure:m (my ~[[t (collect-slots ball.vw)]]))
 ::
 ::  +group-ids: which thread holds each of these message ids.
 ::
-::    ONE PASS over the mailbox, shared by %read and %unread so the two
+::    ONE PASS over what was read, shared by %read and %unread so the two
 ::    cannot disagree about what a set of ids names. Flat on purpose: a
 ::    roll nested inside a roll cannot thread the outer accumulator
 ::    through, because the inner one starts from the BUNT of its own
@@ -1677,32 +1442,6 @@
     ?:((~(has in ids) i) `i ~)
   ?:(=(~ mine) ~ `[t mine])
 ::
-::  +do-unread: the exact inverse of %read, over the same pass.
-::
-::    Marking a %forged message unread is a no-op on every surface a
-::    user sees, and no branch here says so: the unread count in
-::    +entry-json already skips forged copies, because "%forged messages
-::    are never counted as unread" is a property of how unread is
-::    COMPUTED and not of what is stored. Special-casing it here would
-::    be a second place for that rule to live and a second place for it
-::    to drift.
-::
-::    %.n, always, exactly as %read is: read state is not content, and a
-::    reader that answered a bump by refetching the thread it is showing
-::    would mark it read again - a loop, not a burst.
-::
-++  do-unread
-  |=  [root=@ud ids=(set msg-id:uc)]
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ?:  =(~ ids)  (pure:m |)
-  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
-  =/  hits  (group-ids loaded ids)
-  ?~  hits  (reject root 'unknown message')
-  ;<  ~  bind:m  (mark-read-loop root hits |)
-  ;<  ~  bind:m  (note root 'unread' & 'ok')
-  (pure:m |)
-::
 ::  ── labels, folders and archive ─────────────────────────────────────
 ::
 ::  +do-label: add or remove ONE label on one thread.
@@ -1728,7 +1467,7 @@
   ::  happily and then crashes `scot %tas` on a request fiber, which is
   ::  an HTTP connection that never answers.
   ?.  (label-ok:uc l)  (reject root 'bad label')
-  ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir root t)))
+  ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir t)))
   ?.  ex  (reject root 'unknown thread')
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   =/  now=(set @tas)  ?:(add (~(put in labels.mt) l) (~(del in labels.mt) l))
@@ -1753,7 +1492,7 @@
   |=  [root=@ud t=thread-id:uc arch=?]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir root t)))
+  ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir t)))
   ?.  ex  (reject root 'unknown thread')
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ?:  =(arch archived.mt)  (pure:m |)
@@ -1768,7 +1507,7 @@
 ::    NOTHING IS SIGNED HERE. A draft has no author, no life, no send
 ::    time and no signature, and it is stored outside /mail/thread so no
 ::    walk that produces messages can reach it. Signing happens once, at
-::    %send-draft, over the fields as they stand at that moment.
+::    the send, over the fields as they stand at that moment.
 ::
 ::    The id comes from the client and is overwritten in place, so a
 ::    debounced save costs one grub however many keystrokes it covers.
@@ -1781,7 +1520,7 @@
   ::  is a message the user loses at the last moment, and the whole
   ::  point of a draft is that nothing is lost.
   ?.  (draft-ok:uc d)  (reject root 'bad draft')
-  ;<  ~  bind:m  (ensure-dir root (draft-dir root))
+  ;<  ~  bind:m  (ensure-dir root draft-dir)
   ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
   ::  the store bound counts only a draft we do not already hold, so
   ::  re-saving an existing draft is never refused for capacity.
@@ -1793,44 +1532,15 @@
   ;<  ~  bind:m  (note root 'save-draft' & (scot %uv id.d))
   (pure:m |)
 ::
-++  do-delete-draft
-  |=  [root=@ud i=@uv]
+::  +do-delete-leaf: cull one draft or rule. The two deletes differ in
+::  nothing but the road and the trace label.
+::
+++  do-delete-leaf
+  |=  [root=@ud =road:tarball stage=@t i=@uv]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (cull-if-there (draft-rail root i))
-  ;<  ~  bind:m  (note root 'delete-draft' & (scot %uv i))
-  (pure:m |)
-::
-::  +do-send-draft: SIGN IT NOW, THEN DELETE IT.
-::
-::    The draft becomes a message at this instant and not before: the
-::    signature is made over the fields as they stand, by +do-send,
-::    exactly as a compose is. There is no path by which a draft is
-::    signed at save time and no path by which a stored draft carries a
-::    signature.
-::
-::    DELETION IS GATED ON THE SEND ACTUALLY HAVING HAPPENED. +do-send
-::    answers whether it sent; a refused send - a body over the cap, an
-::    unknown prev, a full blob store - leaves the draft exactly where
-::    it was. Deleting unconditionally would destroy the composed
-::    message at the one moment the ship is telling the user it will not
-::    carry it, which is the failure the web route's cap checks were
-::    added to prevent, arriving through a different door.
-::
-++  do-send-draft
-  |=  [root=@ud i=@uv]
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ;<  d=(unit draft:uc)  bind:m  (read-draft root i)
-  ?~  d  (reject root 'unknown draft')
-  ;<  sent=?  bind:m  (do-send root to.u.d subject.u.d body.u.d '' prev.u.d ~ ~)
-  ?.  sent
-    ::  +do-send has already written its own reason to /tr/last. The
-    ::  draft survives.
-    (pure:m |)
-  ;<  ~  bind:m  (cull-if-there (draft-rail root i))
-  ;<  ~  bind:m  (note root 'send-draft' & (scot %uv i))
-  ::  %.n: +do-send bumped the beacon itself, before its fan-out.
+  ;<  ~  bind:m  (cull-if-there road)
+  ;<  ~  bind:m  (note root stage & (scot %uv i))
   (pure:m |)
 ::
 ::  ── filters ─────────────────────────────────────────────────────────
@@ -1842,7 +1552,7 @@
   ::  a rule with no condition matches every delivered chain, and with
   ::  `archive` set would empty the inbox permanently and silently.
   ?.  (rule-ok:uc r)  (reject root 'bad rule')
-  ;<  ~  bind:m  (ensure-dir root (rule-dir root))
+  ;<  ~  bind:m  (ensure-dir root rule-dir)
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
   ::  every rule is evaluated against every delivered chain, ON THE
   ::  WRITER, which is the ship's single serialisation point for mail.
@@ -1852,14 +1562,6 @@
     (reject root 'too many rules')
   ;<  ~  bind:m  (put-file (rule-rail root id.r) [/auspex %rule] r)
   ;<  ~  bind:m  (note root 'save-rule' & (scot %uv id.r))
-  (pure:m |)
-::
-++  do-delete-rule
-  |=  [root=@ud i=@uv]
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ;<  ~  bind:m  (cull-if-there (rule-rail root i))
-  ;<  ~  bind:m  (note root 'delete-rule' & (scot %uv i))
   (pure:m |)
 ::
 ::  ── mailing lists ───────────────────────────────────────────────────
@@ -1891,7 +1593,7 @@
   ?:  (~(has in members) our)  (reject root 'a list may not hold your own ship')
   ::  a list larger than a send may carry is a list that cannot be used.
   ?.  (lte ~(wyt in members) max-to:uc)  (reject root 'too many members')
-  ;<  ~  bind:m  (ensure-dir root (list-dir root))
+  ;<  ~  bind:m  (ensure-dir root list-dir)
   ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
   ::  the store bound counts only a list we do not already hold, so
   ::  overwriting an existing list is never refused for capacity - which
@@ -1965,11 +1667,11 @@
   |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  =/  road=road:tarball  (rv root (tdir root t))
+  =/  road=road:tarball  (rv root (tdir t))
   ;<  ~  bind:m  (cull-if-there road)
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
   ;<  ~  bind:m
-    %^  put-file  (rf root (mail-dir root) %idx)  [/auspex %idx]
+    %^  put-file  (rf root mail-dir %idx)  [/auspex %idx]
     ix(inbox (skip inbox.ix |=(o=thread-id:uc =(o t))))
   ;<  ~  bind:m  (note root 'delete-thread' & (scot %uv t))
   (pure:m &)
@@ -2045,7 +1747,7 @@
   ::  unsorted, so the head-as-supplied is not a stable identity.
   ::  +thread-key crashes on a first-contact chain with no unique prev=~
   ::  root, which is hostile input reaching the writer, so: mule.
-  =/  rk  (mule |.((thread-key:uc (threads-of loaded) c)))
+  =/  rk  (mule |.((thread-key:uc (key-threads loaded) c)))
   ?:  ?=(%| -.rk)  (reject root 'no unique root')
   =/  rid=thread-id:uc  p.rk
   =/  ss=(map path stored-msg:uc)  (~(gut by loaded) rid ~)
@@ -2095,64 +1797,6 @@
 ::
 ::  ── blobs ───────────────────────────────────────────────────────────
 ::
-::  +store-files: put each attached file in the store and publish it.
-::
-++  store-files
-  |=  [root=@ud fs=(list file:uc)]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ?~  fs  (pure:m ~)
-  ;<  ~  bind:m  (store-blob root octs.i.fs)
-  ::  recursion by ARM NAME. A $ with arguments inside a ;< continuation
-  ::  cannot find the trap.
-  (store-files root t.fs)
-::
-::  +store-blob: write one blob's bytes and bind them in the farm.
-::
-::    GATED ON NOT ALREADY HOLDING IT, and that gate is what keeps the
-::    fetch path simple. gall assigns a spur's case itself
-::    (+grow:of-farm in sys/lull): an unbound, never-culled spur takes
-::    case 1, and every later %grow at the same spur takes the next key
-::    up. A remote fetcher cannot discover a case - gall's %w care, the
-::    only read that answers one, is gated on `=(our ship)` - so it has
-::    to construct the path from the hash alone and therefore has to be
-::    able to assume case 1. Growing only when the grub is absent means
-::    a re-send of a file we still hold, or a re-fetch of one, does not
-::    bump the case. See +keen-blob for the one thing that does.
-::
-++  store-blob
-  |=  [root=@ud =octs]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  =/  h=@uv  (blob-hash:uc octs)
-  ;<  ex=?  bind:m  (peek-exists:io (blob-rail root h))
-  ?:  ex  (pure:m ~)
-  ;<  now=@da  bind:m  bowl-now
-  ;<  ~  bind:m  (put-file (blob-rail root h) [/auspex %blob] [%1 octs now])
-  (publish-blob root h octs |)
-::
-::  +unheld-files: the files in a send we do not already hold.
-::
-++  unheld-files
-  |=  [root=@ud fs=(list file:uc)]
-  =/  m  (fiber:fiber:nexus ,(list file:uc))
-  ^-  form:m
-  ?~  fs  (pure:m ~)
-  ;<  ex=?  bind:m  (peek-exists:io (blob-rail root (blob-hash:uc octs.i.fs)))
-  ;<  rest=(list file:uc)  bind:m  (unheld-files root t.fs)
-  (pure:m ?:(ex rest [i.fs rest]))
-::
-::  +room-for: can the store take all of these? Sheds if it has to.
-::
-++  room-for
-  |=  [root=@ud fs=(list file:uc)]
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ?~  fs  (pure:m &)
-  ;<  ok=?  bind:m  (make-room root p.octs.i.fs)
-  ?.  ok  (pure:m |)
-  (room-for root t.fs)
-::
 ::  +publish-blob: bind the bytes in gall's remote-scry farm.
 ::
 ::    This is the whole permission story for a public blob. A %keen is
@@ -2167,8 +1811,16 @@
 ::    gall's farm is a FLAT namespace shared by every nexus in this yoke
 ::    (lattice grows at /pub/page/...), hence the /auspex prefix.
 ::
+::    GROWN ONLY WHEN UNBOUND, and that is what keeps the fetch path
+::    simple. gall assigns a spur's case itself (+grow:of-farm in
+::    sys/lull): an unbound, never-culled spur takes case 1, and every
+::    later %grow at the same spur takes the next key up. A remote
+::    fetcher cannot discover a case - gall's %w care, the only read that
+::    answers one, is gated on `=(our ship)` - so it builds the path from
+::    the hash alone at case 1, and nothing here ever culls a blob spur.
+::
 ++  publish-blob
-  |=  [root=@ud h=@uv =octs force=?]
+  |=  [root=@ud h=@uv =octs]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ::  THE FARM IS DOWN /sys/scry, so this whole arm is behind the key
@@ -2182,16 +1834,7 @@
     (trace:io ~[leaf+"auspex: no key road; blob {<h>} stays unpublished"])
   ::  NOTHING MAY GROW A SPUR IT HAS NOT ESTABLISHED IS UNBOUND. gall
   ::  assigns las+1 on a non-empty fan, so a second %grow at a bound
-  ::  spur raises the case a peer has to probe for, and cases only ever
-  ::  go up. This check is the structural guard; +do-publish's own
-  ::  visibility gate is belt to these braces.
-  ::
-  ::  `force` exists for exactly one caller. A restrict CULLED the spur,
-  ::  and gall keeps the emptied plot, so %gt still lists a spur that no
-  ::  longer answers - the one case where "listed" and "bound" disagree.
-  ::  +do-publish has already established the blob is %restricted, which
-  ::  is the record that says the cull happened, and so may grow anyway.
-  ?:  force  (grow:io (blob-spur:uc h) [blob-page-mark:uc octs])
+  ::  spur would move the blob off the case 1 every fetcher asks for.
   ;<  bound=?  bind:m  (farm-has (blob-spur:uc h))
   ?:  bound  (pure:m ~)
   (grow:io (blob-spur:uc h) [blob-page-mark:uc octs])
@@ -2230,8 +1873,7 @@
 ::    exactly what is missing.
 ::
 ::    Gated on the farm listing, so it is a no-op in the ordinary case
-::    and can never raise a case by running again. A %restricted blob is
-::    skipped: it is withdrawn on purpose.
+::    and can never raise a case by running again.
 ::
 ++  republish-all
   |=  root=@ud
@@ -2249,19 +1891,13 @@
   ::  BOTH branches of that narrowing, so the null case then fails to
   ::  nest. The empty case costs one scry and is not worth the shape.
   ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
-  ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
   ;<  n=noun  bind:m
     (typed-scry:io noun %noun ~[%gt mesa-agent %$ %'1' %auspex %blob])
   =/  res  (mule |.(;;((list path) n)))
   ?:  ?=(%| -.res)  (pure:m ~)
   =/  bound=(set path)  (~(gas in *(set path)) p.res)
   %+  republish-loop  root
-  %+  skip  held
-  |=  r=blob-row:uc
-  ^-  ?
-  ?:  (~(has in bound) (blob-spur:uc h.r))  &
-  =/  v=blob-vis:uc  (~(gut by vis.ix) h.r [%public ~])
-  ?=(%restricted -.v)
+  (skip held |=(r=blob-row:uc (~(has in bound) (blob-spur:uc h.r))))
 ::
 ++  republish-loop
   |=  [root=@ud rs=(list blob-row:uc)]
@@ -2284,7 +1920,7 @@
 ::    and it is here for the same structural reason: gall assigns las+1
 ::    on a non-empty fan, so a second %grow raises the case a peer has to
 ::    probe for and cases only ever go up. Three redeploys of an
-::    unconditional grow would push /proto past +max-case-probe and make
+::    unconditional grow would push /proto past +proto-probe-cases and make
 ::    it unreadable by every peer, forever, with no error - the fetcher
 ::    would simply report a miss, which is the answer that means
 ::    "version 1" and would then be wrong.
@@ -2332,7 +1968,7 @@
   ::  1 forever and the new one unreachable behind it.
   ::
   ::  ONE GROW PER PROTOCOL CHANGE, never per deploy - which is what
-  ::  keeps this inside +max-case-probe. /proto-pub is the record that
+  ::  keeps this inside +proto-probe-cases. /proto-pub is the record that
   ::  makes a redeploy of unchanged content free, and it is a LOCAL
   ::  record rather than a read of the farm because the farm cannot be
   ::  read from here: a keen addressed to our own ship does not answer,
@@ -2386,86 +2022,37 @@
 ::
 ++  blob-timeout  ^-(@dr ~s10)
 ::
-::  +max-case-probe: how far up the case ladder to look.
+::  +proto-probe-cases / +proto-timeout: /proto's case ladder.
 ::
-::    Case 1 is the answer for a blob the publisher grew once and never
-::    culled, which is every ordinary blob (+store-blob only grows when
-::    the grub is absent). The ladder exists for the one operation that
-::    burns a case: %restrict-blob culls the spur, and gall's +ap-cull
-::    parks the culled case as a high-water mark so nothing ever re-binds
-::    at or below it. A blob restricted and later re-published therefore
-::    answers at case 2, not 1, permanently. Probing a few cases up is
-::    the fetcher's whole defence against that, and it costs one timeout
-::    per miss, paid only by a blob that has actually been restricted.
+::    A blob is content-addressed and immutable and is only ever grown at
+::    case 1. /proto is MUTABLE: it moves one case every time a ship
+::    changes its version ladder or its caps, which is a normal thing for
+::    a deployed protocol to do. Measured on ~feb, two content changes
+::    put it at case 3. So a ladder, and a shorter deadline to pay for
+::    it: eight cases at four seconds is 32s for a total miss, and those
+::    seconds hold QUEUED MAIL on first contact - which is why the total,
+::    and not the per-case number, is what was held fixed.
 ::
-++  max-case-probe  ^-(@ud 3)
+++  proto-probe-cases  ^-(@ud 8)
+++  proto-timeout      ^-(@dr ~s4)
 ::
-::  +keen-blob: a peer's blob bytes, ~ on any failure.
+::  +keen-page: one %keen, ~ on every failure - our own deadline, an
+::  unbound spur, a page under a mark we did not ask for. On our deadline
+::  firing, %yawn the request: ames otherwise holds an unanswerable keen
+::  forever, one parked request per miss. The caller clams the noun.
 ::
-++  keen-blob
-  |=  [who=ship h=@uv case=@ud]
-  =/  m  (fiber:fiber:nexus ,(unit octs))
+++  keen-page
+  |=  [who=ship pax=path to=@dr mark=@tas]
+  =/  m  (fiber:fiber:nexus ,(unit *))
   ^-  form:m
-  ?:  (gth case max-case-probe)  (pure:m ~)
-  ;<  got=(unit octs)  bind:m  (keen-blob-at who h case)
-  ?^  got  (pure:m got)
-  (keen-blob who h +(case))
-::
-::  +keen-blob-at: one %keen, at one case.
-::
-::    ~ on every failure: our own deadline, an unbound spur, a mark we do
-::    not understand, a noun that is not octs. On our deadline firing,
-::    %yawn the request - ames otherwise holds an unanswerable keen
-::    forever, one parked request per miss.
-::
-++  keen-blob-at
-  |=  [who=ship h=@uv case=@ud]
-  =/  m  (fiber:fiber:nexus ,(unit octs))
-  ^-  form:m
-  =/  pax=path  (blob-keen-path:uc mesa-agent h case)
   ;<  res=(unit (unit page))  bind:m
-    ((deadline ,(unit page)) blob-timeout (keen:io who pax))
+    ((deadline ,(unit page)) to (keen:io who pax))
   ?~  res
     ;<  ~  bind:m  (yawn:io who pax)
     (pure:m ~)
   ?~  u.res  (pure:m ~)
-  =/  pag=page  u.u.res
-  ?.  =(blob-page-mark:uc p.pag)  (pure:m ~)
-  =/  got  (mule |.(;;(octs q.pag)))
-  ?:(?=(%| -.got) (pure:m ~) (pure:m `p.got))
-::
-::  +keen-proto: a peer's published /proto, ~ on any failure.
-::
-::    Same shape, same timeout and same case ladder as +keen-blob, and
-::    for the same reasons - see those arms. ~ is not a failure the
-::    caller has to handle specially: a peer that does not answer is a
-::    peer treated as version 1, which is what every Auspex before
-::    discovery speaks.
-::
-::  +proto-probe-cases / +proto-timeout: /proto's OWN ladder.
-::
-::    A blob is content-addressed and immutable, so its spur moves only
-::    when a restrict culls it - +max-case-probe's 3 is generous for
-::    that. /proto is MUTABLE: it moves one case every time a ship
-::    changes its version ladder or its caps, which is a normal thing
-::    for a deployed protocol to do. Measured on ~feb, two content
-::    changes put it at case 3, which is the blob ceiling exactly - one
-::    more and every peer would silently report a miss, read that as
-::    silence, and treat the ship as version 1 forever.
-::
-::    So a wider ladder, and a shorter deadline to pay for it. A
-::    namespace read is answered from a cache or from the publisher's
-::    kernel with no agent in the loop, so a keen that is slow is a keen
-::    that is not coming - which is +blob-timeout's own argument, and it
-::    licenses a tighter bound here than the ten seconds a blob fetch
-::    allows. Eight cases at four seconds is 32s for a total miss,
-::    against the 30s the three-case blob ladder already costs, and
-::    those seconds hold QUEUED MAIL on first contact - which is the
-::    reason the total, and not the per-case number, is what was held
-::    fixed.
-::
-++  proto-probe-cases  ^-(@ud 8)
-++  proto-timeout      ^-(@dr ~s4)
+  ?.  =(mark p.u.u.res)  (pure:m ~)
+  (pure:m `q.u.u.res)
 ::
 ::  +fetch-keen / +probe-keen: the two keens, BEHIND THE KEY ROAD.
 ::
@@ -2486,7 +2073,9 @@
   ^-  form:m
   ;<  may=?  bind:m  (may-scry root)
   ?.  may  (pure:m ~)
-  (keen-blob who h 1)
+  ;<  n=(unit *)  bind:m
+    (keen-page who (blob-keen-path:uc mesa-agent h 1) blob-timeout blob-page-mark:uc)
+  (pure:m (biff n |=(x=* (mole |.(;;(octs x))))))
 ::
 ++  probe-keen
   |=  [root=@ud who=ship]
@@ -2496,50 +2085,37 @@
   ?.  may  (pure:m ~)
   (keen-proto who 1)
 ::
+::  +keen-proto: up /proto's ladder, first hit wins. A noun that is not a
+::  $proto, or a $proto saying what one cannot truthfully say - lists
+::  that disagree in length, or a ship claiming to speak nothing - is a
+::  miss, and the peer is treated as silent: silence means version 1,
+::  and version 1 is what we would have poked anyway.
+::
 ++  keen-proto
   |=  [who=ship case=@ud]
   =/  m  (fiber:fiber:nexus ,(unit proto:uc))
   ^-  form:m
   ?:  (gth case proto-probe-cases)  (pure:m ~)
-  ;<  got=(unit proto:uc)  bind:m  (keen-proto-at who case)
-  ?^  got  (pure:m got)
+  ;<  n=(unit *)  bind:m
+    (keen-page who (proto-keen-path:uc mesa-agent case) proto-timeout proto-page-mark:uc)
+  =/  got=(unit proto:uc)
+    (biff n |=(x=* (mole |.(;;(proto:uc x)))))
+  ?:  &(?=(^ got) (proto-ok:uc u.got))  (pure:m got)
   (keen-proto who +(case))
 ::
-::  +keen-proto-at: one %keen, at one case.
+::  +enqueue-chain: hand this send to the peer's probe fiber.
 ::
-::    Refuses a noun that is not a $proto AND one that is a $proto
-::    saying something a $proto cannot truthfully say - lists that
-::    disagree in length, or a ship claiming to speak nothing. Both
-::    answer ~ and the peer is treated as silent, which is the safe
-::    direction: silence means version 1, and version 1 is what we would
-::    have poked anyway.
+::    EVERY SEND GOES THIS WAY, known peer or not. The writer used to poke
+::    a peer it had a fresh answer for itself, and a poke carries
+::    +send-timeout because grubbery never returns a remote ack: each
+::    known recipient held the writer twenty seconds, and every
+::    read-mark, delivery and autosave queued behind it. The fiber reads
+::    the cache first and keens only when nothing fresh is there.
 ::
-++  keen-proto-at
-  |=  [who=ship case=@ud]
-  =/  m  (fiber:fiber:nexus ,(unit proto:uc))
-  ^-  form:m
-  =/  pax=path  (proto-keen-path:uc mesa-agent case)
-  ;<  res=(unit (unit page))  bind:m
-    ((deadline ,(unit page)) proto-timeout (keen:io who pax))
-  ?~  res
-    ;<  ~  bind:m  (yawn:io who pax)
-    (pure:m ~)
-  ?~  u.res  (pure:m ~)
-  =/  pag=page  u.u.res
-  ?.  =(proto-page-mark:uc p.pag)  (pure:m ~)
-  =/  got  (mule |.(;;(proto:uc q.pag)))
-  ?:  ?=(%| -.got)  (pure:m ~)
-  ?.  (proto-ok:uc p.got)  (pure:m ~)
-  (pure:m `p.got)
-::
-::  +enqueue-chain: hold this send until we know what the peer speaks.
-::
-::    THE SEND DOES NOT GO OUT AS VERSION 1 HERE, and that is the fix
-::    this arm exists for. Poking v1 while the probe was still in flight
-::    meant the "no common protocol version" refusal could never fire on
-::    FIRST CONTACT - the one send most likely to reach a ship running
-::    something else - because by the time the answer arrived the chain
-::    was already on the wire.
+::    AND NOTHING GOES OUT AS VERSION 1 ON A GUESS. Poking v1 while a
+::    probe was still in flight meant the "no common protocol version"
+::    refusal could never fire on FIRST CONTACT - the one send most
+::    likely to reach a ship running something else.
 ::
 ::    Writing the grub is the whole spawn: grubbery runs +on-file for
 ::    the rail. An UPDATE does not spawn a second fiber (see
@@ -2551,24 +2127,16 @@
   |=  [root=@ud c=chain:uc who=ship now=@da]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  ~  bind:m  (ensure-dir root (probe-dir root))
+  ;<  ~  bind:m  (ensure-dir root probe-dir)
   ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
   =/  nex=probe-req:uc
     ?~  rq  [%0 who now ~[c] ~ 0]
     u.rq(pending (queue-chain:uc pending.u.rq c))
   ;<  ~  bind:m  (put-file (probe-rail root who) [/auspex %probereq] nex)
-  %-  trace:io
-  :~  leaf+"auspex: holding a send to {<who>} for discovery"
-  ==
+  (trace:io ~[leaf+"auspex: handing a send to {<who>} to its fiber"])
 ::
-::  +deliver-chain: THE DECISION, and it is the same one wherever it is
-::  made.
-::
-::    Called by the writer for a peer we already have an answer for, and
-::    by the probe fiber for a peer we have just asked. One arm, so the
-::    two paths cannot drift on which mark is poked or which refusal is
-::    said - which they would, because they are the same four outcomes
-::    in two different fibers.
+::  +deliver-chain: THE DECISION, made on the probe fiber and nowhere
+::  else.
 ::
 ::      answer, common version   poke the mark for the HIGHEST common one
 ::      answer, none in common   REFUSE. Never poke: a mark the peer does
@@ -2581,12 +2149,11 @@
 ::                               empty result reaches here, never a cache
 ::                               that merely had no entry.
 ::
-::    `notes` is off on the fiber. Only the writer mutates the tree, so
-::    the fiber says its outcome to the console and the writer records
-::    the summary when the fiber reports back.
+::    The outcome goes to the console. Only the writer mutates the tree,
+::    and it records what discovery learned when the fiber reports back.
 ::
 ++  deliver-chain
-  |=  [root=@ud c=chain:uc who=ship known=(unit proto:uc) notes=?]
+  |=  [root=@ud c=chain:uc who=ship known=(unit proto:uc)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  mk=(unit @tas)  (peer-mark:uc known)
@@ -2596,14 +2163,14 @@
     ::  us. Written rather than needed, because +need here would be a
     ::  crash on whichever fiber got here.
     ?~  known  (pure:m ~)
-    (say-send root who (no-version-error:uc who u.known) notes)
+    (say-send (no-version-error:uc who u.known))
   =/  cerr=(unit @t)  (peer-cap-error:uc who c known)
-  ?^  cerr  (say-send root who u.cerr notes)
+  ?^  cerr  (say-send u.cerr)
   ::  no answer: the compatibility rule, said out loud before the poke
   ::  rather than after it fails.
   ;<  ~  bind:m
     ?^  known  (pure:m ~)
-    (say-send root who (unanswered-note:uc who) notes)
+    (say-send (unanswered-note:uc who))
   =/  rd=road:tarball  (remote-road [%& %& remote-install %'main.sig'] who)
   ;<  res=(unit (unit tang))  bind:m
     ((deadline ,(unit tang)) send-timeout (poke-soft:io rd [[/ u.mk] c]))
@@ -2627,39 +2194,25 @@
     ::    There is nothing this branch can add to either.
     ::
     ::    So: the record STAYS, the user is told nothing, and the fact
-    ::    is written where an operator looks - the console, and
-    ::    /tr/discovery rather than /tr/last, because /tr/last is the
-    ::    outcome of the send a person is waiting on and this is not an
-    ::    outcome.
+    ::    is written where an operator looks - the console.
     ::
     ::    An explicit NACK is different in kind and is handled below: it
     ::    is the far end SAYING no, which is a fact, and it does drop
     ::    the record.
-    =/  why=@t  (late-ack-note:uc who (div send-timeout ~s1))
-    ;<  ~  bind:m
-      %-  trace:io
-      :~  leaf+"auspex: {(trip why)}"
-          leaf+"auspex: grubbery returns no poke-ack to a nexus fiber; not a failure"
-      ==
-    ?.  notes  (pure:m ~)
-    (note-at root %discovery 'send' & why)
+    %-  trace:io
+    :~  leaf+"auspex: {(trip (late-ack-note:uc who (div send-timeout ~s1)))}"
+        leaf+"auspex: grubbery returns no poke-ack to a nexus fiber; not a failure"
+    ==
   ?~  u.res  (pure:m ~)
   ;<  ~  bind:m  (cull-if-there (peer-rail root who))
-  (say-send root who (nacked-note:uc who) notes)
+  (say-send (nacked-note:uc who))
 ::
-::  +say-send: one sentence, to the console always and to /tr/last only
-::  from the writer. ONLY THE WRITER MUTATES THE TREE, so the fiber
-::  says its outcome where a human can see it and the writer records
-::  the summary when the fiber reports back.
+::  +say-send: one sentence, to the console. The fiber that says it does
+::  not write the tree; the writer records what discovery learned.
 ::
 ++  say-send
-  |=  [root=@ud who=ship why=@t notes=?]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: {(trip why)}"])
-  ?.  notes  (pure:m ~)
-  ;<  *  bind:m  (note root 'send' | why)
-  (pure:m ~)
+  |=  why=@t
+  (trace:io ~[leaf+"auspex: {(trip why)}"])
 ::
 ::  +run-probe: the ephemeral discovery fiber. Runs OFF the writer, and
 ::  it is the fiber that SENDS the mail it was holding.
@@ -2671,7 +2224,8 @@
 ::         otherwise crash this fiber, and a crashed fiber respawns,
 ::         which is an infinite crash loop at 100% CPU. Reading the name
 ::         means the recovery poke below can always be sent.
-::      2  keen, cases 1..3, bounded and yawned.
+::      2  the cached answer if it is fresh; otherwise keen /proto's
+::         ladder, bounded and yawned.
 ::      3  RE-READ the state. Anything the writer appended while the
 ::         keen was in flight is picked up here, which is what makes two
 ::         quick sends to one unknown ship both arrive.
@@ -2692,13 +2246,21 @@
   ?~  wu
     (trace:io ~[leaf+"auspex: probe at {<id>} is not a ship name"])
   =/  who=ship  u.wu
-  ;<  got=(unit proto:uc)  bind:m  (probe-keen root who)
+  ;<  now=@da  bind:m  get-time:io
+  ::  A FRESH RECORD IS THE ANSWER, and it keeps the time it was asked:
+  ::  a peer written to every hour must still expire on +proto-ttl.
+  ;<  rec=(unit peer-rec:uc)  bind:m  (read-peer root who)
+  =/  n  (fiber:fiber:nexus ,[(unit proto:uc) @da])
+  ;<  [got=(unit proto:uc) asked=@da]  bind:m
+    ?:  &(?=(^ rec) (peer-fresh:uc u.rec now))
+      (pure:n [proto.u.rec asked.u.rec])
+    ;<  p=(unit proto:uc)  bind:n  (probe-keen root who)
+    (pure:n [p now])
   ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
   =/  q=(list chain:uc)  ?~(rq ~ pending.u.rq)
-  ;<  now=@da  bind:m  get-time:io
-  ;<  ~  bind:m  (drain-probe root who got q |)
+  ;<  ~  bind:m  (drain-probe root who got q)
   %+  poke:io  (rf root / %'main.sig')
-  [[/auspex %probereq] `probe-req:uc`[%0 who now ~ got (lent q)]]
+  [[/auspex %probereq] `probe-req:uc`[%0 who asked ~ got (lent q)]]
 ::
 ::  +drain-probe: send the held chains, oldest first.
 ::
@@ -2706,12 +2268,12 @@
 ::    cannot find the trap.
 ::
 ++  drain-probe
-  |=  [root=@ud who=ship known=(unit proto:uc) q=(list chain:uc) notes=?]
+  |=  [root=@ud who=ship known=(unit proto:uc) q=(list chain:uc)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  q  (pure:m ~)
-  ;<  ~  bind:m  (deliver-chain root i.q who known notes)
-  (drain-probe root who known t.q notes)
+  ;<  ~  bind:m  (deliver-chain root i.q who known)
+  (drain-probe root who known t.q)
 ::
 ::  +take-probe-done: the writer's half of a probe. Local only.
 ::
@@ -2721,10 +2283,12 @@
 ::
 ::    Then the hand-off. The fiber says how many of the queue it sent;
 ::    everything past that count arrived while it was draining and has
-::    never been near a wire, so it is re-sent HERE - where the record it
-::    needs is now fresh, so it takes the ordinary path. Culling the
-::    whole grub instead would have destroyed exactly those messages,
-::    and nothing would have reported it.
+::    never been near a wire, so it goes back to A FRESH FIBER - never
+::    out from here, because every delivery waits out +send-timeout for
+::    an ack grubbery does not return, and the writer is the ship's
+::    single serialisation point for mail. The fresh fiber finds the
+::    record just written and sends without asking again. Culling the
+::    whole queue instead would have destroyed exactly those messages.
 ::
 ::    ANSWERS %.n, AND THE BEACON IS THE REASON. A peer record is local
 ::    state no reader renders, and the ANSWER COMES FROM A PEER - a bump
@@ -2735,23 +2299,44 @@
   |=  [root=@ud r=probe-req:uc]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (ensure-dir root (peer-dir root))
-  ;<  ~  bind:m
-    %^  put-file  (peer-rail root who.r)  [/auspex %peer]
-    `peer-rec:uc`[%0 who.r answer.r asked.r]
-  =/  spoke=@t
-    ?~  answer.r
-      (rap 3 ~[(scot %p who.r) ' published no /proto'])
-    (rap 3 ~[(scot %p who.r) ' speaks ' (num-list:uc versions.u.answer.r)])
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip spoke)}"])
-  ;<  ~  bind:m  (note-at root %discovery 'discovery' & spoke)
+  ;<  ~  bind:m  (record-peer root [%0 who.r answer.r asked.r])
   ;<  held=(unit probe-req:uc)  bind:m  (read-probe root who.r)
   =/  rest=(list chain:uc)
     ?~  held  ~
     rest:(drain-queue:uc pending.u.held drained.r)
   ;<  ~  bind:m  (cull-if-there (probe-rail root who.r))
-  ;<  ~  bind:m  (drain-probe root who.r answer.r rest &)
+  ;<  ~  bind:m  (requeue root who.r rest)
   (pure:m |)
+::
+::  +record-peer: store what a probe learned. A CACHED ANSWER COMES
+::  BACK UNCHANGED from the fiber that used it, and writes nothing.
+::
+++  record-peer
+  |=  [root=@ud rec=peer-rec:uc]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  was=(unit peer-rec:uc)  bind:m  (read-peer root who.rec)
+  ?:  =(`rec was)  (pure:m ~)
+  ;<  ~  bind:m  (ensure-dir root peer-dir)
+  ;<  ~  bind:m  (put-file (peer-rail root who.rec) [/auspex %peer] rec)
+  =/  spoke=@t
+    ?~  proto.rec
+      (rap 3 ~[(scot %p who.rec) ' published no /proto'])
+    (rap 3 ~[(scot %p who.rec) ' speaks ' (num-list:uc versions.u.proto.rec)])
+  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip spoke)}"])
+  (note-at root %discovery 'discovery' & spoke)
+::
+::  +requeue: hand held chains to a fresh probe fiber. Writing the grub
+::  is the whole spawn.
+::
+++  requeue
+  |=  [root=@ud who=ship q=(list chain:uc)]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  q  (pure:m ~)
+  ;<  now=@da  bind:m  bowl-now
+  %^  put-file  (probe-rail root who)  [/auspex %probereq]
+  `probe-req:uc`[%0 who now q ~ 0]
 ::
 ::  +do-forget-peer: drop one discovery record.
 ::
@@ -2872,9 +2457,8 @@
     (put-file (blob-rail root hash.b) [/auspex %blob] [%1 u.res.b now])
   ::  we hold the bytes now, so we can serve them: a blob request is
   ::  answerable by ANYONE holding the bytes, not only the author,
-  ::  exactly as a chain is forwardable by anyone. That is also why
-  ::  restriction is unpublishing and not revocation - see $blob-vis.
-  ;<  ~  bind:m  (publish-blob root hash.b u.res.b |)
+  ::  exactly as a chain is forwardable by anyone.
+  ;<  ~  bind:m  (publish-blob root hash.b u.res.b)
   ;<  ~  bind:m  (note root 'fetch-blob' & (scot %uv hash.b))
   ::  %.n, AND THE BEACON IS THE REASON. +apply's answer is what moves
   ::  /beacon/rev, and a blob arrival is not message content: no
@@ -2893,120 +2477,6 @@
   ::  moment the next request asks for it.
   (pure:m |)
 ::
-::  ── per-attachment permission ───────────────────────────────────────
-::
-::  +do-restrict: withdraw a blob from the permissionless namespace.
-::
-::    A restricted blob is culled out of the scry farm, which is the only
-::    thing that actually stops an un-granted ship reading it: the farm
-::    has no weir on it at all. What remains is the grubbery peek road,
-::    which is deny-by-default for foreign ships and opens only through a
-::    usergroup, so the named ships are granted by adding this blob's own
-::    road to a group at /auspex/<hash>.
-::
-::    THE GROUP IS NOT CREATED HERE, and that is a platform limit rather
-::    than a choice. $registry-action carries no group-lifecycle op, so a
-::    nexus can only grant into a group that already exists; laying the
-::    group's own grubs by hand would mean a +make under
-::    /sys/ames/usergroups, and a veto there arrives as a %fail that
-::    crashes this writer - the one thing it must never do, because
-::    +rise-wait would then eat the next legitimate poke. So the grant is
-::    attempted and skipped quietly when the group is absent.
-::
-++  do-restrict
-  |=  [root=@ud h=@uv ships=(set ship)]
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ;<  have=(unit octs)  bind:m  (read-blob root h)
-  ?~  have  (reject root 'no such blob')
-  ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
-  =/  cur=blob-vis:uc  (~(gut by vis.ix) h [%public ~])
-  ::  cull ONLY from public. cull-farm is not idempotent: +farm-top's %gw
-  ::  lookup crashes on the emptied plot a previous cull left.
-  ;<  ~  bind:m  (unpublish-if-public root cur h)
-  ;<  ~  bind:m
-    %^  put-file  (vis-rail root)  [/auspex %blobvis]
-    ix(vis (~(put by vis.ix) h [%restricted ships]))
-  ;<  ~  bind:m  (grant-blob root h)
-  ;<  ~  bind:m  (note root 'restrict-blob' & (scot %uv h))
-  (pure:m &)
-::
-++  unpublish-if-public
-  |=  [root=@ud cur=blob-vis:uc h=@uv]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ?.  ?=(%public -.cur)  (pure:m ~)
-  ::  a cull is a poke at /sys/scry like a grow is, so it is behind the
-  ::  same road. Denied, the blob was never published in the first
-  ::  place - +publish-blob refused too - so there is nothing bound to
-  ::  withdraw and the record is still written by the caller.
-  ;<  may=?  bind:m  (may-scry root)
-  ?.  may  (pure:m ~)
-  (cull-farm:io (blob-spur:uc h))
-::
-::  +do-publish: put a restricted blob back in the permissionless
-::  namespace. It re-binds at a HIGHER case than 1, because the cull
-::  parked a high-water mark; +max-case-probe is what covers that.
-::
-++  do-publish
-  |=  [root=@ud h=@uv]
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ;<  have=(unit octs)  bind:m  (read-blob root h)
-  ?~  have  (reject root 'no such blob')
-  ;<  ix=blob-index:uc  bind:m  (read-blobvis root)
-  ::  GATED, and this gate is load-bearing rather than tidy. Publishing
-  ::  an already-public blob would %grow an already-bound spur, and
-  ::  +grow:of-farm assigns las+1 on a non-empty fan, so an
-  ::  idempotent-LOOKING "make public" pushes the binding one case
-  ::  higher every time it is pressed. Three presses put it past
-  ::  +max-case-probe and the attachment is unfetchable by every peer,
-  ::  forever, with no error - the fetcher just reports a miss. Cases
-  ::  only ever go up, so there is no recovery. Nothing may %grow a spur
-  ::  it has not first established is unbound.
-  =/  cur=blob-vis:uc  (~(gut by vis.ix) h [%public ~])
-  ?.  ?=(%restricted -.cur)
-    ;<  ~  bind:m  (note root 'publish-blob' & 'already public')
-    (pure:m |)
-  ;<  ~  bind:m
-    %^  put-file  (vis-rail root)  [/auspex %blobvis]
-    ix(vis (~(del by vis.ix) h))
-  ;<  ~  bind:m  (publish-blob root h u.have &)
-  ;<  ~  bind:m  (note root 'publish-blob' & (scot %uv h))
-  (pure:m &)
-::
-::  +grant-blob: give the named ships a peek road on one blob.
-::
-::    Per-attachment permission, expressed as one usergroup per content
-::    address. %how replaces this prefix's roads in THAT group wholesale,
-::    so a group per blob is also what keeps two restricted attachments
-::    from overwriting each other's grant.
-::
-++  grant-blob
-  |=  [root=@ud h=@uv]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  =/  grp=path  /auspex/[(scot %uv h)]
-  =/  gdir=path  (weld /sys/ames/usergroups/auspex /[(cat 3 (scot %uv h) '.grp')])
-  ;<  ok=?  bind:m  (exists-soft [%& %& gdir %'who.ships'])
-  ?.  ok
-    %-  trace:io
-    :_  ~
-    :-  %leaf
-    "auspex: no usergroup at {<grp>}, blob {<h>} is withdrawn but ungranted"
-  ::  soft for the same reason as +grant-public: a refused registry must
-  ::  not undo the withdrawal this arm has already recorded.
-  ;<  reg=(unit tang)  bind:m  (reg-register-at-soft:io writer-rail)
-  ?^  reg
-    %-  (slog leaf+"auspex: no registry road, blob {<h>} is ungranted" u.reg)
-    (pure:m ~)
-  ;<  how=(unit tang)  bind:m
-    %+  reg-how-soft:io  grp
-    [make=~ poke=~ peek=(sy ~[(blob-rail root h)])]
-  ?~  how  (pure:m ~)
-  %-  (slog leaf+"auspex: registry refused the grant for blob {<h>}" u.how)
-  (pure:m ~)
-::
 ::  ── slot writing ────────────────────────────────────────────────────
 ::
 ::  +write-msg: one copy, at its own node in the tree.
@@ -3021,7 +2491,7 @@
   |=  [root=@ud t=thread-id:uc place=(list msg-id:uc) mg=msg:uc v=verdict:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  =/  dir=path  (mdir root t)
+  =/  dir=path  (mdir t)
   =/  pax=path  (node-dir place)
   ;<  ~  bind:m  (ensure-nodes root dir (prefixes:uc pax))
   %^  put-file  (rf root (weld dir pax) (slot (id:uc unsigned.mg) sig.mg))
@@ -3096,7 +2566,7 @@
       ==
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  =/  dir=path  (mdir root t)
+  =/  dir=path  (mdir t)
   =/  wn=(set path)  (node-dirs:uc ~(tap in ~(key by want)))
   =/  stale=(set path)
     %-  ~(gas in *(set path))
@@ -3148,84 +2618,6 @@
     st.i.xs
   (put-slots up dir t.xs)
 ::
-::  ── the pre-tree migration ──────────────────────────────────────────
-::
-::  +migrate-flat: move a mailbox stored flat into the tree.
-::
-::    Before this layout every copy sat directly under msg/<slot>. Those
-::    grubs READ back perfectly - nothing outside the storage layer cares
-::    where a copy was filed, and +collect-slots keys them by a
-::    one-segment path - so this is a tidy, not a gate: a ship that
-::    somehow never ran it still shows all its mail.
-::
-::    IT IS A LAYOUT MIGRATION AND NOTHING ELSE, which is why it may
-::    happen in place at all. The two format breaks recorded in
-::    +read-stored could not, because a signature covers a shape and
-::    rewriting the shape turns genuine mail into apparent forgeries.
-::    Here every byte a signature covers is untouched: the same grub is
-::    written at a different path.
-::
-::    Runs once at writer rise, gated on a thread actually holding a flat
-::    copy, so a migrated ship pays one peek of /mail/thread per reload
-::    and writes nothing. +sync-slots does the work, so the migration and
-::    the delivery path cannot disagree about where a message goes.
-::
-::  REPORTING DOES NOT HAPPEN ON THE WRITER'S RISE.
-::
-::    An earlier draft counted the unreadable grubs from inside the rise
-::    sequence and noted the total. It is off that path now as policy,
-::    not because it was seen to misbehave: the writer rises ONCE and
-::    only then enters its take-poke loop, so anything added there that
-::    fails to return would leave every poke queued forever, with no
-::    crash, no restart and no print, since +rise-wait fires on failure
-::    and not on a hang. The rise does the minimum needed to serve, and
-::    a count that exists to inform a human is served from a REQUEST
-::    FIBER, where the worst case costs one HTTP connection instead of
-::    the ship's entire mail path. +unreadable-in is therefore called
-::    only from +serve-thread.
-::
-++  migrate-flat
-  |=  root=@ud
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
-  (migrate-loop root ~(tap by loaded))
-::
-++  migrate-loop
-  |=  [root=@ud ts=(list [t=thread-id:uc ss=(map path stored-msg:uc)])]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ?~  ts  (pure:m ~)
-  ;<  ~  bind:m  (migrate-one root t.i.ts ss.i.ts)
-  (migrate-loop root t.ts)
-::
-++  migrate-one
-  |=  [root=@ud t=thread-id:uc ss=(map path stored-msg:uc)]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ::  a one-segment path is a copy directly under msg/, which is what a
-  ::  pre-tree grub is and what a tree grub can never be.
-  ?.  (lien ~(tap in ~(key by ss)) |=(pk=path =(1 (lent pk))))
-    (pure:m ~)
-  ;<  *  bind:m
-    (sync-slots root t ss (want-slots (chain-of ss) (verdicts-of ss)))
-  (note root 'migrate' & (scot %uv t))
-::
-::  +record-bcc: the sender's own note of who it blind-copied.
-::
-::    Keyed by the message, kept in the thread's local meta, and never
-::    shipped. An empty set writes nothing, so an ordinary send does not
-::    grow the grub.
-::
-++  record-bcc
-  |=  [root=@ud t=thread-id:uc i=msg-id:uc bcc=(set ship)]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ?:  =(~ bcc)  (pure:m ~)
-  ;<  mt=meta:uc  bind:m  (read-meta root t)
-  %^  put-file  (meta-rail root t)  [/auspex %meta]
-  mt(bcc (~(put by bcc.mt) i bcc))
-::
 ::  +mark-direct: this thread reached us through a DELIVERY POKE.
 ::
 ::    The Inbox view is threads we participate in, and a BCC'd recipient
@@ -3268,56 +2660,29 @@
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  %^  put-file  (meta-rail root t)  [/auspex %meta]
-  mt(read ?:(rd (~(uni in read.mt) is) (~(dif in read.mt) is)))
+  =/  nex=(set msg-id:uc)  ?:(rd (~(uni in read.mt) is) (~(dif in read.mt) is))
+  ::  a mark that changes nothing writes nothing: a thread opened twice,
+  ::  or a relay echoing a mark back, is not a meta rewrite.
+  ?:  =(nex read.mt)  (pure:m ~)
+  (put-file (meta-rail root t) [/auspex %meta] mt(read nex))
 ::
 ++  touch-idx
   |=  [root=@ud t=thread-id:uc]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
-  %^  put-file  (rf root (mail-dir root) %idx)  [/auspex %idx]
+  %^  put-file  (rf root mail-dir %idx)  [/auspex %idx]
   ix(inbox [t (skip inbox.ix |=(o=thread-id:uc =(o t)))])
 ::
 ::  ── delivery out ────────────────────────────────────────────────────
 ::
 ++  fan-out
-  |=  [root=@ud c=chain:uc ws=(list ship)]
+  |=  [root=@ud c=chain:uc now=@da ws=(list ship)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  ws  (pure:m ~)
-  ;<  ~  bind:m  (send-one root c i.ws)
-  (fan-out root c t.ws)
-::
-::  +send-one: ASK WHAT THE PEER SPEAKS, THEN POKE IT.
-::
-::    NOTHING HERE KEENS, AND ON FIRST CONTACT NOTHING HERE POKES. The
-::    answer is read out of the cache - a peek of our own tree - and a
-::    peer we have no fresh answer for gets the chain HELD, not sent:
-::    see +enqueue-chain for why sending version 1 while the probe was
-::    still in flight made the "no common version" refusal unreachable
-::    on exactly the send it was written for.
-::
-::    A keen on the writer would queue every send, every inbound chain
-::    and every read-mark behind a network round trip, and a timed-out
-::    keen leaves a late response and a stray %veto to pile into a
-::    long-lived fiber's skip queue. That is +do-fetch-blob's argument
-::    and it is unchanged by what is being fetched.
-::
-::    So: a peer we know, we poke from here, now. A peer we do not, the
-::    ephemeral probe fiber pokes - or refuses - the moment it knows.
-::    Both go through +deliver-chain, which is the only place the
-::    decision is written down.
-::
-++  send-one
-  |=  [root=@ud c=chain:uc who=ship]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  now=@da  bind:m  bowl-now
-  ;<  rec=(unit peer-rec:uc)  bind:m  (read-peer root who)
-  =/  known=(unit proto:uc)  (known-proto rec now)
-  ?~  known  (enqueue-chain root c who now)
-  (deliver-chain root c who known &)
+  ;<  ~  bind:m  (enqueue-chain root c i.ws now)
+  (fan-out root c now t.ws)
 ::
 ::  +weir-json: every road auspex reaches outside its own tree, with the
 ::  reason a person would need to judge it.
@@ -3353,10 +2718,9 @@
           'verify a signature against the public key of the ship that sent it, sign the mail you send, and fetch attachments from other ships. This one road also carries the private key of this ship: signing needs it, and nothing narrower can be asked for today'
         ::  The registry WRITE, and it belongs beside the usergroup read
         ::  below rather than with the four above: same feature, same
-        ::  optionality. +grant-public and +grant-blob register this
-        ::  writer with the usergroup machinery and then lay their grant
-        ::  through its %how action, and both of those are pokes at
-        ::  /sys/ames/registry.
+        ::  optionality. +grant-public registers this writer with the
+        ::  usergroup machinery and then lays its grant through the %how
+        ::  action, and both of those are pokes at /sys/ames/registry.
         ::
         ::  It was missing, and a sandboxed install showed exactly why
         ::  that costs more than the feature: the key probe proved the
@@ -3368,7 +2732,7 @@
         ::  auspex was ever logged, because the one that mattered was
         ::  about a road auspex never asked for.
           %+  line  '/sys/ames/registry'
-          'publish this ship as somewhere mail can be delivered, and grant a recipient access to one attachment. Refuse this and you can still read and send; people just cannot reach you first'
+          'publish this ship as somewhere mail can be delivered. Refuse this and you can still read and send; people just cannot reach you first'
         ::  the peer mirror: another ship's auspex is a writer under
         ::  /sys/ames/ships/<ship>/root, and delivering mail is a poke at
         ::  it. Without this road the poke is vetoed at home, before it
@@ -3384,7 +2748,7 @@
       :-  'peek'
       :-  %a
       :~  %+  line  '/sys/ames/usergroups/'
-          'let other ships deliver mail to you, and let a recipient fetch an attachment you sent them. Without this you can still read and send; people cannot reach you first'
+          'let other ships deliver mail to you. Without this you can still read and send; people cannot reach you first'
       ==
   ==
 ::
@@ -3628,31 +2992,29 @@
 ::  writer is a busy fiber: an %auspex-chain poke queued while it was
 ::  mid-work must be skipped back to the loop, not stolen by a bowl read.
 ::
-++  bowl-our
-  =/  m  (fiber:fiber:nexus ,ship)
+++  bowl-ask
+  |=  [ask=?(%our %now) mark=@tas]
+  =/  m  (fiber:fiber:nexus ,vase)
   ^-  form:m
-  ;<  ~  bind:m  (poke:io &+&+[/sys %'bowl.sig'] [[/ %bowl-req] %our])
+  ;<  ~  bind:m  (poke:io &+&+[/sys %'bowl.sig'] [[/ %bowl-req] ask])
   |=  input:fiber:nexus
   :+  ~  q.state
   ?+  in  [%skip ~]
       ~  [%wait ~]
       [~ %poke * *]
-    ?.  =([/ %ship] p.sage.u.in)  [%skip ~]
-    [%done !<(ship q.sage.u.in)]
+    ?.  =([/ mark] p.sage.u.in)  [%skip ~]
+    [%done q.sage.u.in]
   ==
+::
+++  bowl-our
+  =/  m  (fiber:fiber:nexus ,ship)
+  ;<  v=vase  bind:m  (bowl-ask %our %ship)
+  (pure:m !<(ship v))
 ::
 ++  bowl-now
   =/  m  (fiber:fiber:nexus ,@da)
-  ^-  form:m
-  ;<  ~  bind:m  (poke:io &+&+[/sys %'bowl.sig'] [[/ %bowl-req] %now])
-  |=  input:fiber:nexus
-  :+  ~  q.state
-  ?+  in  [%skip ~]
-      ~  [%wait ~]
-      [~ %poke * *]
-    ?.  =([/ %time] p.sage.u.in)  [%skip ~]
-    [%done !<(@da q.sage.u.in)]
-  ==
+  ;<  v=vase  bind:m  (bowl-ask %now %time)
+  (pure:m !<(@da v))
 ::
 ::  +deadline: with-timeout, rebuilt from primitives every grubbery in the
 ::  fleet shares. +with-timeout:io's BODY is identical across the versions
@@ -3749,39 +3111,6 @@
 ++  writer-rail  ^-(rail:tarball [/ %'main.sig'])
 ++  nexus-root  ^-(@ud (lent req-dir))
 ::
-::  +is-owner: is this request really from the ship that owns us?
-::
-::    `authenticated.req` is eyre's own answer and should already imply
-::    this - it means the request carried a valid session for our
-::    owner's web login. This compares the `src` the request fiber was
-::    handed anyway, so the surface does not rest on one flag from one
-::    vane. Lattice rests on that flag alone; matching a reference
-::    implementation is not a reason to stop at it on a write surface.
-::
-::    ON EVERY ROUTE THAT TOUCHES MAIL, and on no other. `src` is in
-::    hand but `our` is not: getting it is a poke to /sys/bowl.sig and
-::    a reply, the round trip whose ~0.2s per request is recorded on
-::    the owner gate below. That is worth paying wherever the answer
-::    could be someone else's mail, and not worth paying anywhere else.
-::
-::    So: the three writes, and the two DATA READS - /api/inbox and
-::    /api/thread/<id> - which return the owner's mailbox. If
-::    `authenticated` could ever be true for a visiting ship those two
-::    would hand over the mail, and the cost of being wrong about that
-::    is not comparable to the cost of a bowl read.
-::
-::    NOT the shell or app.js. They are a static document and a static
-::    script, identical for every viewer, and 0.2s on each asset load
-::    buys nothing. /api/whoami is likewise only the answer `our`,
-::    which is what the check would fetch anyway.
-::
-++  is-owner
-  |=  src=@p
-  =/  m  (fiber:fiber:nexus ,?)
-  ^-  form:m
-  ;<  our=@p  bind:m  bowl-our
-  (pure:m =(our src))
-::
 ::  +handle-request: one HTTP request, on its own ephemeral fiber.
 ::
 ++  handle-request
@@ -3829,75 +3158,70 @@
   ::  the launcher tile's icon, and the manifest's. It is a NEXUS-ROOT
   ::  grub rather than one of the four under /app - the tiles nexus
   ::  pulls it from there through /grubbery/tiles/icon/auspex - so it
-  ::  needs a route of its own even though +serve-ui serves it. Without
-  ::  this arm the path +on-load's comment names 404s, which is what
-  ::  drove the manifest to carry the icon as a data: URI instead.
+  ::  needs a route of its own even though +serve-ui serves it.
   ?:  &(=(`path`[%'icon.svg' ~] suffix) =(%'GET' meth))
     (serve-ui eyre-id %'icon.svg')
-  ::  GET /api/thread/<id>: the id is the last segment, so this cannot
-  ::  sit in the table below, which keys on the whole suffix. The ?= comes
-  ::  FIRST in the &, so the branch can reach into the path it matched.
-  ?:  &(?=([%api %thread @ ~] suffix) =(%'GET' meth))
-    (serve-thread src eyre-id i.t.t.suffix)
-  ::  GET /api/blob/<hash>: THE ONLY ROUTE THAT ANSWERS ANYTHING BUT
-  ::  JSON, and the only one whose response body is not something this
-  ::  nexus wrote. Same shape as /api/thread/<id> and here for the same
-  ::  reason: the hash is the last segment, so it cannot sit in the
-  ::  table below, which keys on the whole suffix.
-  ?:  &(?=([%api %blob @ ~] suffix) =(%'GET' meth))
-    (serve-blob src eyre-id i.t.t.suffix args.parsed)
-  ::  the rest of the surface, keyed on the WHOLE suffix rather than on
-  ::  its last segment: /read and /api/read are different requests and
-  ::  only one of them is a route.
-  ?+    [meth suffix]
-    (send-err eyre-id 404 'not found')
-      [%'GET' [%api %whoami ~]]         (serve-whoami eyre-id)
+  ::  our own @p, which is what the mail gate below would fetch anyway.
+  ?:  &(=(`path`/api/whoami suffix) =(%'GET' meth))
+    (serve-whoami eyre-id)
+  ::  THE MAIL GATE, ONCE, FOR EVERY ROUTE BELOW. `authenticated` is
+  ::  eyre's answer and should already imply this; comparing the `src`
+  ::  the fiber was handed means the mailbox does not rest on one flag
+  ::  from one vane. It costs a /sys/bowl round trip, which is worth
+  ::  paying wherever the answer could be someone else's mail - and
+  ::  written here once, a route added later cannot ship without it.
+  ;<  our=@p  bind:m  bowl-our
+  ?.  =(our src)  (send-err eyre-id 403 'forbidden')
+  ?:  =(%'GET' meth)
+    ::  keyed on the WHOLE suffix: /read and /api/read are different
+    ::  requests and only one of them is a route.
+    ?+  suffix  (send-err eyre-id 404 'not found')
     ::  THE LISTING, AND EVERY VIEW IS THIS ONE ROUTE. Inbox, Sent,
     ::  Archived, a label and a search are the same walk over the same
-    ::  tree with a different predicate, so they are the same route with
-    ::  a different `view` - see +serve-inbox. Query args, not path
-    ::  segments, because a view plus a label plus a query plus an
-    ::  offset plus a limit in the path would be five positional
+    ::  tree with a different predicate - see +serve-inbox. Query args,
+    ::  not path segments, because a view plus a label plus a query plus
+    ::  an offset plus a limit in the path would be five positional
     ::  segments a client has to get in the right order.
-      [%'GET' [%api %inbox ~]]          (serve-inbox src eyre-id args.parsed)
-      [%'GET' [%api %drafts ~]]         (serve-drafts src eyre-id)
-      [%'GET' [%api %rules ~]]          (serve-rules src eyre-id)
-      [%'GET' [%api %lists ~]]          (serve-lists src eyre-id)
-      [%'POST' [%api %send ~]]          (do-web-send src eyre-id (req-body req))
-    ::  POST /api/blob: THE UPLOAD, and the only route whose REQUEST
-    ::  body is not JSON. The body is the file, byte for byte, and it
-    ::  is handed on as the $octs eyre already built - no decode, no
-    ::  copy, no encoding to undo. It is the pair to the GET above,
-    ::  which is the only route whose RESPONSE body is not JSON.
-      [%'POST' [%api %blob ~]]
-    (do-web-blob src eyre-id body.request.req)
-      [%'POST' [%api %read ~]]          (do-web-read src eyre-id (req-body req))
-      [%'POST' [%api %'fetch-blob' ~]]  (do-web-fetch src eyre-id (req-body req))
+        [%api %inbox ~]     (serve-inbox our eyre-id args.parsed)
+        [%api %thread @ ~]  (serve-thread eyre-id i.t.t.suffix)
+    ::  THE ONLY ROUTE THAT ANSWERS ANYTHING BUT JSON, and the only one
+    ::  whose response body is not something this nexus wrote.
+        [%api %blob @ ~]    (serve-blob eyre-id i.t.t.suffix args.parsed)
+        [%api %drafts ~]    (serve-drafts eyre-id)
+        [%api %rules ~]     (serve-rules eyre-id)
+        [%api %lists ~]     (serve-lists eyre-id)
+    ==
+  ?.  =(%'POST' meth)  (send-err eyre-id 404 'not found')
+  ::  POST /api/blob: THE UPLOAD, and the only route whose REQUEST body
+  ::  is not JSON. The body is the file, byte for byte, handed on as the
+  ::  $octs eyre already built - no decode, no copy, no encoding to undo.
+  ?:  =(`path`/api/blob suffix)
+    (do-web-blob eyre-id body.request.req)
+  ::  every other write is a JSON object, parsed once, here.
+  =/  jon=(unit json)  (de:json:html (req-body req))
+  ?~  jon  (send-err eyre-id 400 'not json')
+  ?+  suffix  (send-err eyre-id 404 'not found')
+      [%api %send ~]             (do-web-send eyre-id u.jon)
+      [%api %read ~]             (do-web-mark eyre-id u.jon &)
+      [%api %unread ~]           (do-web-mark eyre-id u.jon |)
+      [%api %'fetch-blob' ~]     (do-web-fetch eyre-id u.jon)
     ::  forget one discovery record, so the next send re-probes. The
     ::  user-facing half of +proto-refusal-ttl: a cap refusal is not
     ::  derivable from the record alone, so it keeps the ordinary TTL
     ::  and this is the way out of it.
-      [%'POST' [%api %'forget-peer' ~]]
-    (do-web-forget src eyre-id (req-body req))
-      [%'POST' [%api %unread ~]]        (do-web-unread src eyre-id (req-body req))
-      [%'POST' [%api %label ~]]         (do-web-label src eyre-id (req-body req))
-      [%'POST' [%api %archive ~]]       (do-web-archive src eyre-id (req-body req))
-      [%'POST' [%api %draft ~]]         (do-web-draft src eyre-id (req-body req))
-      [%'POST' [%api %'draft-delete' ~]]
-    (do-web-id src eyre-id (req-body req) %delete-draft)
-      [%'POST' [%api %'draft-send' ~]]
-    (do-web-draft-send src eyre-id (req-body req))
-      [%'POST' [%api %rule ~]]          (do-web-rule src eyre-id (req-body req))
-      [%'POST' [%api %'rule-delete' ~]]
-    (do-web-id src eyre-id (req-body req) %delete-rule)
+      [%api %'forget-peer' ~]    (do-web-forget eyre-id u.jon)
+      [%api %label ~]            (do-web-label eyre-id u.jon)
+      [%api %archive ~]          (do-web-archive eyre-id u.jon)
+      [%api %draft ~]            (do-web-draft eyre-id u.jon)
+      [%api %'draft-delete' ~]   (do-web-id eyre-id u.jon %delete-draft)
+      [%api %rule ~]             (do-web-rule eyre-id u.jon)
+      [%api %'rule-delete' ~]    (do-web-id eyre-id u.jon %delete-rule)
     ::  ONE VERB FOR A LIST. Create, overwrite, add a member, drop one,
     ::  rename by re-saving and copy the membership off a message are
     ::  all this POST, because a list is a name and a set of ships.
-      [%'POST' [%api %list ~]]          (do-web-list src eyre-id (req-body req))
-      [%'POST' [%api %'list-delete' ~]]
-    (do-web-list-delete src eyre-id (req-body req))
-      [%'POST' [%api %'delete-thread' ~]]
-    (do-web-delete src eyre-id (req-body req))
+      [%api %list ~]             (do-web-list our eyre-id u.jon)
+      [%api %'list-delete' ~]    (do-web-list-delete eyre-id u.jon)
+      [%api %'delete-thread' ~]  (do-web-delete eyre-id u.jon)
   ==
 ::
 ::  ── the client, as grubs ────────────────────────────────────────────
@@ -3988,14 +3312,9 @@
 ::    inbox, not the inbox-shaped subset of the first fifty threads.
 ::
 ++  serve-inbox
-  |=  [src=@p eyre-id=@ta args=quay:eyre]
+  |=  [our=@p eyre-id=@ta args=quay:eyre]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ::  `our` in hand, not just the owner answer: Inbox and Sent are both
-  ::  questions about us, so the bowl read the owner gate pays for is
-  ::  the same one those two views need.
-  ;<  our=@p  bind:m  bowl-our
-  ?.  =(our src)  (send-err eyre-id 403 'forbidden')
   =/  view=@t   (fall (arg args 'view') 'inbox')
   =/  q=@t      (fall (arg args 'q') '')
   =/  lab=@t    (fall (arg args 'label') '')
@@ -4004,22 +3323,26 @@
   =/  lim=@ud   (min max-page:uc (fall (arg-ud args 'limit') 50))
   =/  root=@ud  nexus-root
   ;<  ix=mail-idx:uc  bind:m  (read-idx root)
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (thread-dir root)) ~)
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root thread-dir) ~)
   =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
-  =/  loaded  (collect-threads b)
-  =/  metas   (collect-metas b)
-  =/  lost    (collect-unreadable b)
+  =/  rows=(map thread-id:uc row)  (collect-rows b)
   =/  keep=(list thread-id:uc)
     %+  skim  inbox.ix
-    |=(t=thread-id:uc (in-view our view lab q t loaded metas lost))
+    |=(t=thread-id:uc (in-view our view lab q (~(get by rows) t)))
   =/  jon=json
     %-  pairs:enjs:format
     :~  ['total' (numb:enjs:format (lent keep))]
         ['offset' (numb:enjs:format off)]
         ['limit' (numb:enjs:format lim)]
         ['view' [%s view]]
-        :-  'threads'
-        (inbox-json (page:uc keep off lim) loaded metas lost q)
+      ::  WHAT THE SIDEBAR SHOWS, WHATEVER VIEW IS OPEN: the Inbox's
+      ::  unread count and every label in use. Out of the same walk, so
+      ::  the client needs no second listing of everything to draw them -
+      ::  and neither stops at a page size, which a client's count off the
+      ::  rows it holds did.
+        ['unread' (numb:enjs:format (inbox-unread our rows))]
+        ['labels' (sorted-labels (all-labels rows))]
+        ['threads' (inbox-json (page:uc keep off lim) rows q)]
     ==
   (send-json eyre-id jon)
 ::
@@ -4062,23 +3385,14 @@
 ::    cannot read and saying we did would be a lie.
 ::
 ++  in-view
-  |=  $:  our=@p
-          view=@t
-          lab=@t
-          q=@t
-          t=thread-id:uc
-          loaded=(map thread-id:uc (map path stored-msg:uc))
-          metas=(map thread-id:uc meta:uc)
-          lost=(map thread-id:uc @ud)
-      ==
+  |=  [our=@p view=@t lab=@t q=@t r=(unit row)]
   ^-  ?
-  =/  ss=(map path stored-msg:uc)  (~(gut by loaded) t ~)
-  =/  n=@ud  (~(gut by lost) t 0)
   ::  the index names a thread with nothing at all under it: a stale
   ::  entry, which +inbox-json also drops.
-  ?:  &(=(~ ss) =(0 n))  |
-  =/  mt=meta:uc  (~(gut by metas) t *meta:uc)
-  ?:  =(~ ss)
+  ?~  r  |
+  ?:  &(=(~ ss.u.r) =(0 lost.u.r))  |
+  =/  mt=meta:uc  mt.u.r
+  ?:  =(~ ss.u.r)
     ::  unreadable-only. No chain, so no participants, no authorship and
     ::  no searchable text.
     ?&  =('' q)
@@ -4089,7 +3403,7 @@
           %label     (~(has in labels.mt) `@tas`lab)
         ==
     ==
-  =/  c=chain:uc  (chain-of ss)
+  =/  c=chain:uc  c.u.r
   ?&  ?+  view  |
         %inbox     (in-inbox:uc our c archived.mt direct.mt)
         %sent      (in-sent:uc our c)
@@ -4110,50 +3424,23 @@
 ::    prevent.
 ::
 ++  serve-drafts
-  |=  [src=@p eyre-id=@ta]
+  |=  [eyre-id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  root=@ud  nexus-root
   ;<  ds=(list draft:uc)  bind:m  (read-drafts root)
   ::  newest first, matching the listing's order.
   =/  sorted=(list draft:uc)
     (sort ds |=([a=draft:uc b=draft:uc] (gth at.a at.b)))
-  %+  send-json  eyre-id
-  :-  %a
-  %+  turn  sorted
-  |=  d=draft:uc
-  ^-  json
-  %-  pairs:enjs:format
-  :~  ['id' [%s (scot %uv id.d)]]
-      ['to' [%a (turn ~(tap in to.d) |=(w=@p `json`[%s (scot %p w)]))]]
-      ['subject' [%s subject.d]]
-      ['body' [%s body.d]]
-      ['prev' ?~(prev.d ~ [%s (scot %uv u.prev.d)])]
-      ['at' (time:enjs:format at.d)]
-  ==
+  (send-json eyre-id [%a (turn sorted draft-json:uc)])
 ::
 ++  serve-rules
-  |=  [src=@p eyre-id=@ta]
+  |=  [eyre-id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  root=@ud  nexus-root
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
-  %+  send-json  eyre-id
-  :-  %a
-  %+  turn  rs
-  |=  r=rule:uc
-  ^-  json
-  %-  pairs:enjs:format
-  :~  ['id' [%s (scot %uv id.r)]]
-      ['from' ?~(from.r ~ [%s (scot %p u.from.r)])]
-      ['subject' ?~(subject.r ~ [%s u.subject.r])]
-      ['add' [%a (turn ~(tap in add.r) |=(l=@tas `json`[%s l]))]]
-      ['archive' [%b archive.r]]
-  ==
+  (send-json eyre-id [%a (turn rs rule-json:uc)])
 ::
 ::  +serve-lists: every mailing list, SORTED BY NAME.
 ::
@@ -4166,11 +3453,9 @@
 ::    goes no further - see mar/auspex/list.
 ::
 ++  serve-lists
-  |=  [src=@p eyre-id=@ta]
+  |=  [eyre-id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  root=@ud  nexus-root
   ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
   =/  sorted=(list [name=@t members=(set @p)])
@@ -4184,28 +3469,27 @@
   ^-  json
   %-  pairs:enjs:format
   :~  ['name' [%s name.l]]
-      ['members' [%a (turn ~(tap in members.l) |=(w=@p `json`[%s (scot %p w)]))]]
+      ['members' (ships-json:uc members.l)]
   ==
 ::
 ::  +serve-thread: one thread, every stored copy with its own verdict.
 ::
 ++  serve-thread
-  |=  [src=@p eyre-id=@ta seg=@ta]
+  |=  [eyre-id=@ta seg=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  (send-err eyre-id 400 'bad thread id')
   =/  root=@ud  nexus-root
-  ::  one peek, walked twice: once for the copies a reader can produce
-  ::  and once for the ones it cannot. The second number is what stops
-  ::  a thread holding only pre-break grubs from rendering as an empty
-  ::  thread with no explanation - see +unreadable-in.
-  ;<  vw=view:nexus  bind:m  (peek:io (rv root (tdir root u.t)) ~)
+  ::  one peek, one walk: the copies a reader can produce and the count
+  ::  it cannot. The second number is what stops a thread holding only
+  ::  pre-break grubs from rendering as an empty thread with no
+  ::  explanation - see +slots-of.
+  ;<  vw=view:nexus  bind:m  (peek:io (rv root (tdir u.t)) ~)
   =/  b=ball:tarball  ?:(?=([%ball *] vw) ball.vw *ball:tarball)
-  =/  ss=(map path stored-msg:uc)  (collect-slots b)
-  =/  lost=@ud  (unreadable-in b)
+  =/  w  (slots-of b)
+  =/  ss=(map path stored-msg:uc)  ss.w
+  =/  lost=@ud  lost.w
   ::  an empty thread dir and an absent one are the same thing to a
   ::  reader. The client turns this 404 into "no longer exists", which is
   ::  what a thread deleted in another tab actually is. A thread whose
@@ -4255,11 +3539,9 @@
 ::    would guess a type we deliberately did not give it.
 ::
 ++  serve-blob
-  |=  [src=@p eyre-id=@ta seg=@ta args=quay:eyre]
+  |=  [eyre-id=@ta seg=@ta args=quay:eyre]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
   =/  h=(unit @uv)  (slaw %uv seg)
   ?~  h  (send-err eyre-id 400 'bad hash')
   =/  root=@ud  nexus-root
@@ -4278,43 +3560,85 @@
       ==
   `u.got
 ::
-::  +collect-unreadable: per thread, how many copies this build cannot
-::  read - out of the same deep peek +collect-threads already walks.
+::  $row: one thread as the listing needs it, built ONCE per request.
 ::
-::    Only threads with a nonzero count appear, so an ordinary mailbox
-::    produces an empty map and the listing pays nothing for it.
+::    The listing, its page, the Inbox's unread count and the label union
+::    all ask about every thread, and each question used to rebuild the
+::    chain - a sort and a +sham per message - and re-read the meta. One
+::    walk of the deep peek now builds each thread's chain, verdicts and
+::    meta once, and every question reads them.
 ::
-++  collect-unreadable
++$  row
+  $:  ss=(map path stored-msg:uc)
+      c=chain:uc
+      vs=(map [msg-id:uc @ux] verdict:uc)
+      lost=@ud
+      mt=meta:uc
+  ==
+::
+++  collect-rows
   |=  b=ball:tarball
-  ^-  (map thread-id:uc @ud)
-  %-  ~(gas by *(map thread-id:uc @ud))
+  ^-  (map thread-id:uc row)
+  %-  ~(gas by *(map thread-id:uc row))
   %+  murn  ~(tap by dir.b)
   |=  [seg=@ta kid=ball:tarball]
-  ^-  (unit [thread-id:uc @ud])
+  ^-  (unit [thread-id:uc row])
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  ~
-  =/  n=@ud  (unreadable-in kid)
-  ?:(=(0 n) ~ `[u.t n])
+  =/  w  (slots-of kid)
+  `[u.t [ss.w (chain-of ss.w) (verdicts-of ss.w) lost.w (fall (meta-of kid) *meta:uc)]]
 ::
-::  +collect-metas: every thread's meta leaf, out of the same deep peek
-::  +collect-threads walks for message grubs.
+::  +meta-of: a thread's meta leaf, out of the thread's own ball, through
+::  the same ladder +read-meta uses - so the listing and the thread view
+::  cannot disagree about an old meta's labels and archive flag.
 ::
-++  collect-metas
-  |=  b=ball:tarball
-  ^-  (map thread-id:uc meta:uc)
-  %-  ~(gas by *(map thread-id:uc meta:uc))
-  %+  murn  ~(tap by dir.b)
-  |=  [seg=@ta kid=ball:tarball]
-  ^-  (unit [thread-id:uc meta:uc])
-  =/  t=(unit @uv)  (slaw %uv seg)
-  ?~  t  ~
+++  meta-of
+  |=  kid=ball:tarball
+  ^-  (unit meta:uc)
   ?~  fil.kid  ~
   =/  c=(unit [=sang:tarball gain=? bang=(unit tang)])
     (~(get by contents.u.fil.kid) %meta)
   ?~  c  ~
   ?:  (is-boom:tarball sang.u.c)  ~
-  =/  res  (mule |.(;;(meta:uc (sang-noun:tarball sang.u.c))))
-  ?:(?=(%| -.res) ~ `[u.t p.res])
+  (meta-from-noun:uc (sang-noun:tarball sang.u.c))
+::
+::  +row-unread: does this thread hold a message nobody has read?
+::
+::    The spec is explicit that %forged messages "are never counted as
+::    unread and never sort into the normal inbox flow", so a count that
+::    included them would let one poke bold every row.
+::
+++  row-unread
+  |=  r=row
+  ^-  ?
+  %+  lien  c.r
+  |=  m=msg:uc
+  =/  i=msg-id:uc  (id:uc unsigned.m)
+  ?&  !=(%forged (~(gut by vs.r) [i sig.m] %unverified))
+      !(~(has in read.mt.r) i)
+  ==
+::
+++  inbox-unread
+  |=  [our=@p rows=(map thread-id:uc row)]
+  ^-  @ud
+  %-  lent
+  %+  skim  ~(val by rows)
+  |=  r=row
+  &((in-inbox:uc our c.r archived.mt.r direct.mt.r) (row-unread r))
+::
+::  +all-labels: every label in use. A label exists exactly as long as
+::  some thread carries it, so this is the whole label registry.
+::
+++  all-labels
+  |=  rows=(map thread-id:uc row)
+  ^-  (set @tas)
+  %+  roll  ~(val by rows)
+  |=([r=row acc=(set @tas)] (~(uni in acc) labels.mt.r))
+::
+++  sorted-labels
+  |=  ls=(set @tas)
+  ^-  json
+  [%a (turn (sort ~(tap in ls) aor) |=(l=@tas `json`[%s l]))]
 ::
 ::  ── json ────────────────────────────────────────────────────────────
 ::
@@ -4334,7 +3658,7 @@
   %-  pairs:enjs:format
   :~  ['id' [%s (scot %uv i)]]
       ['from' [%s (scot %p from.unsigned.m)]]
-      ['to' [%a (turn ~(tap in to.unsigned.m) |=(s=ship [%s (scot %p s)]))]]
+      ['to' (ships-json:uc to.unsigned.m)]
       ['subject' [%s subj.unsigned.m]]
       ['body' [%s body.unsigned.m]]
     ::  the author's rendering instruction, signed and therefore
@@ -4372,17 +3696,7 @@
     ::  holding them can serve them, and bytes that do not hash to it
     ::  are discarded. `size` is tied to it - the hash is over octs, so
     ::  a lie about the size is a lie about the address.
-      :-  'attachments'
-      :-  %a
-      %+  turn  attachments.unsigned.m
-      |=  a=attachment:uc
-      ^-  json
-      %-  pairs:enjs:format
-      :~  ['name' [%s name.a]]
-          ['size' (numb:enjs:format size.a)]
-          ['mime' [%s mime.a]]
-          ['hash' [%s (scot %uv hash.a)]]
-      ==
+      ['attachments' [%a (turn attachments.unsigned.m attachment-json:uc)]]
     ::  THE VERDICT IS PER MESSAGE, never per thread. A thread holding one
     ::  unverified message is not an unverified thread, and this field is
     ::  the whole product claim reaching the screen.
@@ -4400,7 +3714,7 @@
   %-  pairs:enjs:format
   :~  ['id' [%s (scot %uv t)]]
       ['messages' [%a (turn c |=(m=msg:uc (msg-json vs read.mt m)))]]
-      ['participants' [%a (turn ~(tap in (participants:uc c)) |=(s=ship [%s (scot %p s)]))]]
+      ['participants' (ships-json:uc (participants:uc c))]
       ['last' (time:enjs:format (last-sent:uc c))]
     ::  copies stored here that THIS BUILD cannot read - grubs written
     ::  under a pre-body-mime shape, refused rather than relabelled by
@@ -4412,7 +3726,7 @@
     ::  every field below and still agree, byte for byte, about who
     ::  signed what.
       ['archived' [%b archived.mt]]
-      ['labels' [%a (turn ~(tap in labels.mt) |=(l=@tas `json`[%s l]))]]
+      ['labels' (labels-json:uc labels.mt)]
   ==
 ::
 ::  +inbox-json: the listing. Deliberately not the full chains - the list
@@ -4424,9 +3738,7 @@
 ::
 ++  inbox-json
   |=  $:  order=(list thread-id:uc)
-          loaded=(map thread-id:uc (map path stored-msg:uc))
-          metas=(map thread-id:uc meta:uc)
-          lost=(map thread-id:uc @ud)
+          rows=(map thread-id:uc row)
         ::  the search term, '' for an ordinary listing. It reaches
         ::  +entry-json because a search row must be drawn from the
         ::  message that MATCHED, not from the newest honest copy - see
@@ -4438,8 +3750,8 @@
   %+  murn  order
   |=  t=thread-id:uc
   ^-  (unit json)
-  =/  ss=(map path stored-msg:uc)  (~(gut by loaded) t ~)
-  =/  n=@ud  (~(gut by lost) t 0)
+  =/  r=(unit row)  (~(get by rows) t)
+  ?~  r  ~
   ::  A THREAD WITH NO READABLE COPY STILL GETS A ROW, as long as
   ::  something is actually stored under it. After the %1 refusal that
   ::  is reachable on any ship carrying pre-freeze mail: every copy is
@@ -4448,9 +3760,9 @@
   ::  listing while its meta and its /mail/idx entry survived. That is
   ::  the silent disappearance this build exists to stop saying
   ::  nothing about, so the row says it instead.
-  ?:  =(~ ss)
-    ?:(=(0 n) ~ `(unreadable-entry-json t n (~(gut by metas) t *meta:uc)))
-  `(entry-json t ss (~(gut by metas) t *meta:uc) n q)
+  ?:  =(~ ss.u.r)
+    ?:(=(0 lost.u.r) ~ `(unreadable-entry-json t lost.u.r mt.u.r))
+  `(entry-json t u.r q)
 ::
 ::  +unreadable-entry-json: the row for a thread this build cannot read
 ::  a single message of.
@@ -4478,14 +3790,15 @@
     ::  the row shape is uniform across both branches, so a client never
     ::  has to ask which kind of row it is holding before reading a field.
       ['archived' [%b archived.mt]]
-      ['labels' [%a (turn ~(tap in labels.mt) |=(l=@tas `json`[%s l]))]]
+      ['labels' (labels-json:uc labels.mt)]
   ==
 ::
 ++  entry-json
-  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc lost=@ud q=@t]
+  |=  [t=thread-id:uc r=row q=@t]
   ^-  json
-  =/  c=chain:uc  (chain-of ss)
-  =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
+  =/  c=chain:uc  c.r
+  =/  vs=(map [msg-id:uc @ux] verdict:uc)  vs.r
+  =/  mt=meta:uc  mt.r
   ::  the list view is the surface a user scans fastest, and every field
   ::  on it is attacker-chosen: anyone may poke a one-message chain
   ::  claiming from=~zod, subject='Password reset' with a `sent` far in the
@@ -4514,16 +3827,7 @@
   ::  one it found and carries that copy's verdict, so a forged hit
   ::  reads FORGED.
   =/  picked=(unit msg:uc)  (newest-match:uc q c)
-  =/  newest=msg:uc  ?^(picked u.picked ?~(honest (rear c) (rear honest)))
-  ::  the spec is explicit that %forged messages "are never counted as
-  ::  unread and never sort into the normal inbox flow", so an unread
-  ::  count that included them would let one poke bold every row.
-  =/  unread=?
-    %+  lien  c
-    |=  m=msg:uc
-    ?&  !=(%forged (~(gut by vs) [(id:uc unsigned.m) sig.m] %unverified))
-        !(~(has in read.mt) (id:uc unsigned.m))
-    ==
+  =/  newest=msg:uc  ?^(picked u.picked ?~(honest (rear c) (best-copy vs honest)))
   %-  pairs:enjs:format
   :~  ['id' [%s (scot %uv t)]]
       ['subject' [%s subj.unsigned.newest]]
@@ -4539,17 +3843,34 @@
     ::  that a message count would be a lie told by the safety mechanism.
       ['count' (numb:enjs:format (lent c))]
       ['last' (time:enjs:format (last-sent:uc c))]
-      ['unread' [%b unread]]
-      ['participants' [%a (turn ~(tap in (participants:uc c)) |=(s=ship [%s (scot %p s)]))]]
+      ['unread' [%b (row-unread r)]]
+      ['participants' (ships-json:uc (participants:uc c))]
     ::  copies stored here that this build cannot read. Usually 0; a row
     ::  can be partly readable, which is why the count rides on the
     ::  ordinary row too and not only on the placeholder one.
-      ['unreadable' (numb:enjs:format lost)]
+      ['unreadable' (numb:enjs:format lost.r)]
     ::  local state, so the sidebar can show which view a row is in
     ::  without a second request per row.
       ['archived' [%b archived.mt]]
-      ['labels' [%a (turn ~(tap in labels.mt) |=(l=@tas `json`[%s l]))]]
+      ['labels' (labels-json:uc labels.mt)]
   ==
+::
+::  +best-copy: which copy of the thread's newest honest message speaks
+::  for the row. Copies of one id carry the same words and differ only in
+::  signature, so the one to show is a %verified one when there is one:
+::  the last copy in sort order is ordered by signature bytes, which says
+::  nothing about which one checked. `c` is non-empty.
+::
+++  best-copy
+  |=  [vs=(map [msg-id:uc @ux] verdict:uc) c=chain:uc]
+  ^-  msg:uc
+  =/  top=msg:uc  (rear c)
+  =/  i=msg-id:uc  (id:uc unsigned.top)
+  =/  good=chain:uc
+    %+  skim  c
+    |=  m=msg:uc
+    &(=(i (id:uc unsigned.m)) =(%verified (~(gut by vs) [i sig.m] %unverified)))
+  ?~(good top (rear good))
 ::
 ::  ── writes ──────────────────────────────────────────────────────────
 ::
@@ -4572,146 +3893,83 @@
 ::  that tells them apart, here as everywhere else.
 ::
 ++  do-web-send
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  req=(unit send-req:uw)  (de-send:uw u.jon)
+  =/  req=(unit send-req:uw)  (de-send:uw jon)
   ?~  req  (send-err eyre-id 400 'bad send')
+  ::  ATTACHMENTS, AND NOT ONE BYTE OF THEM. Each entry names a blob
+  ::  this ship already holds, because the browser uploaded it to
+  ::  POST /api/blob first. Decoded off the SAME json object rather than
+  ::  out of $send-req, so a client that sends no `attachments` key
+  ::  decodes exactly as it always did. A key that is present and wrong
+  ::  is a 400: that is a client that meant to attach something and did
+  ::  not, and answering ok would be a lie.
+  =/  rs=(unit (list up-ref:uw))  (de-refs:uw jon max-attach:uc)
+  ?~  rs  (send-err eyre-id 400 'bad attachment')
+  =/  refs=(list attach-ref:uc)  u.rs
+  ::  EVERYTHING THIS ROUTE CAN REFUSE IS REFUSED HERE, BEFORE THE WRITER
+  ::  TAKES THE POKE. The route answers as soon as the writer takes it,
+  ::  because waiting for the apply would hold the connection across the
+  ::  fan-out, and the cost of that split is a lie wherever a check lives
+  ::  only on the writer: a send the writer refuses writes its reason to
+  ::  /tr/last, while the route has already answered 200 and the
+  ::  composer has closed on the message. So every check that depends
+  ::  only on the request is made here, from the same lib arms +do-send
+  ::  uses. The writer still makes them all - a route check is not a
+  ::  substitute for one at the point of use.
   =/  root=@ud  nexus-root
-  ::  THE KEY ROAD, CHECKED HERE, WHERE THE COMPOSER IS STILL OPEN.
-  ::
-  ::    +do-send-core refuses this send on the writer too, with the same
-  ::    words, and that check is the real one. But this route answers as
-  ::    soon as the writer TAKES the poke, so a refusal that happened
-  ::    only there would be a composed message destroyed behind a 200 -
-  ::    the exact failure the caps checks below were added to stop,
-  ::    arriving through a different door. Answered here, the composer
-  ::    stays open with its content and its files, exactly as it does
-  ::    when the ship is unreachable.
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
     %^  send-err  eyre-id  400
     'this ship cannot sign mail: Auspex has not been granted the key road'
-  ::  THE CAPS, CHECKED HERE, WHERE THE ANSWER CAN STILL BE NO.
-  ::
-  ::    This route pokes the writer and answers as soon as the writer
-  ::    takes the poke, because waiting for the apply would hold the
-  ::    connection across a fan-out that carries a twenty-second
-  ::    deadline per recipient. The cost of that split was a lie: a
-  ::    send +do-send refuses wrote its reason to /tr/last and returned,
-  ::    while the route had already answered 200 {"ok":true}. A body one
-  ::    byte over max-body was a composed message silently destroyed,
-  ::    with no draft to recover it - and the composer's own maxLength
-  ::    cannot catch it, because that counts UTF-16 units and the cap
-  ::    counts BYTES.
-  ::
-  ::    "No delivery receipts" is a deliberate limit about REMOTE
-  ::    delivery. This was the ship refusing its owner's own message and
-  ::    saying yes, which is a different thing entirely.
-  ::
-  ::    Every cap that depends only on the request is checked here, from
-  ::    the same lib arms +do-send uses, so the two cannot drift. The
-  ::    writer still checks them all: this route is not the only caller,
-  ::    and a check on the boundary is not a substitute for a check at
-  ::    the point of use.
-  ::    `from`, `life`, `sent` and the signature are bunted: not one of
-  ::    the three predicates below reads them, and inventing values the
-  ::    writer will overwrite would be the drift this shares arms to
-  ::    avoid.
-  =/  one=chain:uc
-    ~[[[*@p 0 to.u.req subject.u.req body.u.req '' *@da prev.u.req ~] 0x0]]
-  ?.  (fits-bodies:uc one max-body:uc)
-    (send-err eyre-id 400 'body too long')
-  ?.  (fits-subjects:uc one max-subj:uc)
-    (send-err eyre-id 400 'subject too long')
-  ?.  (fits-recipients:uc one max-to:uc)
-    (send-err eyre-id 400 'too many recipients')
-  ::  ATTACHMENTS, AND NOT ONE BYTE OF THEM. Each entry names a blob
-  ::  this ship already holds, because the browser uploaded it to
-  ::  POST /api/blob first. Decoded off the SAME json object rather than
-  ::  out of $send-req, so a client that sends no `attachments` key -
-  ::  which is this one on a send with nothing attached - decodes
-  ::  exactly as it always did. A key that is present and wrong is a
-  ::  400: that is a client that meant to attach something and did not,
-  ::  and answering ok would be the same lie the cap checks above exist
-  ::  to stop.
-  =/  rs=(unit (list up-ref:uw))  (de-refs:uw u.jon max-attach:uc)
-  ?~  rs  (send-err eyre-id 400 'bad attachment')
-  =/  refs=(list attach-ref:uc)  u.rs
-  ::  the count and the two hostile strings, from the same lib arm the
-  ::  writer's +attaches-ok shares. `size` is NOT checked here: a ref
-  ::  does not carry one, reading it off the store costs a peek of the
-  ::  bytes per file, and the upload route already refused anything
+  ::  THE CAPS. The composer's own maxLength cannot catch the body one,
+  ::  because that counts UTF-16 units and the cap counts BYTES. `from`,
+  ::  `life`, `sent` and the signature are bunted: no predicate here
+  ::  reads them. The attachment sizes are 0 for the same reason - a
+  ::  ref carries no size, and the upload route already refused anything
   ::  over max-blob with a 413 before it stored a thing.
-  ?.  (refs-ok:uc refs)  (send-err eyre-id 400 'bad attachment')
-  ::  EVERY REF NAMES A BLOB WE HOLD, CHECKED HERE SO THE ANSWER CAN
-  ::  STILL BE NO. This route pokes the writer and answers as soon as
-  ::  the poke is taken, so a ref the writer cannot resolve would be a
-  ::  composed message destroyed silently behind a 200 - the exact
-  ::  failure the cap checks above were added to stop, arriving through
-  ::  a different door. Naming the hash is the point: "unknown
-  ::  attachment" alone tells a person nothing about which file went
-  ::  missing. +peek-exists and not +blob-size, because existence is
-  ::  all this needs and the writer has to read the blob anyway.
-  ;<  missing=(unit @uv)  bind:m  (first-unheld root refs)
-  ?^  missing
-    %^  send-err  eyre-id  400
-    (rap 3 ~['unknown attachment ' (scot %uv u.missing)])
-  ::  body-mime='' is 'text/plain', which is what this composer produces
-  ::  and the only thing the client renders. bcc=~: no BCC field exists
-  ::  in the web client yet, and it is absent from $send-req rather than
-  ::  defaulted there, so a client cannot set it by accident through a
-  ::  route that has no UI behind it.
-  ::  DISCOVERY, CHECKED HERE, WHERE THE ANSWER CAN STILL BE NO.
-  ::
-  ::    Every cap above is about what THIS ship will carry. These two are
-  ::    about what the RECIPIENT will carry, and they are the reason
-  ::    /proto exists: a poke of a mark the far end does not hold parks,
-  ::    and a send over the far end's caps is dropped there, and both of
-  ::    them look from here exactly like a ship that is offline.
-  ::
-  ::    FROM THE CACHE ONLY. This fiber does not keen: a send may name
-  ::    max-to (100) recipients, and a probe per unknown one would put
-  ::    up to a hundred sequential ten-second round trips on the
-  ::    connection the composer is waiting on. The writer spawns the
-  ::    probes; a recipient we have never asked about is silent, silence
-  ::    is version 1, and the send goes out as it always did.
-  ::
-  ::    So this refuses what we KNOW will be refused and never guesses.
-  ;<  now=@da  bind:m  bowl-now
-  =/  probe=chain:uc
-    :~  :-  :*  *@p  0  to.u.req  subject.u.req  body.u.req  ''  *@da
-                prev.u.req
-                %+  turn  refs
-                |=(r=attach-ref:uc `attachment:uc`[name.r 0 mime.r hash.r])
+  =/  one=chain:uc
+    :~  :-  :*  *@p  0  to.u.req  subject.u.req  body.u.req  ''  *@da  prev.u.req
+                (turn refs |=(r=attach-ref:uc `attachment:uc`[name.r 0 mime.r hash.r]))
             ==
         0x0
     ==
+  ?.  (fits-bodies:uc one max-body:uc)    (send-err eyre-id 400 'body too long')
+  ?.  (fits-subjects:uc one max-subj:uc)  (send-err eyre-id 400 'subject too long')
+  ?.  (fits-recipients:uc one max-to:uc)  (send-err eyre-id 400 'too many recipients')
+  ?.  (refs-ok:uc refs)                   (send-err eyre-id 400 'bad attachment')
+  ::  EVERY REF NAMES A BLOB WE HOLD, and naming the hash that does not
+  ::  is the point: "unknown attachment" alone tells a person nothing
+  ::  about which file went missing. +peek-exists, because existence is
+  ::  all this needs and the writer has to read the blob anyway.
+  ;<  missing=(unit @uv)  bind:m  (first-unheld root refs)
+  ?^  missing
+    (send-err eyre-id 400 (rap 3 ~['unknown attachment ' (scot %uv u.missing)]))
+  ::  DISCOVERY: what the RECIPIENT will carry. A poke of a mark the far
+  ::  end does not hold parks, and a send over the far end's caps is
+  ::  dropped there, and both look from here exactly like a ship that is
+  ::  offline. FROM THE CACHE ONLY: a send may name max-to recipients,
+  ::  and a probe per unknown one would put a hundred round trips on the
+  ::  connection the composer is waiting on. A recipient we have never
+  ::  asked about is silent, silence is version 1, and its probe fiber
+  ::  asks. So this refuses what we KNOW will be refused and never
+  ::  guesses.
+  ;<  now=@da  bind:m  bowl-now
   ;<  bad=(list [who=ship why=@t])  bind:m
-    (peer-refusals root now probe ~(tap in to.u.req) ~)
-  ::  ONE HOSTILE RECIPIENT MUST NOT BLOCK THE OTHER NINETY-NINE. This
-  ::  used to answer 400 on the FIRST refusal and poke nothing, so a
-  ::  single peer publishing max-chain 0 in a hundred-recipient `to`
-  ::  killed the whole send - for a day, silently, with a message about
-  ::  one ship. The refusals are now reported per recipient and the send
-  ::  goes out; +send-one refuses each of them individually on the
-  ::  writer, which is the real gate and always was.
+    (peer-refusals root now one ~(tap in to.u.req) ~)
+  ::  ONE HOSTILE RECIPIENT MUST NOT BLOCK THE OTHER NINETY-NINE. The
+  ::  refusals are reported per recipient and the send goes out; each
+  ::  recipient's probe fiber refuses its own, which is the real gate.
   ::
-  ::  `to` IS NOT TRIMMED. It is a signed field and it names the audience
-  ::  the author chose; rewriting it here would sign a different message
-  ::  than the one that was composed, and every other recipient would see
-  ::  an audience that quietly lost people. Delivery skips them; the
-  ::  message does not.
-  ?:  =((lent bad) ~(wyt in to.u.req))
-    ::  every recipient refused. A 400, because a composed message must
-    ::  not vanish behind a 200 with nobody to carry it to.
-    (send-err eyre-id 400 (refusal-line bad))
-  ;<  ~  bind:m
-    (poke-writer [%send-ref to.u.req subject.u.req body.u.req '' prev.u.req refs ~])
+  ::  `to` IS NOT TRIMMED. It is a signed field naming the audience the
+  ::  author chose; rewriting it would sign a different message than the
+  ::  one composed. Delivery skips them; the message does not.
+  ::
+  ::  Every recipient refused is a 400: a composed message must not
+  ::  vanish behind a 200 with nobody to carry it to.
+  ?:  =((lent bad) ~(wyt in to.u.req))  (send-err eyre-id 400 (refusal-line bad))
+  ;<  ~  bind:m  (poke-writer [%send to.u.req subject.u.req body.u.req prev.u.req refs])
   (send-refused eyre-id bad)
 ::
 ::  +refusal-line: the whole refusal, on one line, for the case where
@@ -4823,8 +4081,8 @@
 ::    O(mailbox) work this slice exists to keep off a request fiber -
 ::    and a cull racing the writer's own is not idempotent the way the
 ::    put is. So max-blobs and max-blob-bytes bound the tree store at
-::    the two places that still evict, %send's dojo path and a blob
-::    fetch, and an upload can carry the store past them. The fix is
+::    the one place that still evicts, a blob fetch, and an upload can
+::    carry the store past them. The fix is
 ::    the same sweep of unreferenced blobs that collects abandoned
 ::    uploads, on the writer, and it is not in this slice.
 ::
@@ -4835,11 +4093,9 @@
 ::    is reading this response.
 ::
 ++  do-web-blob
-  |=  [src=@p eyre-id=@ta bod=(unit octs)]
+  |=  [eyre-id=@ta bod=(unit octs)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
   ::  NO BODY AND A ZERO-BYTE BODY ARE THE SAME REFUSAL. An empty file
   ::  has a content address like any other and the store would hold it
   ::  quite happily, but there is nothing a user gains by attaching one
@@ -4872,11 +4128,9 @@
   ?:  ex  (blob-uploaded eyre-id h p.bts)
   ;<  now=@da  bind:m  bowl-now
   ;<  ~  bind:m  (put-file (blob-rail root h) [/auspex %blob] [%1 bts now])
-  ::  PUBLISHED, exactly as an outbound attachment is: an uploaded blob
-  ::  is OUR file and a recipient must be able to keen it the instant
-  ::  the chain lands. Visibility is %public by absence from
-  ::  /mail/blobvis, which is what +store-files leaves behind too.
-  ;<  ~  bind:m  (publish-blob root h bts |)
+  ::  PUBLISHED: an uploaded blob is OUR file, and a recipient must be
+  ::  able to keen it the instant the chain lands.
+  ;<  ~  bind:m  (publish-blob root h bts)
   (blob-uploaded eyre-id h p.bts)
 ::
 ::  +blob-uploaded: the upload's one answer shape, on both paths through
@@ -4892,17 +4146,27 @@
       ['size' (numb:enjs:format size)]
   ==
 ::
-++  do-web-read
-  |=  [src=@p eyre-id=@ta raw=@t]
+::  +do-web-mark: POST /api/read and /api/unread: the ids and the thread
+::  they are in, so the writer reads one thread and not the mailbox.
+::
+++  do-web-mark
+  |=  [eyre-id=@ta jon=json rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  i=(unit (set @uv))  (de-read:uw u.jon)
+  =/  i=(unit (set @uv))  (de-read:uw jon)
   ?~  i  (send-err eyre-id 400 'bad msg-ids')
-  ;<  ~  bind:m  (poke-writer [%read u.i])
+  =/  t=(unit @uv)  (de-uv-field:uw jon %'thread-id')
+  ?~  t  (send-err eyre-id 400 'bad thread-id')
+  ;<  ~  bind:m  (poke-writer ?:(rd [%read u.i u.t] [%unread u.i u.t]))
+  (send-ok eyre-id)
+::
+++  do-web-forget
+  |=  [eyre-id=@ta jon=json]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  w=(unit @p)  (de-forget:uw jon)
+  ?~  w  (send-err eyre-id 400 'bad ship')
+  ;<  ~  bind:m  (poke-writer [%forget-peer u.w])
   (send-ok eyre-id)
 ::
 ::  +do-web-fetch: pull an attachment's bytes from a peer.
@@ -4921,65 +4185,29 @@
 ::    instead, which is one peek per retry against a route it was going
 ::    to call anyway.
 ::
-++  do-web-forget
-  |=  [src=@p eyre-id=@ta raw=@t]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  res
-    %-  mule
-    |.  ((ot:dejs:format ~[ship+(se:dejs:format %p)]) u.jon)
-  ?:  ?=(%| -.res)  (send-err eyre-id 400 'bad ship')
-  ;<  ~  bind:m  (poke-writer [%forget-peer p.res])
-  (send-ok eyre-id)
-::
 ++  do-web-fetch
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  r=(unit [hash=@uv from=@p])  (de-fetch:uw u.jon)
+  =/  r=(unit [hash=@uv from=@p])  (de-fetch:uw jon)
   ?~  r  (send-err eyre-id 400 'bad fetch request')
   ;<  ~  bind:m  (poke-writer [%fetch-blob hash.u.r from.u.r])
   (send-ok eyre-id)
 ::
 ::  ── the mail-client writes ──────────────────────────────────────────
 ::
-::  Each one is the same three steps: owner gate, decode, poke. The
-::  decoders live in the import-free web lib so a test can reach them;
+::  Each one is the same two steps: decode, poke - the owner gate and the
+::  JSON parse happened once, in +handle-request. The decoders live in the import-free web lib so a test can reach them;
 ::  the semantic checks (is this a @tas? does this rule have a
 ::  condition?) live at the writer, because this route is not the only
 ::  caller and a check at the boundary is not a substitute for a check
 ::  at the point of use.
 ::
-++  do-web-unread
-  |=  [src=@p eyre-id=@ta raw=@t]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  i=(unit (set @uv))  (de-read:uw u.jon)
-  ?~  i  (send-err eyre-id 400 'bad msg-ids')
-  ;<  ~  bind:m  (poke-writer [%unread u.i])
-  (send-ok eyre-id)
-::
 ++  do-web-label
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  r=(unit label-req:uw)  (de-label:uw u.jon)
+  =/  r=(unit label-req:uw)  (de-label:uw jon)
   ?~  r  (send-err eyre-id 400 'bad label request')
   ::  ANSWERED HERE, WHERE THE ANSWER CAN STILL BE NO. The route pokes
   ::  and returns as soon as the writer takes the poke, so a label the
@@ -4992,14 +4220,10 @@
   (send-ok eyre-id)
 ::
 ++  do-web-archive
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  r=(unit [t=@uv a=?])  (de-archive:uw u.jon)
+  =/  r=(unit [t=@uv a=?])  (de-archive:uw jon)
   ?~  r  (send-err eyre-id 400 'bad archive request')
   ;<  ~  bind:m  (poke-writer [%archive t.u.r a.u.r])
   (send-ok eyre-id)
@@ -5012,14 +4236,10 @@
 ::    to protect, lost at save time instead of at send time.
 ::
 ++  do-web-draft
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  r=(unit draft-req:uw)  (de-draft:uw u.jon)
+  =/  r=(unit draft-req:uw)  (de-draft:uw jon)
   ?~  r  (send-err eyre-id 400 'bad draft')
   ;<  now=@da  bind:m  bowl-now
   =/  d=draft:uc
@@ -5030,14 +4250,10 @@
   (send-ok eyre-id)
 ::
 ++  do-web-rule
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  r=(unit rule-req:uw)  (de-rule:uw u.jon)
+  =/  r=(unit rule-req:uw)  (de-rule:uw jon)
   ?~  r  (send-err eyre-id 400 'bad rule')
   ::  labels arrive as strings and are refused here if they are not
   ::  terms, so the 400 names the field the user got wrong.
@@ -5073,15 +4289,10 @@
 ::    else is a list they will look for under the name they chose.
 ::
 ++  do-web-list
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [our=@p eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  ;<  our=@p  bind:m  bowl-our
-  =/  r=(unit list-req:uw)  (de-list:uw u.jon our)
+  =/  r=(unit list-req:uw)  (de-list:uw jon our)
   ::  ONE REFUSAL, THREE CAUSES, and the message names all three rather
   ::  than making the user guess which one they hit: the decoder is a
   ::  unit and cannot say why, and splitting it into three decoders to
@@ -5097,92 +4308,22 @@
   (send-ok eyre-id)
 ::
 ++  do-web-list-delete
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  n=(unit @t)  (de-list-name:uw u.jon)
+  =/  n=(unit @t)  (de-list-name:uw jon)
   ?~  n  (send-err eyre-id 400 'bad list name')
   ;<  ~  bind:m  (poke-writer [%delete-list u.n])
   (send-ok eyre-id)
 ::
 ::  +do-web-id: the two routes that carry only an id and nothing to check.
-::
-::    delete-draft and delete-rule differ in nothing but the action tag,
-::    so they share one arm rather than two copies of the same owner
-::    gate and the same decoder. draft-send used to be here and is not
-::    any more: it has caps to check, and answering ok to a send the
-::    writer will refuse is what its own arm exists to stop.
-::
-::  +do-web-draft-send: sign a draft and send it.
-::
-::    THE CAPS ARE CHECKED HERE, WHERE THE ANSWER CAN STILL BE NO, for
-::    the same reason /api/send checks them: this route answers as soon
-::    as the writer takes the poke, so a draft the writer then refuses
-::    was answered `ok` and the composer closed on it. The draft
-::    survives on disk - +do-send-draft deletes only on a send that
-::    happened - so nothing is lost, but the user was told a message
-::    went out that did not, which is the one thing "no delivery
-::    receipts" was never meant to cover.
-::
-::    The same three predicates +do-web-send uses, from the same lib
-::    arms, so the two boundaries cannot drift. What stays writer-side
-::    is what only the writer can answer: an unknown `prev` and a blob
-::    store with no room. Those still refuse cleanly and still leave the
-::    draft where it was; the trace says which.
-::
-++  do-web-draft-send
-  |=  [src=@p eyre-id=@ta raw=@t]
-  =/  m  (fiber:fiber:nexus ,~)
-  ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  i=(unit @uv)  (de-id:uw u.jon)
-  ?~  i  (send-err eyre-id 400 'bad id')
-  =/  root=@ud  nexus-root
-  ::  the key road, before the draft is even read: a send this ship
-  ::  cannot sign is refused with the words the composer shows, and the
-  ::  DRAFT IS NOT TOUCHED. +do-send-draft on the writer keeps it too -
-  ::  +do-send answers %.n and the delete is gated on that answer - so
-  ::  the two halves agree that a refused send loses nothing.
-  ;<  may=?  bind:m  (may-scry root)
-  ?.  may
-    %^  send-err  eyre-id  400
-    'this ship cannot sign mail: Auspex has not been granted the key road'
-  ;<  d=(unit draft:uc)  bind:m  (read-draft root u.i)
-  ::  a draft that is not there is a 404 and not an ok. The composer
-  ::  turns it into "this draft no longer exists", which is what a draft
-  ::  deleted in another tab actually is.
-  ?~  d  (send-err eyre-id 404 'no such draft')
-  ::  `from`, `life`, `sent` and the signature are bunted: not one of
-  ::  the three predicates below reads them, and inventing values the
-  ::  writer will overwrite would be the drift this shares arms to
-  ::  avoid.
-  =/  one=chain:uc
-    ~[[[*@p 0 to.u.d subject.u.d body.u.d '' *@da prev.u.d ~] 0x0]]
-  ?.  (fits-bodies:uc one max-body:uc)
-    (send-err eyre-id 400 'body too long')
-  ?.  (fits-subjects:uc one max-subj:uc)
-    (send-err eyre-id 400 'subject too long')
-  ?.  (fits-recipients:uc one max-to:uc)
-    (send-err eyre-id 400 'too many recipients')
-  ;<  ~  bind:m  (poke-writer [%send-draft u.i])
-  (send-ok eyre-id)
+::  delete-draft and delete-rule differ in nothing but the action tag.
 ::
 ++  do-web-id
-  |=  [src=@p eyre-id=@ta raw=@t tag=?(%delete-draft %delete-rule)]
+  |=  [eyre-id=@ta jon=json tag=?(%delete-draft %delete-rule)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  i=(unit @uv)  (de-id:uw u.jon)
+  =/  i=(unit @uv)  (de-id:uw jon)
   ?~  i  (send-err eyre-id 400 'bad id')
   ;<  ~  bind:m
     %-  poke-writer
@@ -5193,14 +4334,10 @@
   (send-ok eyre-id)
 ::
 ++  do-web-delete
-  |=  [src=@p eyre-id=@ta raw=@t]
+  |=  [eyre-id=@ta jon=json]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  mine=?  bind:m  (is-owner src)
-  ?.  mine  (send-err eyre-id 403 'forbidden')
-  =/  jon=(unit json)  (de:json:html raw)
-  ?~  jon  (send-err eyre-id 400 'not json')
-  =/  i=(unit @uv)  (de-delete:uw u.jon)
+  =/  i=(unit @uv)  (de-delete:uw jon)
   ?~  i  (send-err eyre-id 400 'bad thread-id')
   ;<  ~  bind:m  (poke-writer [%delete-thread u.i])
   (send-ok eyre-id)

@@ -372,5 +372,13 @@
 ::
 ++  test-de-fetch-needs-a-hash
   %+  expect-eq  !>(`(unit [@uv @p])`~)
-  !>  (de-fetch:web (jo '{"from":"~zod"}'))
+  !>  (de-fetch:web (jo '{"from":"~zod"}'))::
+::  ── forgetting a peer ───────────────────────────────────────────────
+::
+++  test-de-forget
+  ;:  weld
+    (expect-eq !>(`(unit @p)`[~ ~zod]) !>((de-forget:web (jo '{"ship":"~zod"}'))))
+    (expect-eq !>(`(unit @p)`~) !>((de-forget:web (jo '{"ship":"zod"}'))))
+    (expect-eq !>(`(unit @p)`~) !>((de-forget:web (jo '{"who":"~zod"}'))))
+  ==
 --

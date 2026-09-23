@@ -117,7 +117,7 @@
 ::  considered and rejected; BCC is deliberately absent, because the
 ::  chain proves authorship and not delivery, which is exactly why a
 ::  forwarded chain works at all. Everything else a mail client needs -
-::  labels, folders, archive, read state, drafts, filters, BCC records -
+::  labels, folders, archive, read state, drafts, filters -
 ::  is LOCAL, and two ships may disagree about all of it while still
 ::  agreeing exactly on who signed what.
 ::
@@ -140,58 +140,26 @@
 ::    action on the poke's source being us - so no peer can delete a
 ::    thread out from under us.
 ::
-::    %send's `files` carry BYTES, so %send is the one action with a size
-::    to it, and it is the only way bytes ever enter this ship's blob
-::    store from the user side. There is no separate attach action: the
-::    files ride on the send that names them, because the metadata built
-::    from those bytes goes inside `unsigned` and is therefore signed -
-::    hashing and signing in one step is what makes `size` and `hash`
-::    agree with what a fetcher will re-measure. A prior draft of this
-::    comment described a %attach-file member; there has never been one.
-::
-::    %send's `bcc` affects DELIVERY ONLY. The chain names `to` and
-::    nothing else; the blind-copied ships get the same canonical bytes,
-::    the same msg-id and the same thread as everyone else, and see the
-::    visible recipients, which is what BCC means. Replying reveals
-::    them, because a reply is signed and lists its own `to` - BCC's
-::    behaviour everywhere.
-::
 +$  action
-  $%  $:  %send
+  $%  ::  %send: compose, reply and forward. The bytes of every attachment
+      ::  are ALREADY IN THE STORE: the browser uploads each file to
+      ::  POST /api/blob first, which stores it and answers its content
+      ::  address, and the send names those addresses. `size` is read off
+      ::  the stored blob and never off the request, so the nexus signs
+      ::  what it stores.
+      $:  %send
           to=(set ship)
           subject=@t
           body=@t
-          body-mime=@t
-          prev=(unit msg-id)
-          files=(list file)
-          bcc=(set ship)
-      ==
-    ::  %read takes a SET, because opening a thread marks every unread
-    ::  message in it at once. One id per poke meant one writer event
-    ::  and one full mailbox scan per message - forty messages, forty
-    ::  serialised scans, on the ship's single serialisation point for
-    ::  mail, to record something no peer will ever see.
-    ::  %send-ref is %send with the bytes ALREADY IN THE STORE. It is
-    ::  the web surface's send: the browser uploads each file to
-    ::  POST /api/blob first, which stores it and answers its content
-    ::  address, and the send then names those addresses. A separate
-    ::  member rather than a tenth field on %send, so a programmatic
-    ::  poke written against %send keeps working unchanged.
-    ::
-    ::  Both end in the same signing path; they differ only in where
-    ::  the signed [name size mime hash] comes from. Here `size` is
-    ::  read off the stored blob and never off the request, so the
-    ::  nexus signs what it stores.
-      $:  %send-ref
-          to=(set ship)
-          subject=@t
-          body=@t
-          body-mime=@t
           prev=(unit msg-id)
           refs=(list attach-ref)
-          bcc=(set ship)
       ==
-      [%read ids=(set msg-id)]
+    ::  %read takes a SET, because opening a thread marks every unread
+    ::  message in it at once, and names the THREAD they are in, so the
+    ::  writer reads that one thread rather than walking the mailbox on the
+    ::  ship's single serialisation point for mail. Ids not in it are
+    ::  skipped.
+      [%read ids=(set msg-id) tid=thread-id]
       [%delete-thread =thread-id]
       [%fetch-blob hash=@uv from=ship]
     ::  %forget-peer drops one discovery record so the next send
@@ -202,8 +170,6 @@
     ::  poke is never sent. +proto-refusal-ttl shortens that window to an
     ::  hour; this is how a person shortens it to now.
       [%forget-peer who=ship]
-      [%restrict-blob hash=@uv ships=(set ship)]
-      [%publish-blob hash=@uv]
     ::  ── the mail-client actions. Every one is LOCAL STATE ──────────
     ::
     ::  None of these touch `unsigned`, none produce or alter a
@@ -224,12 +190,11 @@
     ::  unread in the first place (see +entry-json), so marking one
     ::  unread is a no-op on every surface a user sees - which is the
     ::  correct behaviour and not a special case anywhere.
-      [%unread ids=(set msg-id)]
-    ::  drafts. %send-draft signs and sends, and deletes the draft ONLY
-    ::  if the send succeeded - see +do-send-draft.
+      [%unread ids=(set msg-id) tid=thread-id]
+    ::  drafts. A draft is sent by %send like any other message, and the
+    ::  client deletes it once the send is taken.
       [%save-draft =draft]
       [%delete-draft id=@uv]
-      [%send-draft id=@uv]
     ::  filters.
       [%save-rule =rule]
       [%delete-rule id=@uv]
@@ -296,11 +261,7 @@
 ::
 ++  caps-denied  ^-(caps [%0 |])
 ::
-::  $file: one file as handed to %send, before it is hashed and stored.
-::
-::    The DOJO shape, and only that. Bytes reach the writer this way
-::    from a programmatic %send; the web surface uploads them first and
-::    names the result, which is $attach-ref below.
+::  $file: one file's bytes, as +describe measures them.
 ::
 +$  file  [name=@t mime=@t =octs]
 ::
@@ -317,49 +278,9 @@
 ::
 +$  attach-ref  [name=@t mime=@t hash=@uv]
 ::
-::  $blob-vis: whether THIS SHIP serves a blob's bytes.
-::
-::    RESTRICTION IS NOT ACCESS CONTROL, and calling it that would be a
-::    lie to the user. It is withdrawal of our own copy, and it is
-::    meaningful only before anyone has opened the attachment.
-::
-::    The reason is structural, not an implementation gap. A blob is
-::    content-addressed and answerable by anyone holding the bytes -
-::    that property is what makes a forwarded chain's attachments
-::    readable at all, and this ship relies on it every time it fetches
-::    one. But a ship that fetches a blob stores it and publishes it
-::    into ITS OWN permissionless farm, because it is now one of the
-::    ships holding the bytes. So the first successful fetch creates a
-::    second, independent, un-revocable source. Withdrawing ours after
-::    that stops nobody.
-::
-::    What restriction therefore buys is exactly this: bytes we have not
-::    yet served cannot be pulled from us, and a hash is not a
-::    capability we hand out by default once we have said no. Treat it
-::    as unpublishing, never as revoking.
-::
-::    %public     grown into the remote-scry farm, so ANY ship holding
-::                the hash may keen it. The default: a chain is
-::                forwardable to anyone by design, and an attachment
-::                nobody but the original recipients could read would
-::                make a forward carry an unreadable file.
-::    %restricted withdrawn from our farm. The named ships are recorded
-::                so a weir grant can serve them a peek instead; see
-::                +do-restrict in the nexus for what that costs and what
-::                the platform will not yet let a nexus do.
-::
-+$  blob-vis
-  $%  [%public ~]
-      [%restricted ships=(set ship)]
-  ==
-::
 ::  $stored-blob: one attachment's bytes, at /mail/blob/<hash>.
 ::
-::    Bytes and an arrival time. Visibility lives in a separate small
-::    grub so that changing who may read a file does not rewrite the
-::    file.
-::
-::    `at` is what makes "evict the OLDEST unreferenced blob" a thing
+::    Bytes and an arrival time. `at` is what makes "evict the OLDEST unreferenced blob" a thing
 ::    the store can actually do rather than a phrase in a spec. It is
 ::    local bookkeeping and is deliberately not part of the address:
 ::    two ships holding the same file agree on its hash and disagree
@@ -373,6 +294,18 @@
 ::
 +$  stored-blob  [%1 =octs at=@da]
 +$  stored-blob-0  [%0 =octs]
+::
+::  +blob-from-noun: the blob ladder, for every reader, as
+::  +meta-from-noun is for meta. A %0 blob gets at=0, which sorts it
+::  oldest and evicts it first.
+::
+++  blob-from-noun
+  |=  n=*
+  ^-  (unit stored-blob)
+  =/  r1  (mole |.(;;(stored-blob n)))
+  ?^  r1  r1
+  =/  r0  (mole |.(;;(stored-blob-0 n)))
+  ?~(r0 ~ `[%1 octs.u.r0 *@da])
 ::
 ::  $blob-row: one held blob, as the store's bookkeeping sees it.
 ::
@@ -393,11 +326,6 @@
 ::    a failed fetch leaves nothing behind. A wire format, never stored.
 ::
 +$  blob-in  [%0 id=@ta hash=@uv res=(unit octs)]
-::
-::  $blob-index: visibility for every blob we hold, at /mail/blobvis.
-::  Absent from the map means %public, the default.
-::
-+$  blob-index  [%0 vis=(map @uv blob-vis)]
 ::
 ::  the tree's persisted shapes. Every one of these is read back through
 ::  ;; against a NOUN-marc vase, newest shape first, so a later version
@@ -444,20 +372,21 @@
 ::    and a BCC'd recipient is in neither `from` nor `to` - their mail
 ::    would be invisible. Inbox is therefore participant OR direct.
 ::
-::    `bcc` is the sender's own record of who it blind-copied, keyed by
-::    the message it sent, so its Sent view is accurate. IT NEVER
-::    TRAVELS and it is not signed. Signing the set would not be BCC,
-::    and signing a hashed commitment to it would leak that a BCC
-::    exists while remaining testable against any guessed ship - privacy
-::    it cannot deliver, which is the same class of overstatement as
-::    calling blob restriction access control.
-::
-::    Version 1, and version 0 IS upgraded in place. None of this is
-::    covered by a signature, so supplying defaults misrepresents
-::    nothing - the contrast with $stored-msg above is the whole point
-::    of keeping local state out of `unsigned`.
+::    Version 2, and versions 1 and 0 ARE upgraded in place. None of
+::    this is covered by a signature, so supplying defaults - or, for a
+::    %1, dropping the record of who we blind-copied, which only a
+::    dojo-only send could ever write - misrepresents nothing. That is
+::    the contrast with $stored-msg above, and the whole point of keeping
+::    local state out of `unsigned`.
 ::
 +$  meta
+  $:  %2
+      read=(set msg-id)
+      archived=$~(%.n ?)
+      labels=(set @tas)
+      direct=$~(%.n ?)
+  ==
++$  meta-1
   $:  %1
       read=(set msg-id)
       archived=$~(%.n ?)
@@ -466,6 +395,23 @@
       bcc=(map msg-id (set ship))
   ==
 +$  meta-0  [%0 read=(set msg-id) archived=$~(%.n ?) labels=(set @tas)]
+::
+::  +meta-from-noun: THE meta ladder, newest shape first. The nexus's
+::  readers and the marc all read meta through this one arm, so a later
+::  version is one branch here rather than one per reader - two copies of
+::  a ladder drift, and a reader that missed a branch silently drops a
+::  thread's labels and archive flag.
+::
+++  meta-from-noun
+  |=  n=*
+  ^-  (unit meta)
+  =/  r2  (mole |.(;;(meta n)))
+  ?^  r2  r2
+  =/  r1  (mole |.(;;(meta-1 n)))
+  ?^  r1  `[%2 read.u.r1 archived.u.r1 labels.u.r1 direct.u.r1]
+  =/  r0  (mole |.(;;(meta-0 n)))
+  ?~  r0  ~
+  `[%2 read.u.r0 archived.u.r0 labels.u.r0 |]
 ::
 ::  $mail-idx: the derived inbox order, at /mail/idx. Newest first.
 ::
@@ -650,7 +596,7 @@
 ::    has one.
 ::
 ::    max-blobs bounds this ship's blob store. It cannot be weaponised:
-::    bytes only ever enter through a LOCAL action (%send's files or
+::    bytes only ever enter through a LOCAL action (an upload or
 ::    %fetch-blob), never through a delivered chain, which carries
 ::    metadata alone.
 ::
@@ -695,11 +641,9 @@
 ::
 ::  +attach-ok: is this attachment's METADATA storable at all?
 ::
-::    The whole of +file-ok that does not need the bytes, so the two
-::    paths into a send - files with octs, and refs naming blobs the
-::    store already holds - are checked by ONE arm and cannot drift.
-::    Everything it enforces was enforced before it existed: size
-::    against max-blob, name and mime through +text-ok.
+::    Size against max-blob, name and mime through +text-ok. One arm for
+::    the send path and for delivery (+fits-attachments), so what this
+::    ship signs and what it accepts cannot drift apart.
 ::
 ++  attach-ok
   |=  a=attachment
@@ -743,21 +687,6 @@
       (levy rs ref-ok)
   ==
 ::
-::  +file-ok: is this file storable at all?
-::
-::    +attach-ok plus the one check only bytes can carry. p.octs is the
-::    DECLARED length and q is the atom. An atom cannot carry more bytes
-::    than it measures, so a declared length below the measured one is a
-::    malformed octs and would make +blob-hash disagree with anything the
-::    bytes are later re-measured against.
-::
-++  file-ok
-  |=  f=file
-  ^-  ?
-  ?&  (gte p.octs.f (met 3 q.octs.f))
-      (attach-ok [name.f p.octs.f mime.f *@uv])
-  ==
-::
 ::  +text-ok: a signed metadata string that is safe to hand onward.
 ::
 ::    Length is not the only thing wrong a `name` or a `mime` can be.
@@ -776,13 +705,6 @@
   ?&  (lte (met 3 t) m)
       %+  levy  (trip t)
       |=(c=@tD &((gth c 0x1f) !=(c 0x7f)))
-  ==
-::
-++  files-ok
-  |=  fs=(list file)
-  ^-  ?
-  ?&  (lte (lent fs) max-attach)
-      (levy fs file-ok)
   ==
 ::
 ::  +fits-attachments: the INCOMING bound, applied to a delivered chain.
@@ -1482,23 +1404,13 @@
 ::    HTTP connection that never answers, so the check happens at the
 ::    boundary instead, and this is it.
 ::
+::    +sym is exactly the @tas grammar: a lowercase letter, then
+::    lowercase letters, digits and hyphens.
+::
 ++  term-ok
   |=  l=@tas
   ^-  ?
-  =/  t=tape  (trip l)
-  ?~  t  |
-  ?.  &((gte i.t 'a') (lte i.t 'z'))  |
-  ::  `tape`t, not t: ?~ has narrowed t to a NON-EMPTY tape and +levy
-  ::  recurses on its own sample, so the recursion hands ~ to a gate
-  ::  whose sample type no longer admits it. Same shape as the +scag
-  ::  call in +has-sub below, and it is the standard cost of calling a
-  ::  wet list gate from inside a ?~.
-  %+  levy  `tape`t
-  |=  c=@tD
-  ?|  &((gte c 'a') (lte c 'z'))
-      &((gte c '0') (lte c '9'))
-      =(c '-')
-  ==
+  ?=(^ (rush l sym))
 ::
 ++  label-ok
   |=(l=@tas &((term-ok l) (lte (met 3 l) max-label)))
@@ -1520,22 +1432,14 @@
 ::    An empty needle matches everything, which is what makes an absent
 ::    query mean "no filter" at every call site without a branch.
 ::
+::    +find is jetted, and it answers ~ for an empty needle, so that
+::    case is decided first.
+::
 ++  has-sub
   |=  [hay=@t ned=@t]
   ^-  ?
-  =/  n=tape  (cass (trip ned))
-  ?:  =(~ n)  &
-  =/  ln=@ud  (lent n)
-  =/  h=tape  (cass (trip hay))
-  |-  ^-  ?
-  ?~  h  |
-  ::  `tape`h, not h: ?~ has narrowed h to a NON-EMPTY tape, +scag is a
-  ::  wet gate casting its result to ^+ its sample, and one of its
-  ::  branches produces ~ - which does not nest under a non-empty list.
-  ::  Widening at the call site is the fix; the same shape bites every
-  ::  wet list gate called from inside a ?~.
-  ?:  =(n (scag ln `tape`h))  &
-  $(h t.h)
+  ?:  =('' ned)  &
+  ?=(^ (find (cass (trip ned)) (cass (trip hay))))
 ::
 ::  +matches: does one message answer this query?
 ::
@@ -1639,7 +1543,6 @@
 ++  page
   |*  [l=(list) off=@ud lim=@ud]
   ^+  l
-  ?:  =(0 lim)  ~
   (scag lim (slag off l))
 ::
 ::  +draft-ok: the request-only caps, on a draft.
@@ -1735,6 +1638,56 @@
   =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c)))
   :-  (~(gas in *(set @tas)) (zing (turn hits |=(r=rule ~(tap in add.r)))))
   (lien hits |=(r=rule archive.r))
+
+::  ── json, rendered once ─────────────────────────────────────────────
+::
+::  The nexus's routes and the marcs render these shapes, and two copies
+::  of a renderer drift - the msg marc said `bodyMime` while the route
+::  said `body-mime`. Fully qualified `pairs:enjs:format` and never `=,`,
+::  for the reason the note above +msg-json in the nexus gives.
+::
+++  ships-json
+  |=  s=(set ship)
+  ^-  json
+  [%a (turn ~(tap in s) |=(w=ship `json`[%s (scot %p w)]))]
+::
+++  labels-json
+  |=  ls=(set @tas)
+  ^-  json
+  [%a (turn ~(tap in ls) |=(l=@tas `json`[%s l]))]
+::
+++  attachment-json
+  |=  a=attachment
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['name' [%s name.a]]
+      ['size' (numb:enjs:format size.a)]
+      ['mime' [%s mime.a]]
+      ['hash' [%s (scot %uv hash.a)]]
+  ==
+::
+++  draft-json
+  |=  d=draft
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv id.d)]]
+      ['to' (ships-json to.d)]
+      ['subject' [%s subject.d]]
+      ['body' [%s body.d]]
+      ['prev' ?~(prev.d ~ [%s (scot %uv u.prev.d)])]
+      ['at' (time:enjs:format at.d)]
+  ==
+::
+++  rule-json
+  |=  r=rule
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['id' [%s (scot %uv id.r)]]
+      ['from' ?~(from.r ~ [%s (scot %p u.from.r)])]
+      ['subject' ?~(subject.r ~ [%s u.subject.r])]
+      ['add' (labels-json add.r)]
+      ['archive' [%b archive.r]]
+  ==
 
 ::  ── protocol discovery ──────────────────────────────────────────────
 ::
@@ -1934,9 +1887,8 @@
   ?~  hits  ~
   ::  `(list @ud)`hits, not hits: ?~ has narrowed it to a NON-EMPTY list
   ::  and +roll is a wet gate that recurses on its own sample, so the
-  ::  recursion hands ~ to a gate whose sample no longer admits it. The
-  ::  same shape +has-sub and +term-ok above already carry a note for.
-  `(roll `(list @ud)`hits |=([v=@ud acc=@ud] ?:((gth v acc) v acc)))
+  ::  recursion hands ~ to a gate whose sample no longer admits it.
+  `(roll `(list @ud)`hits max)
 ::
 ::  +mark-for: the wire mark a peer named for one version.
 ::
@@ -2017,11 +1969,7 @@
   |=  l=(list @ud)
   ^-  @t
   ?~  l  'nothing'
-  =/  acc=@t  (scot %ud i.l)
-  =/  r=(list @ud)  t.l
-  |-  ^-  @t
-  ?~  r  acc
-  $(acc (rap 3 ~[acc ', ' (scot %ud i.r)]), r t.r)
+  (rap 3 (join ', ' (turn `(list @ud)`l |=(v=@ud `@t`(scot %ud v)))))
 ::
 ::  +no-version-error: the peer answered, and nothing it speaks is
 ::  anything we speak. This is a REFUSAL and not a failed attempt: the

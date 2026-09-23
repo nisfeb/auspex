@@ -12,7 +12,7 @@
 ::    ephemeral request fiber. A crash there is not a lost fiber, it is an
 ::    HTTP connection that never gets a response: the browser hangs until
 ::    it times out and the user sees a Send button that never comes back.
-::    So every arm here is a unit, `mule` is what makes it one, and the
+::    So every arm here is a unit, `mole` is what makes it one, and the
 ::    caller answers 400.
 ::
 ::    IMPORT-FREE, and therefore testable: this is the rule the v3 spec
@@ -49,20 +49,18 @@
 ++  de-send
   |=  jon=json
   ^-  (unit send-req)
-  =/  res
-    %-  mule
-    |.
-    ^-  send-req
-    %.  jon
-    %-  ot:dejs:format
-    :~  to+(as:dejs:format (se:dejs:format %p))
-        subject+so:dejs:format
-        body+so:dejs:format
-      ::  the client sends `null` for a compose. `mu` is what makes that
-      ::  a missing prev rather than a parse failure.
-        prev+(mu:dejs:format (se:dejs:format %uv))
-    ==
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  send-req
+  %.  jon
+  %-  ot:dejs:format
+  :~  to+(as:dejs:format (se:dejs:format %p))
+      subject+so:dejs:format
+      body+so:dejs:format
+    ::  the client sends `null` for a compose. `mu` is what makes that
+    ::  a missing prev rather than a parse failure.
+      prev+(mu:dejs:format (se:dejs:format %uv))
+  ==
 ::
 ::  +de-read: {"msg-ids": ["0v...", ...]} -> the ids.
 ::
@@ -78,13 +76,11 @@
 ++  de-read
   |=  jon=json
   ^-  (unit (set @uv))
-  =/  res
-    %-  mule
-    |.
-    ^-  (set @uv)
-    %.  jon
-    (ot:dejs:format ~[['msg-ids' (as:dejs:format (se:dejs:format %uv))]])
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  (set @uv)
+  %.  jon
+  (ot:dejs:format ~[['msg-ids' (as:dejs:format (se:dejs:format %uv))]])
 ::
 ::  +de-delete: {"thread-id": "0v..."} -> the id.
 ::
@@ -92,9 +88,6 @@
   |=  jon=json
   ^-  (unit @uv)
   (de-uv-field jon %'thread-id')
-::
-::  +de-uv-field: one named @uv out of an object.
-::
 ::
 ::  ── the mail-client requests ────────────────────────────────────────
 ::
@@ -117,28 +110,24 @@
 ++  de-label
   |=  jon=json
   ^-  (unit label-req)
-  =/  res
-    %-  mule
-    |.
-    ^-  label-req
-    %.  jon
-    %-  ot:dejs:format
-    :~  ['thread-id' (se:dejs:format %uv)]
-        label+so:dejs:format
-        add+bo:dejs:format
-    ==
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  label-req
+  %.  jon
+  %-  ot:dejs:format
+  :~  ['thread-id' (se:dejs:format %uv)]
+      label+so:dejs:format
+      add+bo:dejs:format
+  ==
 ::
 ++  de-archive
   |=  jon=json
   ^-  (unit [@uv ?])
-  =/  res
-    %-  mule
-    |.
-    ^-  [@uv ?]
-    %.  jon
-    (ot:dejs:format ~[['thread-id' (se:dejs:format %uv)] archived+bo:dejs:format])
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  [@uv ?]
+  %.  jon
+  (ot:dejs:format ~[['thread-id' (se:dejs:format %uv)] archived+bo:dejs:format])
 ::
 ::  +de-draft: the save-draft body.
 ::
@@ -152,19 +141,17 @@
 ++  de-draft
   |=  jon=json
   ^-  (unit draft-req)
-  =/  res
-    %-  mule
-    |.
-    ^-  draft-req
-    %.  jon
-    %-  ot:dejs:format
-    :~  id+(se:dejs:format %uv)
-        to+(as:dejs:format (se:dejs:format %p))
-        subject+so:dejs:format
-        body+so:dejs:format
-        prev+(mu:dejs:format (se:dejs:format %uv))
-    ==
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  draft-req
+  %.  jon
+  %-  ot:dejs:format
+  :~  id+(se:dejs:format %uv)
+      to+(as:dejs:format (se:dejs:format %p))
+      subject+so:dejs:format
+      body+so:dejs:format
+      prev+(mu:dejs:format (se:dejs:format %uv))
+  ==
 ::
 ::  +de-rule: the save-rule body. `from` and `subject` are both optional
 ::  and the nexus refuses a rule that sets neither - a rule with no
@@ -174,7 +161,7 @@
   |=  jon=json
   ^-  (unit rule-req)
   =/  res
-    %-  mule
+    %-  mole
     |.
     ^-  rule-req
     %.  jon
@@ -185,8 +172,8 @@
         add+(ar:dejs:format so:dejs:format)
         archive+bo:dejs:format
     ==
-  ?:  ?=(%| -.res)  ~
-  =/  r  p.res
+  ?~  res  ~
+  =/  r  u.res
   ::  AN EMPTY SUBJECT IS NOT A CONDITION, so it decodes to ~ rather
   ::  than to [~ '']. Belt to +rule-ok's braces, which refuses the same
   ::  shape at the writer: a rule whose only condition is an empty cord
@@ -226,19 +213,8 @@
 ++  list-name-ok
   |=  n=@t
   ^-  ?
-  =/  t=tape  (trip n)
-  ?&  ?=(^ t)
-      (lte (met 3 n) 64)
-    ::  `tape`t, WIDENED. ?=(^ t) narrows t to a lest inside the rest of
-    ::  this ?&, and +levy is a wet gate that fails to mull against one
-    ::  - the same shape recorded against +safe-name above.
-      %+  levy  `tape`t
-      |=  c=@tD
-      ^-  ?
-      ?|  &((gte c 'a') (lte c 'z'))
-          &((gte c '0') (lte c '9'))
-          =(c '-')
-      ==
+  ?&  (lte (met 3 n) 64)
+      ?=(^ (rush n (plus ;~(pose low nud hep))))
   ==
 ::
 ::  +de-list: the save-list body, or ~ if it is not one.
@@ -257,7 +233,7 @@
   |=  [jon=json our=@p]
   ^-  (unit list-req)
   =/  res
-    %-  mule
+    %-  mole
     |.
     ^-  list-req
     %.  jon
@@ -265,8 +241,8 @@
     :~  name+so:dejs:format
         members+(as:dejs:format (se:dejs:format %p))
     ==
-  ?:  ?=(%| -.res)  ~
-  =/  r  p.res
+  ?~  res  ~
+  =/  r  u.res
   ?.  (list-name-ok name.r)  ~
   ?:  (~(has in members.r) our)  ~
   `r
@@ -279,16 +255,26 @@
   |=  jon=json
   ^-  (unit @t)
   =/  res
-    %-  mule
+    %-  mole
     |.
     ^-  @t
     ((ot:dejs:format ~[[%name so:dejs:format]]) jon)
-  ?:  ?=(%| -.res)  ~
-  ?.  (list-name-ok p.res)  ~
-  `p.res
+  ?~  res  ~
+  ?.  (list-name-ok u.res)  ~
+  res
 ::
-::  +de-id: {"id": "0v..."} -> the id. Shared by delete-draft,
-::  send-draft and delete-rule, which differ only in what they act on.
+::  +de-forget: {"ship": "~sampel-palnet"} -> the ship whose discovery
+::  record to drop.
+::
+++  de-forget
+  |=  jon=json
+  ^-  (unit @p)
+  %-  mole
+  |.
+  ((ot:dejs:format ~[ship+(se:dejs:format %p)]) jon)
+::
+::  +de-id: {"id": "0v..."} -> the id. Shared by delete-draft and
+::  delete-rule, which differ only in what they act on.
 ::
 ++  de-id
   |=  jon=json
@@ -298,12 +284,10 @@
 ++  de-uv-field
   |=  [jon=json key=@t]
   ^-  (unit @uv)
-  =/  res
-    %-  mule
-    |.
-    ^-  @uv
-    ((ot:dejs:format ~[[key (se:dejs:format %uv)]]) jon)
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  @uv
+  ((ot:dejs:format ~[[key (se:dejs:format %uv)]]) jon)
 ::
 ::  ── the attachment surface ──────────────────────────────────────────
 ::
@@ -367,7 +351,7 @@
   ?.  ?=([%o *] jon)  ~
   ?~  (~(get by p.jon) 'attachments')  `~
   =/  res
-    %-  mule
+    %-  mole
     |.
     ^-  (list up-ref)
     %.  jon
@@ -380,9 +364,9 @@
             hash+(se:dejs:format %uv)
         ==
     ==
-  ?:  ?=(%| -.res)  ~
-  ?:  (gth (lent p.res) most)  ~
-  `p.res
+  ?~  res  ~
+  ?:  (gth (lent u.res) most)  ~
+  res
 ::
 ::  ── hostile signed strings, at the header boundary ──────────────────
 ::
@@ -484,14 +468,12 @@
 ++  de-fetch
   |=  jon=json
   ^-  (unit [hash=@uv from=@p])
-  =/  res
-    %-  mule
-    |.
-    ^-  [@uv @p]
-    %.  jon
-    %-  ot:dejs:format
-    :~  hash+(se:dejs:format %uv)
-        from+(se:dejs:format %p)
-    ==
-  ?:(?=(%| -.res) ~ `p.res)
+  %-  mole
+  |.
+  ^-  [@uv @p]
+  %.  jon
+  %-  ot:dejs:format
+  :~  hash+(se:dejs:format %uv)
+      from+(se:dejs:format %p)
+  ==
 --

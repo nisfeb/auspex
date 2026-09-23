@@ -1019,15 +1019,12 @@ The answer is a `$page` — `[mark=@tas noun]` — whose mark MUST be
 **`%auspex-blob`** (`+blob-page-mark`) and whose noun MUST be an `$octs`. A
 fetcher MUST discard anything else.
 
-**Case probing.** Case 1 covers every ordinary blob. The one operation that
-burns a case is restriction: culling a spur parks the culled case as a
-high-water mark, so a blob restricted and later re-published answers at case 2
-permanently. The reference fetcher probes up to `+max-case-probe` = **3**,
-costing one timeout per miss, paid only by a blob that has actually been
-restricted. Relatedly: a publisher MUST NOT `%grow` a spur it has not first
-established is unbound — `+grow` assigns `las+1` on a non-empty fan, so three
-idempotent-looking "make public" presses push a binding past the probe ceiling
-and the attachment becomes unfetchable by every peer, forever, with no error.
+**Case 1, always.** A publisher MUST NOT `%grow` a spur it has not first
+established is unbound — `+grow` assigns `las+1` on a non-empty fan — and MUST
+NOT cull a blob spur, so every blob is bound at case 1 and a fetcher requests
+case 1 only. A publisher that grew on every idempotent-looking republish would
+push the binding off the case every fetcher asks for, and the attachment would
+become unfetchable by every peer, forever, with no error.
 
 **On arrival, the bytes MUST be re-hashed.** The reference receiver, in order:
 
@@ -1046,26 +1043,6 @@ never a message and never a signature.
 
 **A fetcher republishes what it accepted**, because it is now one of the ships
 holding the bytes.
-
-### 5.5 Restriction is withdrawal, not access control
-
-`%public` is the default. A chain is forwardable to anyone by construction, and
-an attachment only the original recipients could read would make every forward
-carry an unreadable file.
-
-Restriction withdraws **our own copy** from our farm. Because a fetcher
-republishes, the first successful fetch creates a second, independent,
-un-revocable source, and withdrawing ours after that stops nobody.
-
-**What restriction buys is exactly this:** bytes we have not yet served cannot
-be pulled from us, and a hash is not a capability we hand out by default once we
-have said no. An implementation MUST present it as unpublishing and MUST NOT
-present it as revoking or as permission. Anything that presents it as revocable
-permission is lying to the user, and the same reasoning that makes a chain
-portable makes a blob unrecallable — that is the trade this design took
-deliberately when it chose the hash as the authority.
-
-Blob visibility is **local state** and never travels ([§7](#7-local-state-is-not-protocol)).
 
 > The HTTP-side blob routes (`POST /api/blob`, `GET /api/blob`) are a property of
 > the reference client's web surface, not of the protocol, and are out of scope
@@ -1263,15 +1240,13 @@ is nothing here worth checking a reader for.
 ceiling and it becomes unreadable by every peer, forever, with no error.
 
 A reader SHOULD probe **cases 1 through 8**, with a deadline of **4 seconds**
-each. That is a wider ladder than a blob fetch uses and a shorter deadline, and
-both halves are deliberate: a blob is immutable, so its spur moves only when a
-restrict culls it, while `/proto` moves one case every time a ship changes its
-version ladder or its caps — a normal thing for a deployed protocol to do, and
-two changes are enough to reach the three-case blob ceiling. A namespace read is
-answered from a cache or from the publisher's kernel with no agent in the loop,
-so a keen that is slow is a keen that is not coming; 8 × 4s is 32 seconds for a
-total miss, against the 30 the three-case blob ladder already costs, and those
-seconds hold queued mail on first contact — which is why the total, and not the
+each. A blob fetch asks for case 1 alone, and the difference is deliberate: a
+blob is immutable and bound once, while `/proto` moves one case every time a
+ship changes its version ladder or its caps — a normal thing for a deployed
+protocol to do. A namespace read is answered from a cache or from the
+publisher's kernel with no agent in the loop, so a keen that is slow is a keen
+that is not coming; 8 × 4s is 32 seconds for a total miss, and those seconds
+hold queued mail on first contact — which is why the total, and not the
 per-case number, is what was held fixed.
 
 So a publisher **reads back what is bound** — through the same keen a peer uses
@@ -1493,7 +1468,7 @@ Observed behaviour of the reference receiver, and the constraint behind it:
 
 | Signed, travels | Local, never travels |
 |---|---|
-| `from`, `life`, `to`, `subj`, `body`, `body-mime`, `sent`, `prev`, `attachments` | read marks, labels, archive, drafts, filters, mailing lists, blob visibility, blob arrival time, inbox order, the `direct` flag, the BCC record, **the verdict**, **the discovery cache** |
+| `from`, `life`, `to`, `subj`, `body`, `body-mime`, `sent`, `prev`, `attachments` | read marks, labels, archive, drafts, filters, mailing lists, blob arrival time, inbox order, the `direct` flag, **the verdict**, **the discovery cache** |
 
 A client MUST NOT infer any right-hand-column value from a chain, MUST NOT
 serialise one into a message, and MUST NOT treat a disagreement about one as an
@@ -1522,9 +1497,6 @@ Specifically:
 - **A mailing list name never travels.** The name is a local key; what a
   recipient sees in `to` is ships, always, exactly as if they had been typed one
   at a time.
-- **BCC is a local record on the sender** — who we blind-copied, keyed by the
-  message we sent, so our own Sent view is accurate. It is not signed and it
-  does not travel.
 - **The discovery cache is local.** `$proto` itself is published and read over
   the namespace ([§6.3](#63-discovery)); what a ship *remembers* about a peer —
   the record, its `asked` time, a remembered silence — is one ship's snapshot at
@@ -1829,8 +1801,6 @@ an implementer inherits them:
   than justified.
 - **Moons and comets are unverifiable to third parties.** See
   [§3.5](#35-moons-and-comets).
-- **Restriction is withdrawal, not revocation.** See
-  [§5.5](#55-restriction-is-withdrawal-not-access-control).
 - **`max-signers` caps one poke, not a sender.** A peer willing to send a
   thousand pokes still buys a thousand times the work. The real answer is a
   per-source rate budget.

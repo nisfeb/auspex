@@ -557,27 +557,12 @@
     (expect !>((blob-ok:auspex octs.f hash.a)))
   ==
 ::
-::  a file whose declared length is BELOW its measured bytes is malformed:
-::  the atom carries more than the octs claims, so the address computed at
-::  send time would not be the address the bytes are re-measured against.
-++  test-file-ok-rejects-malformed-octs
-  ;:  weld
-    (expect !>((file-ok:auspex ['a' 'text/plain' [11 'hello world']])))
-    (expect !>((file-ok:auspex ['a' 'text/plain' [40 'hello world']])))
-    (expect !>(!(file-ok:auspex ['a' 'text/plain' [3 'hello world']])))
-    (expect !>(!(file-ok:auspex ['a' 'text/plain' [1.000.000 'x']])))
-    (expect !>(!(file-ok:auspex [(crip (reap 300 'n')) 'text/plain' [1 'x']])))
-    (expect !>(!(file-ok:auspex ['a' (crip (reap 200 'm')) [1 'x']])))
-  ==
-::
-::  +attach-ok is +file-ok WITHOUT THE BYTES, and the send path that
-::  names an already-stored blob is checked by it alone. Everything
-::  +file-ok enforces except the octs measurement is enforced here, so
-::  the two ways into a send cannot drift on the caps.
+::  +attach-ok is what a send names and what delivery accepts: size
+::  against max-blob, and the two hostile strings through +text-ok.
 ++  test-attach-ok-enforces-the-same-caps
   ;:  weld
     (expect !>((attach-ok:auspex ['a' 11 'text/plain' 0v1])))
-    ::  size against max-blob, exactly as +file-ok checks p.octs
+    ::  size against max-blob
     (expect !>((attach-ok:auspex ['a' 262.144 'text/plain' 0v1])))
     (expect !>(!(attach-ok:auspex ['a' 262.145 'text/plain' 0v1])))
     ::  name and mime through +text-ok, same caps

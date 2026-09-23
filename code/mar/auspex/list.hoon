@@ -31,7 +31,7 @@
     ?:  ?=(%| -.res)  [%s 'unreadable']
     =/  l  p.res
     %-  pairs:enjs:format
-    :~  ['members' [%a (turn ~(tap in members.l) |=(s=@p `^json`[%s (scot %p s)]))]]
+    :~  ['members' (ships-json:uc members.l)]
     ==
   --
 ++  grab

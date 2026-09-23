@@ -17,16 +17,8 @@
   ++  noun  n
   ++  json
     ^-  ^json
-    =/  res  (mule |.(;;(rule:uc n)))
-    ?:  ?=(%| -.res)  [%s 'unreadable']
-    =/  r  p.res
-    %-  pairs:enjs:format
-    :~  ['id' [%s (scot %uv id.r)]]
-        ['from' ?~(from.r ~ [%s (scot %p u.from.r)])]
-        ['subject' ?~(subject.r ~ [%s u.subject.r])]
-        ['add' [%a (turn ~(tap in add.r) |=(t=@tas `^json`[%s t]))]]
-        ['archive' [%b archive.r]]
-    ==
+    ::  the same renderer /api/rules answers with.
+    (fall (bind (mole |.(;;(rule:uc n))) rule-json:uc) [%s 'unreadable'])
   --
 ++  grab
   |%
