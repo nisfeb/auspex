@@ -3,6 +3,7 @@ import { AttachmentRow } from './Attachments'
 import VerdictBadge from './VerdictBadge'
 import ShipChips, { commitShip } from './ShipChips'
 import { ourShip, type MailList, type Message } from './api'
+import { quoteBlocks } from './quote'
 
 // ONE MESSAGE, RENDERED ONCE. The list view stacks these in `sent`
 // order and the tree view shows the copies of whichever node is
@@ -15,9 +16,17 @@ import { ourShip, type MailList, type Message } from './api'
 // callers key on their position in the backend-ordered list rather than
 // on `m.id`.
 export default function MessageCard({
-  m, lists, onSaveList,
+  m, lists, onSaveList, onReply, onForward, targeted,
 }: {
   m: Message
+  // REPLY AND FORWARD ON THE MESSAGE ITSELF. Answering one used to mean
+  // switching to the tree, picking its node, and going back up to the
+  // top of the thread; now it is the message you are looking at. Absent
+  // for a copy whose signature failed: nothing may point at it.
+  onReply?: () => void
+  onForward?: () => void
+  // This is the message the reply box below answers.
+  targeted?: boolean
   // The lists this ship holds, so the Save-as-list form can offer their
   // names and say when a save will OVERWRITE one. Optional, and the
   // control is absent without a handler: a card rendered somewhere with
@@ -26,6 +35,7 @@ export default function MessageCard({
   onSaveList?: (l: MailList) => Promise<void>
 }) {
   const [saving, setSaving] = useState(false)
+  const [copied, setCopied] = useState(false)
   // A DOM id that is unique per card. Several cards render at once and a
   // thread can hold several copies of one message, so keying the
   // datalist on the message id would collide — and a duplicated id
@@ -92,18 +102,50 @@ export default function MessageCard({
   }
 
   return (
-    <article className="mb-3 border-b border-line pb-3">
-      <header className="mb-1 flex min-w-0 items-center gap-2">
+    <article
+      className={`mb-3 border-b border-line pb-3
+        ${targeted ? 'border-l-2 border-l-accent pl-2' : ''}`}
+      aria-current={targeted ? 'true' : undefined}
+    >
+      <header className="mb-1 flex min-w-0 flex-wrap items-center gap-x-2">
         <VerdictBadge verdict={m.verdict} from={m.from} />
         <span className="min-w-0 truncate font-medium">{m.from}</span>
         <span className="ml-auto shrink-0 text-[11px] text-ink-faint">
           {new Date(m.sent).toLocaleString()}
         </span>
+        {onReply && (
+          <button type="button" onClick={onReply} className="btn shrink-0" title="Reply to this message">
+            Reply
+          </button>
+        )}
+        {onForward && (
+          <button
+            type="button"
+            onClick={onForward}
+            className="btn shrink-0"
+            title="Hand this message, and the signed messages leading to it, to someone new"
+          >
+            Forward
+          </button>
+        )}
       </header>
       {/* `break-words`, not just `whitespace-pre-wrap`: a body is
           attacker-chosen text and one unbroken 400-character token
-          would otherwise decide how wide this pane is. */}
-      <p className="whitespace-pre-wrap break-words">{m.body}</p>
+          would otherwise decide how wide this pane is.
+
+          A QUOTE IS SET OFF, a rule beside it and quieter text: lines
+          somebody took from an earlier message, inside what this
+          sender says. Still plain text, still React-escaped. */}
+      {quoteBlocks(m.body).map((b, i) => b.quoted ? (
+        <blockquote
+          key={i}
+          className="my-1 whitespace-pre-wrap break-words border-l-2 border-line-strong pl-2 text-ink-dim"
+        >
+          {b.text}
+        </blockquote>
+      ) : (
+        <p key={i} className="whitespace-pre-wrap break-words">{b.text}</p>
+      ))}
       {/* body-mime is signed, so an intermediary cannot change which
           message you read — but a signature proves the author CHOSE
           the value, never that it is safe, and the chain carrying it
@@ -149,13 +191,24 @@ export default function MessageCard({
           every other per-message control: the primary action on a thread
           is the reply, and exactly one control per surface may look like
           one. */}
-      {onSaveList && !saving && (
-        <p className="mt-1">
+      <p className="mt-1 flex flex-wrap gap-1">
+        {/* The whole body in one go: selecting it works too, but a long
+            message is a long drag. */}
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard?.writeText(m.body).then(() => { setCopied(true) })
+          }}
+          className="btn"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        {onSaveList && !saving && (
           <button type="button" onClick={open} className="btn">
             {done ? 'Saved as a list' : 'Save as list'}
           </button>
-        </p>
-      )}
+        )}
+      </p>
       {onSaveList && saving && (
         <div className="mt-2 max-w-prose space-y-1 rounded-sm border border-line p-2">
           <h3 className="font-medium">Save these ships as a list</h3>

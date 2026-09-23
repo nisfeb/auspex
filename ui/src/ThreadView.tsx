@@ -10,6 +10,8 @@ import { FilePicker } from './Attachments'
 import MessageCard from './MessageCard'
 import ThreadTree, { allForged, copiesOf, speaker } from './ThreadTree'
 import type { ForwardIntent } from './Compose'
+import { when } from './ThreadList'
+import { fuzzyHas, quoteInto } from './quote'
 
 // The default reply audience.
 //
@@ -40,8 +42,10 @@ function defaultRecipients(th: Thread): string[] {
 }
 
 export default function ThreadView({
-  id, onSent, onDeleted, onForward, onFiled, onRead, updatedAt, lists, onSaveList,
+  id, onSent, onDeleted, onForward, onFiled, onRead, updatedAt, lists, onSaveList, knownLabels,
 }: {
+  // The labels in use on this ship, offered as a label is typed.
+  knownLabels?: string[]
   id: string
   // Called once the read mark opening this thread has landed on the
   // ship, so the listing can un-bold the row without a refetch.
@@ -97,6 +101,15 @@ export default function ThreadView({
   // thread they open afterwards. List is the default because it is the
   // right shape for reading.
   const [view, setView] = useState<'list' | 'tree'>('list')
+  // The reply box, to focus when a message's own Reply is pressed; the
+  // messages, so a quote is taken only from text selected in them.
+  const replyRef = useRef<HTMLTextAreaElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
+  // The rest of what travels with a reply, unrolled on request.
+  const [showIncluded, setShowIncluded] = useState(false)
+  // A label being typed, or null while the field is shut.
+  const [labelDraft, setLabelDraft] = useState<string | null>(null)
+  const [hint, setHint] = useState<string | null>(null)
   // The node the tree has selected, by message id — null until the user
   // picks one, when it stands for "whatever the list would have replied
   // to". Cleared on a thread change and never on a beacon push: a
@@ -254,16 +267,19 @@ export default function ThreadView({
 
   const onLabel = (l: string, add: boolean) => file(setLabel(id, l, add))
 
-  const addLabel = () => {
-    const l = (window.prompt(
-      'Label this conversation. Labels are local: they never travel, and no other'
-      + ' ship can see them. Lowercase letters, digits and hyphens.',
-    ) ?? '').trim()
-    if (!l) return
+  // A LABEL IS TYPED IN PLACE, and the ones already in use narrow to
+  // what it could be as it is typed, letters in order ("inv" finds
+  // "invoices"): most labels are picked, not spelled. It was a browser
+  // prompt that offered nothing.
+  const addLabel = (raw: string) => {
+    const l = raw.trim()
+    if (!l) { setLabelDraft(null); return }
     if (!/^[a-z][a-z0-9-]*$/.test(l)) {
       setSendError('A label is a lowercase term: a-z, 0-9 and hyphens, starting with a letter.')
       return
     }
+    setSendError(null)
+    setLabelDraft(null)
     void onLabel(l, true)
   }
 
@@ -371,15 +387,17 @@ export default function ThreadView({
   // Not t.messages.length — that counts stored COPIES, several of which
   // may be one message kept in several signatures, and it counts sibling
   // branches that no longer leave the ship at all.
-  const pathLength = (from: Message): number => {
+  // The messages a reply to [from] carries, root first: one per id, the
+  // copy that speaks for it, never a forged twin chosen by position.
+  const pathTo = (from: Message): Message[] => {
     const byId = new Map(t.messages.map((m) => [m.id, m]))
-    const seen = new Set<string>()
+    const seen: string[] = []
     let cur: Message | undefined = from
-    while (cur && !seen.has(cur.id)) {
-      seen.add(cur.id)
+    while (cur && !seen.includes(cur.id)) {
+      seen.push(cur.id)
       cur = cur.prev ? byId.get(cur.prev) : undefined
     }
-    return seen.size
+    return seen.reverse().map((i) => speaker(copiesOf(t.messages, i)))
   }
 
   // WHICH VIEW IS ACTUALLY ON SCREEN. The toggle is only offered on a
@@ -406,7 +424,8 @@ export default function ThreadView({
   // rather than quietly falling back to somewhere the user did not
   // click. Within a node that has an honest copy, that copy speaks.
   const pickedCopies = picked ? copiesOf(t.messages, picked) : []
-  const target = mode === 'tree' && pickedCopies.length ? speaker(pickedCopies) : last
+  // Picked from the tree, or by a message's own Reply in either view.
+  const target = pickedCopies.length ? speaker(pickedCopies) : last
   // Only ever true in the tree view — and true of the DEFAULT selection
   // too, not just a clicked one. On a thread where every copy is forged
   // `last` above falls back to a forged message, so the node the tree
@@ -415,14 +434,64 @@ export default function ThreadView({
   // view keeps its long-standing behaviour: with no way to say "that
   // one" it has nowhere else to fall back to, and that is not something
   // to change here.
-  const targetForged = mode === 'tree' && allForged(copiesOf(t.messages, target.id))
+  const targetForged = (mode === 'tree' || picked !== null) && allForged(copiesOf(t.messages, target.id))
   const noTarget = targetForged
     ? 'Every stored copy of this message failed its signature, so nothing can'
       + ' point at it: a reply naming it would carry a chain nobody signed.'
       + ' Select another message.'
     : null
 
-  const travels = pathLength(target)
+  const path = pathTo(target)
+  const travels = path.length
+  const replyTo = (mid: string) => {
+    setPicked(mid)
+    setShowIncluded(false)
+    requestAnimationFrame(() => {
+      replyRef.current?.focus()
+      replyRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+  }
+  const forwardFrom = (m: Message) => {
+    const p = pathTo(m)
+    onForward({ prev: m.id, subject: m.subject, count: p.length, path: p })
+  }
+  // A QUOTE, FROM WHAT IS SELECTED IN THE MESSAGES ABOVE: the lines go
+  // into the reply at the cursor, each set with "> ". Only a selection
+  // inside the thread counts, so something highlighted elsewhere on the
+  // page is not quoted into a signed message by accident.
+  const quoteSelection = () => {
+    const sel = window.getSelection()
+    const text = sel?.toString() ?? ''
+    const inThread = sel !== null && sel.rangeCount > 0
+      && (messagesRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer) ?? false)
+    if (!text.trim() || !inThread) {
+      setHint('Select some lines in a message above, then press Quote selection.')
+      return
+    }
+    setHint(null)
+    const ta = replyRef.current
+    const q = quoteInto(reply, text, ta ? ta.selectionStart : reply.length)
+    setReply(q.body)
+    requestAnimationFrame(() => { ta?.focus(); ta?.setSelectionRange(q.cursor, q.cursor) })
+  }
+  // A message's own Reply and Forward. Not on a copy whose signature
+  // failed, which nothing may point at.
+  //
+  // Up to 4 copies of a message share the same `id` by design (one
+  // genuine, others forged): keyed on the position in the fixed,
+  // backend-ordered list, not `m.id`, or React's key collision folds
+  // distinct verified and forged copies into one node.
+  const card = (m: Message, i: number) => (
+    <MessageCard
+      key={i}
+      m={m}
+      lists={lists}
+      onSaveList={onSaveList}
+      onReply={m.verdict === 'forged' ? undefined : () => replyTo(m.id)}
+      onForward={m.verdict === 'forged' ? undefined : () => forwardFrom(m)}
+      targeted={m.verdict !== 'forged' && m.id === target.id}
+    />
+  )
 
   // A @p typed but not yet committed to a chip would otherwise vanish on
   // send. Fold it in rather than silently dropping a recipient the user
@@ -509,6 +578,9 @@ export default function ThreadView({
     }
     setReply('')
     setFiles([])
+    // Sent: the next reply answers the conversation as it now stands.
+    setPicked(null)
+    setShowIncluded(false)
     onSent(notice)
     try {
       const th = await thread(forId)
@@ -532,49 +604,22 @@ export default function ThreadView({
         {/* LIST OR TREE, offered only where there is a shape to see. A
             thread of one message has no branch to draw, and a control
             switching between two identical pictures is furniture. */}
+        {/* THE TREE IS SHOWN OR IT IS NOT: one switch. Two buttons, List
+            and Tree, read as a pair of views, and pressing Tree again did
+            nothing. Offered only where there is a shape to see. */}
         {branching && (
-          <span className="flex shrink-0 items-center" role="group" aria-label="Conversation shape">
-            <button
-              type="button"
-              onClick={() => setView('list')}
-              aria-pressed={mode === 'list'}
-              title="Every stored copy of every message, oldest first."
-              className={`btn rounded-r-none border-line-strong ${mode === 'list' ? 'bg-sunken text-ink' : ''}`}
-            >
-              List
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('tree')}
-              aria-pressed={mode === 'tree'}
-              title="Who replied to what. A reply or forward ships the path from the root down to
-                the message it points at — this is that shape, and a node picked here is what
-                the next message points at."
-              className={`btn -ml-px rounded-l-none border-line-strong ${mode === 'tree' ? 'bg-sunken text-ink' : ''}`}
-            >
-              Tree
-            </button>
-          </span>
+          <button
+            type="button"
+            onClick={() => setView(mode === 'tree' ? 'list' : 'tree')}
+            aria-pressed={mode === 'tree'}
+            title="Who replied to what. A reply or forward ships the path from the root down to
+              the message it points at; this is that shape, and a node picked here is what
+              the next message points at."
+            className={`btn shrink-0 border-line-strong ${mode === 'tree' ? 'bg-sunken text-ink' : ''}`}
+          >
+            Tree
+          </button>
         )}
-        {/* Forward is a reply addressed elsewhere: same poke, `prev`
-            pointing into this chain, `to` naming someone new. The chain
-            it carries is the payload, and the recipient can verify every
-            author in it without ever having met them - which is why the
-            composer says so before the To field. */}
-        <button
-          type="button"
-          disabled={targetForged}
-          onClick={() => onForward({
-            prev: target.id,
-            subject: target.subject,
-            count: travels,
-          })}
-          title={noTarget
-            ?? `Hand this line of the conversation to someone new. The ${travels} signed ${travels === 1 ? 'message' : 'messages'} leading to this one travel; other branches do not. The recipient can verify each author independently.`}
-          className="btn shrink-0"
-        >
-          Forward
-        </button>
         {/* ARCHIVE IS NOT DELETE, and the two sit side by side, so the
             difference has to be on the buttons rather than only in a
             document. Archiving takes a thread out of the Inbox view and
@@ -634,9 +679,43 @@ export default function ThreadView({
             </button>
           </span>
         ))}
-        <button type="button" onClick={addLabel} className="btn btn-outline">
-          + label
-        </button>
+        {labelDraft === null ? (
+          <button type="button" onClick={() => setLabelDraft('')} className="btn btn-outline">
+            + label
+          </button>
+        ) : (
+          <>
+            <input
+              autoFocus
+              value={labelDraft}
+              onChange={(e) => setLabelDraft(e.target.value.toLowerCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); addLabel(labelDraft) }
+                if (e.key === 'Escape') setLabelDraft(null)
+              }}
+              onBlur={() => { if (!labelDraft.trim()) setLabelDraft(null) }}
+              placeholder="label"
+              aria-label="Label this conversation"
+              title="Labels are local: they never travel, and no other ship can see them. Lowercase letters, digits and hyphens."
+              className="field w-32"
+            />
+            {(knownLabels ?? [])
+              .filter((l) => !t.labels.includes(l) && fuzzyHas(l, labelDraft.trim()))
+              .slice(0, 8)
+              .map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  // Before the field's blur can shut it.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => addLabel(l)}
+                  className="btn btn-outline"
+                >
+                  + {l}
+                </button>
+              ))}
+          </>
+        )}
       </div>
       {/* Messages stored on this ship that this build cannot read. The
           nexus refuses pre-body-mime grubs rather than relabelling them,
@@ -653,6 +732,7 @@ export default function ThreadView({
           the current format would break the signature that makes it evidence.
         </p>
       )}
+      <div ref={messagesRef}>
       {mode === 'tree' ? (
         <>
           <ThreadTree
@@ -664,17 +744,48 @@ export default function ThreadView({
               uses. Every copy, not one: a node collapses the copies that
               share an id, and a forged twin of the message on screen is
               exactly the thing a reader must be able to see. */}
-          {copiesOf(t.messages, target.id).map((m, i) => (
-            <MessageCard key={i} m={m} lists={lists} onSaveList={onSaveList} />
-          ))}
+          {copiesOf(t.messages, target.id).map(card)}
         </>
-      ) : t.messages.map((m, i) => (
-        // Up to 4 copies of a message share the same `id` by design (one
-        // genuine, others forged) — index into the fixed, backend-ordered
-        // list, not `m.id`, or React's key collision folds distinct
-        // verified/forged copies into one node.
-        <MessageCard key={i} m={m} lists={lists} onSaveList={onSaveList} />
-      ))}
+      ) : t.messages.map(card)}
+      </div>
+      {/* WHAT THE REPLY ANSWERS, AND WHAT GOES WITH IT. The message it
+          answers is marked above; the rest of what travels, every signed
+          message from the start of the conversation down to it, is here
+          to read before sending, and other branches are not in it. */}
+      <div className="mb-1 mt-3 flex flex-wrap items-center gap-1 text-[12px]">
+        <span className="text-ink-dim">Replying to</span>
+        <span className="font-medium">{target.from}</span>
+        <span className="text-ink-faint">{when(target.sent)}</span>
+        {picked !== null && target.id !== last.id && (
+          <button type="button" onClick={() => setPicked(null)} className="btn">
+            Reply to the newest instead
+          </button>
+        )}
+        {path.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShowIncluded(!showIncluded)}
+            aria-expanded={showIncluded}
+            className="btn ml-auto"
+          >
+            {showIncluded
+              ? 'Hide included messages'
+              : `Show ${path.length - 1} included ${path.length - 1 === 1 ? 'message' : 'messages'}`}
+          </button>
+        )}
+      </div>
+      {showIncluded && (
+        <div className="mb-2 max-h-72 overflow-y-auto rounded-sm bg-sunken p-2 ring-1 ring-line">
+          {path.slice(0, -1).map((m) => (
+            <div key={m.id} className="mb-2 last:mb-0">
+              <p className="text-[11px] text-ink-faint">
+                {m.from} · {new Date(m.sent).toLocaleString()}
+              </p>
+              <p className="whitespace-pre-wrap break-words text-ink-dim">{m.body}</p>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="mb-1 rounded-sm border border-line p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <span className="text-ink-dim">To</span>
@@ -720,7 +831,22 @@ export default function ThreadView({
       </div>
       {/* max-body in grubbery-overlay/lib/auspex-chain.hoon. See
           Compose.tsx: a guard rail in UTF-16 units, not the authority. */}
+      <div className="mb-1 flex items-center gap-2">
+        {/* Kept from stealing the selection: a press on a button can
+            clear what was highlighted before the click reads it. */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={quoteSelection}
+          title="Put the lines selected in a message above into your reply, each set with >."
+          className="btn"
+        >
+          Quote selection
+        </button>
+        {hint && <span className="text-[11px] text-ink-dim">{hint}</span>}
+      </div>
       <textarea
+        ref={replyRef}
         value={reply}
         onChange={(e) => setReply(e.target.value)}
         maxLength={100000}

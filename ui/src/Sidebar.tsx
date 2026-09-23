@@ -63,6 +63,8 @@ export default function Sidebar({
 }) {
   const row = (
     active: boolean, name: string, hint: string, n: number | null, onClick: () => void,
+    // Unread is news and is drawn so; a count of drafts is not.
+    loud = false,
   ) => (
     <button
       key={name}
@@ -76,7 +78,14 @@ export default function Sidebar({
     >
       <span className="truncate">{name}</span>
       {n !== null && n > 0 && (
-        <span className="ml-auto shrink-0 text-[11px] text-ink-faint">{n}</span>
+        <span
+          className={loud
+            ? 'ml-auto shrink-0 rounded-full bg-accent px-1.5 text-[11px] font-bold text-accent-ink'
+            : 'ml-auto shrink-0 text-[11px] text-ink-faint'}
+          title={loud ? `${n} unread` : undefined}
+        >
+          {n}
+        </span>
       )}
     </button>
   )
@@ -92,7 +101,7 @@ export default function Sidebar({
       <nav className="mt-2 min-h-0 flex-1 overflow-y-auto px-1">
         {FIXED.map((f) =>
           row(view === f.view, f.name, f.hint, counts[f.view] ?? null,
-            () => onView(f.view)))}
+            () => onView(f.view), true))}
         {row(
           view === 'drafts',
           'Drafts',

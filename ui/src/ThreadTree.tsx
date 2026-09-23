@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ownWords } from './quote'
 import type { Message, Verdict } from './api'
 import VerdictBadge from './VerdictBadge'
 import { when } from './ThreadList'
@@ -44,12 +45,16 @@ interface Node {
   orphan: boolean
   depth: number
   row: number
+  // Two lines of what the speaker said, its own words, not its quotes.
+  preview: string
 }
 
 const NODE_W = 178
-const NODE_H = 40 // ≥40px on a finger, and the same on a mouse.
+// A name and a time, then two lines of what the message says: a node
+// that named only its sender said nothing about which reply it was.
+const NODE_H = 64
 const COL = NODE_W + 46
-const ROW = 52
+const ROW = 76
 const PAD = 12
 const STUB = 22 // the dashed edge an orphan hangs from.
 
@@ -100,6 +105,7 @@ export function layout(messages: Message[]): { nodes: Node[]; rows: number; cols
       orphan: false,
       depth: 0,
       row: 0,
+      preview: ownWords(s.body) || '(no text)',
     }
     nodes.push(n)
     byId.set(m.id, n)
@@ -292,16 +298,21 @@ export default function ThreadTree({
                 title={n.orphan
                   ? `${n.from} — the message this one replies to is not held by this ship.`
                   : `${n.from} — ${new Date(n.sent).toLocaleString()}`}
-                className={`flex h-10 w-full items-center gap-1.5 rounded-sm border px-1.5 text-left
+                className={`flex h-16 w-full flex-col justify-center rounded-sm border px-1.5 text-left
                   ${here
                     ? 'border-accent bg-accent-soft text-accent-soft-ink ring-1 ring-accent'
                     : on
                       ? 'border-accent bg-raised text-ink'
                       : 'border-line bg-raised text-ink-dim hover:bg-sunken'}`}
               >
-                <VerdictBadge verdict={n.verdict} from={n.from} />
-                <span className="min-w-0 flex-1 truncate text-[12px]">{n.from}</span>
-                <span className="shrink-0 text-[11px] text-ink-faint">{when(n.sent)}</span>
+                <span className="flex w-full min-w-0 items-center gap-1.5">
+                  <VerdictBadge verdict={n.verdict} from={n.from} />
+                  <span className="min-w-0 flex-1 truncate text-[12px]">{n.from}</span>
+                  <span className="shrink-0 text-[11px] text-ink-faint">{when(n.sent)}</span>
+                </span>
+                <span className="line-clamp-2 w-full break-words text-[11px] leading-tight text-ink-dim">
+                  {n.preview}
+                </span>
               </button>
             </foreignObject>
           )

@@ -61,8 +61,21 @@ export default function ThreadList({
             className={`touch flex w-full items-center gap-2 border-b border-line px-2 py-1
               text-left hover:bg-sunken
               ${selected === e.id ? 'bg-accent-soft' : ''}
-              ${e.unread ? 'font-semibold text-ink' : 'text-ink-dim'}`}
+              ${e.unread ? 'font-bold text-ink' : 'text-ink-dim'}`}
           >
+            {/* UNREAD HAS TO BE SEEN DOWN A LONG LIST, which a heavier
+                weight alone was not: a dot in a gutter of its own, bold,
+                the time in the accent, and the read rows around it
+                quieter. The gutter is on every row, so read and unread
+                senders start on the same edge. */}
+            <span className="flex w-2 shrink-0 justify-center">
+              {e.unread && (
+                <>
+                  <span className="size-2 rounded-full bg-accent" aria-hidden="true" />
+                  <span className="sr-only">Unread</span>
+                </>
+              )}
+            </span>
             {/* A STRAIGHT SCAN COLUMN. Two of the verdicts are a glyph
                 and the third is a stamped word, so an unpadded slot
                 pushed the sender and subject of a forged row sideways
@@ -113,7 +126,7 @@ export default function ThreadList({
                     the subject gets what it needs and the snippet gets
                     what is left. */}
                 <span className="min-w-0 flex-1 truncate">
-                  <span className="text-ink">{e.subject}</span>
+                  <span className={e.unread ? 'text-ink' : 'text-ink-dim'}>{e.subject}</span>
                   {e.snippet && (
                     <span className="font-normal text-ink-faint"> — {e.snippet}</span>
                   )}
@@ -136,7 +149,10 @@ export default function ThreadList({
                 {e.count} copies
               </span>
             )}
-            <span className="w-12 shrink-0 text-right text-[11px] font-normal text-ink-faint">
+            <span
+              className={`w-12 shrink-0 text-right text-[11px]
+                ${e.unread ? 'font-bold text-accent' : 'font-normal text-ink-faint'}`}
+            >
               {when(e.last)}
             </span>
           </button>

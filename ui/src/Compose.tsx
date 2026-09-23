@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   canSign, deleteDraft, garbled, isShip, newId, NO_KEYS_LINE, refusalLine,
   saveDraft, send, sendDraft, unreachable, uploadAll,
-  type Draft, type MailList,
-} from './api'
+  type Draft, type MailList, type Message } from './api'
 import { FilePicker } from './Attachments'
 import ShipChips, { commitShip } from './ShipChips'
 
@@ -27,6 +26,9 @@ export interface ForwardIntent {
   // and not the stored-copy count, which counts one message several
   // times when copies differ in signature.
   count: number
+  // Those messages, root first, where the thread was open to hand them
+  // over; the last is the one being forwarded. Absent on a resumed draft.
+  path?: Message[]
 }
 
 // How long the composer sits still before it saves. Long enough that
@@ -58,6 +60,8 @@ export default function Compose({
   // inside the control so Send can fold it in.
   const [to, setTo] = useState<string[]>(resume ? resume.to : [])
   const [pending, setPending] = useState('')
+  // The rest of the forwarded path, unrolled on request.
+  const [showIncluded, setShowIncluded] = useState(false)
   const [subject, setSubject] = useState(
     resume ? resume.subject : forward ? `fwd: ${forward.subject}` : '',
   )
@@ -327,6 +331,49 @@ export default function Compose({
             should get that history.
           </p>
         )}
+        {/* WHAT IS BEING FORWARDED, SHOWN: the message itself, and above
+            it, unrolled on request, the rest of the path that goes with
+            it. A count of messages is not something to review. */}
+        {forward?.path && forward.path.length > 0 && (() => {
+          const fwd = forward.path[forward.path.length - 1]
+          const earlier = forward.path.slice(0, -1)
+          return (
+            <div className="mb-2 space-y-1">
+              <div className="flex flex-wrap items-center gap-1 text-[12px]">
+                <span className="text-ink-dim">Forwarding</span>
+                <span className="font-medium">{fwd.from}</span>
+                <span className="text-ink-faint">{new Date(fwd.sent).toLocaleString()}</span>
+                {earlier.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowIncluded(!showIncluded)}
+                    aria-expanded={showIncluded}
+                    className="btn ml-auto"
+                  >
+                    {showIncluded
+                      ? 'Hide included messages'
+                      : `Show ${earlier.length} included ${earlier.length === 1 ? 'message' : 'messages'}`}
+                  </button>
+                )}
+              </div>
+              {showIncluded && (
+                <div className="max-h-72 overflow-y-auto rounded-sm bg-sunken p-2 ring-1 ring-line">
+                  {earlier.map((m) => (
+                    <div key={m.id} className="mb-2 last:mb-0">
+                      <p className="text-[11px] text-ink-faint">
+                        {m.from} · {new Date(m.sent).toLocaleString()}
+                      </p>
+                      <p className="whitespace-pre-wrap break-words text-ink-dim">{m.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-sm border border-line p-2">
+                {fwd.body}
+              </p>
+            </div>
+          )
+        })()}
         {/* THE AUDIENCE, AS CHIPS, AND IT IS EXACTLY WHAT WILL BE SENT.
             Typing the start of a mailing list's name offers it beside
             the ships; picking one drops its members in as ordinary chips

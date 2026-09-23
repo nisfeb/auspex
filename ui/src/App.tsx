@@ -80,6 +80,9 @@ export default function App() {
   // is one of the two remaining users of `all`, which is why the view
   // stayed an API primitive after it left the sidebar.
   const [labels, setLabels] = useState<string[]>([])
+  // Unread in the inbox, as the sidebar's listing of everything last
+  // counted it: what the count says while another view is open.
+  const [allUnread, setAllUnread] = useState(0)
 
   // ── the shell's own state ──────────────────────────────────────────
 
@@ -244,6 +247,7 @@ export default function App() {
         const seen = new Set<string>()
         for (const e of p.threads) for (const l of e.labels) seen.add(l)
         setLabels([...seen].sort())
+        setAllUnread(p.threads.filter((e) => e.unread && !e.archived).length)
       })
       .catch((e) => { console.error(e) })
     //  allSettled, not all: one of these failing still means the wait is
@@ -331,6 +335,19 @@ export default function App() {
     setSelected(null)
     setNavOpen(false)
   }
+
+  // UNREAD, WHERE IT CAN BE SEEN FROM ANYWHERE: beside Inbox and in the
+  // tab's title, so new mail is noticed without opening the inbox. While
+  // the inbox's first page is on screen it is counted from that listing,
+  // which every delivery refreshes, so it costs the ship nothing more;
+  // elsewhere from the sidebar's listing of everything, which is read
+  // anyway for the labels. ponytail: counts the page on screen, so it
+  // tops out at PER_PAGE there; a count route would lift it.
+  const inboxShown = pane === 'inbox' && !searching && offset === 0
+  const unread = inboxShown ? entries.filter((e) => e.unread).length : allUnread
+  useEffect(() => {
+    document.title = unread > 0 ? `(${unread}) Auspex` : 'Auspex'
+  }, [unread])
 
   const pages = Math.max(1, Math.ceil(total / PER_PAGE))
   const current = Math.floor(offset / PER_PAGE) + 1
@@ -451,7 +468,7 @@ export default function App() {
             drafts={drafts.length}
             rules={rules.length}
             lists={lists.length}
-            counts={{}}
+            counts={{ inbox: unread }}
             onView={goto}
             onCompose={() => {
               setResume(null); setForwarding(null); setComposing(true); setNavOpen(false)
@@ -595,6 +612,7 @@ export default function App() {
                     updatedAt={threadUpdate}
                     lists={lists}
                     onSaveList={async (l) => { await saveList(l); refreshSidebar() }}
+                    knownLabels={labels}
                   />
                 )
                 : <p className="p-3 text-ink-faint">Select a conversation</p>}
