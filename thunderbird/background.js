@@ -9,7 +9,7 @@
 import { Api, ApiError, UnreachableError, MAX_BLOB, MAX_ATTACH } from './lib/api.js'
 import { isChange, revIn, framesIn, nextDelay, nextAttempt } from './lib/beacon.js'
 import {
-  addressToShip, shipToAddress, describeRecipient, DOMAIN,
+  addressToShip, shipToAddress, describeRecipient, isAuspexAddress, DOMAIN,
 } from './lib/address.js'
 import { buildMessage, idFromMessageId, notFetchedNote } from './lib/rfc822.js'
 import {
@@ -669,6 +669,14 @@ function htmlToText(html) {
 }
 
 async function handleSend(tab, details) {
+  //  NOT OURS. onBeforeSend fires for every account in the profile, and a
+  //  send from any identity but ~ship@auspex.urbit belongs to Thunderbird's
+  //  own SMTP. Returning nothing lets it through untouched.
+  const identity = details.identityId
+    ? await browser.identities.get(details.identityId).catch(() => null)
+    : null
+  if (!identity || !isAuspexAddress(identity.email)) return
+
   const state = await getState()
   if (!state.origin) return refuse('No ship is configured. Open the Auspex options.')
   if (state.status === 'signed-out') {

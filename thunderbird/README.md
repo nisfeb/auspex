@@ -14,7 +14,7 @@ the wire on auspex's behalf.
 
 ```
 npm test          # the four pure libs
-npm run build     # → dist/auspex-thunderbird-0.1.0.zip
+npm run build     # → dist/auspex-thunderbird-0.1.1.zip
 ```
 
 Then in Thunderbird: **Add-ons and Themes → the gear → Install Add-on From
@@ -213,12 +213,9 @@ relay on every change the ship reports.
 
 ## Sending
 
-Send is intercepted (`compose.onBeforeSend`) and always cancelled, because a
-successful auspex send is one this extension already made over HTTP and
-Thunderbird must not also try to deliver it. On success the compose window
-closes and a sync runs so the message appears in `Auspex/Sent`. **On failure
-the window stays open with everything in it** — nothing is lost and nothing
-is claimed sent.
+Only a send from the auspex identity (`~ship@auspex.urbit`, the one this extension creates) is intercepted. `compose.onBeforeSend` fires for every account in the profile, so a send from any other identity, such as an ordinary IMAP/SMTP account, is left untouched for Thunderbird's own delivery.
+
+An auspex send is intercepted and always cancelled, because a successful auspex send is one this extension already made over HTTP and Thunderbird must not also try to deliver it. On success the compose window closes and a sync runs so the message appears in `Auspex/Sent`. **On failure the window stays open with everything in it.** Nothing is lost and nothing is claimed sent.
 
 Refused, with the reason in a notification:
 
