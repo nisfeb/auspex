@@ -52,7 +52,37 @@ const DEFAULTS = {
 }
 
 const getState = async () => ({ ...DEFAULTS, ...(await browser.storage.local.get()) })
-const setState = (patch) => browser.storage.local.set(patch)
+
+//  `imported`, HELD IN MEMORY and shared by the sync and the relay.
+//
+//  It is the one piece of state touched per EVENT: every read, star and
+//  flame in the mirror lands in onUpdated, and reading the whole of
+//  storage.local and writing the whole map back for each one was
+//  O(mailbox) per click. So it is loaded once, and written back by the
+//  sync and, a moment after the last event, by the relay.
+//
+//  SHARED is the point, not just cheaper. The sync moves a record BEFORE
+//  it calls messages.update, and the onUpdated that update provokes reads
+//  this same object, finds a flag that already matches, and relays
+//  nothing. When each side read its own copy out of storage, the relay
+//  saw the record as it was before the sync and posted the sync's own
+//  write straight back to the ship.
+let importedLoad = null
+const importedMap = () => (importedLoad ??= browser.storage.local.get('imported')
+  .then((s) => ({ ...s.imported })))
+
+async function setState(patch) {
+  //  a write of `imported` that is not this map (a disconnect, the
+  //  selftest's reset) replaces it: the next use reloads.
+  if ('imported' in patch && patch.imported !== await importedLoad) importedLoad = null
+  return browser.storage.local.set(patch)
+}
+
+let saveTimer = null
+function saveImportedSoon() {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => importedMap().then((imported) => setState({ imported })), 2000)
+}
 
 //  ONE NOTIFICATION PER TRANSITION, not per failed request. A sync every
 //  sixty seconds against a ship that is down would otherwise be a
@@ -148,31 +178,47 @@ async function ensureIdentity(ship) {
 
 //  ── the mirror ──────────────────────────────────────────────────────
 
-//  An attachment's bytes, or null. On a 409 the ship is asked to keen for
-//  them and the route is polled — ten times, three seconds apart, which is
-//  a shape a per-case-probe deadline can actually finish inside. If they
-//  are still absent the caller writes a placeholder, and the placeholder is
-//  PERMANENT for that import: a message is imported once.
-async function attachmentBytes(api, att, from) {
-  let bytes = await api.blob(att.hash, att.name, att.mime)
-  if (bytes) return bytes
-  try { await api.fetchBlob(att.hash, from) } catch { /* a miss costs a placeholder */ }
-  for (let i = 0; i < 10; i += 1) {
-    await new Promise((r) => setTimeout(r, 3000))
-    bytes = await api.blob(att.hash, att.name, att.mime)
-    if (bytes) return bytes
+//  The bytes of every attachment on `msgs`, by hash; a file the ship could
+//  not get is absent. On a 409 the ship is asked to keen for it, and the
+//  misses are then polled TOGETHER — ten rounds, three seconds apart, which
+//  is a shape a per-case-probe deadline can actually finish inside. Polled
+//  one file at a time, each unfetched attachment was its own thirty
+//  seconds, in turn. A file still absent gets a placeholder, and the
+//  placeholder is PERMANENT for that import: a message is imported once.
+//
+//  ponytail: holds a whole sync's files at once (each at most MAX_BLOB);
+//  chunk the plan if seeding a mailbox with hundreds of them ever strains
+//  memory.
+async function attachmentBytes(api, msgs) {
+  const got = new Map()
+  const missing = new Map()   // hash → the attachment, while it is absent
+  for (const m of msgs) {
+    for (const a of (m.attachments || [])) {
+      if (got.has(a.hash) || missing.has(a.hash)) continue
+      const bytes = await api.blob(a.hash, a.name, a.mime)
+      if (bytes) { got.set(a.hash, bytes); continue }
+      missing.set(a.hash, a)
+      try { await api.fetchBlob(a.hash, m.from) } catch { /* a miss costs a placeholder */ }
+    }
   }
-  return null
+  for (let i = 0; i < 10 && missing.size; i += 1) {
+    await new Promise((r) => setTimeout(r, 3000))
+    for (const [hash, a] of missing) {
+      const bytes = await api.blob(hash, a.name, a.mime)
+      if (bytes) { got.set(hash, bytes); missing.delete(hash) }
+    }
+  }
+  return got
 }
 
 //  `flags` is the thread's star and flame AT IMPORT TIME, so a message
 //  arriving into a thread the owner already starred is starred the moment
 //  it appears rather than one sync later.
-async function importOne(api, item, folders, imported, flags) {
+async function importOne(item, folders, imported, flags, files) {
   const { msg } = item
   const parts = []
   for (const a of (msg.attachments || [])) {
-    const bytes = await attachmentBytes(api, a, msg.from)
+    const bytes = files.get(a.hash)
     parts.push(bytes ? { ...a, bytes } : { ...a, note: notFetchedNote(a) })
   }
   const raw = buildMessage({
@@ -238,6 +284,18 @@ async function headerFor(auspexId, rec) {
 
 let syncing = false
 
+//  WHAT A SYNC STANDS ON — the ship's name, the folders, the identity —
+//  set up at connect or by the first sync after a start, and not on every
+//  change. Nothing that moves them arrives on the beacon: another ship at
+//  this origin cannot use this session, so it is a 403, signed out, and a
+//  connect, which sets them up again. Per change it was a whoami against
+//  the ship and half a dozen calls into Thunderbird for an answer that
+//  could not have moved. Keyed by origin, so nothing set up for one ship is
+//  used against another; cleared by a FAILED sync, because a folder
+//  deleted in Thunderbird is exactly what makes an import throw, and the
+//  next sync then puts it back.
+let setup = null   // {origin, ship, folders}
+
 //  A change that arrives WHILE a sync is running is not lost.
 //
 //  The listing walk takes seconds against a large mailbox, and mail
@@ -254,16 +312,21 @@ async function syncNow() {
     const state = await getState()
     if (!state.origin) return { skipped: true, why: 'unconfigured' }
     const api = new Api(state.origin)
-    const ship = await api.whoami()
-    await setStatus('connected')
-    if (ship !== state.ship) await setState({ ship })
-    const folders = await ensureFolders()
-    await ensureIdentity(ship)
+    if (!setup || setup.origin !== state.origin) {
+      const ship = await api.whoami()
+      if (ship !== state.ship) await setState({ ship })
+      const folders = await ensureFolders()
+      await ensureIdentity(ship)
+      setup = { origin: state.origin, ship, folders }
+    }
+    const { ship, folders } = setup
 
-    const { threads: entries } = await api.allThreads('all', 100)
+    const entries = await api.allThreads()
+    if (state.status !== 'connected') await setStatus('connected')
     const wanted = threadsToFetch(entries, state.snapshot)
     const byThread = new Map(entries.map((e) => [e.id, e]))
-    const imported = { ...state.imported }
+    const imported = await importedMap()
+    //  imported OR planned: a message is planned once per sync
     const importedIds = new Set(Object.keys(imported))
     let added = 0
 
@@ -276,6 +339,11 @@ async function syncNow() {
     //  live on the MESSAGE, so applying them needs the membership: the
     //  flags of each thread looked at this sync, and the ids in it.
     const want = new Map()   // threadId → {flagged, junk, ids}
+
+    //  Every thread is read before anything is imported, so the files the
+    //  imports need are fetched in one pass rather than one thread at a
+    //  time. Order within a thread is kept: a parent still lands first.
+    const plans = []   // [{item, flags}]
 
     for (const id of wanted) {
       let thread
@@ -291,33 +359,36 @@ async function syncNow() {
       const entry = byThread.get(id) || thread
       const flags = flagsFor(entry)
       want.set(id, { ...flags, ids: (thread.messages || []).map((m) => m.id) })
-      const plan = planThread(thread, byThread.get(id), ship, importedIds)
-      for (const item of plan) {
-        try {
-          await importOne(api, item, folders, imported, flags)
-          importedIds.add(item.msg.id)
-          added += 1
-        } catch (e) {
-          //  Thunderbird refuses a duplicate Message-ID in a folder,
-          //  which is a mirror that lost its bookkeeping and not a
-          //  failure. Both wordings, because Thunderbird 147 says
-          //  "Destination folder already contains a message with id"
-          //  and does not use the word Message-ID at all — a sync that
-          //  did not know that aborted on the first duplicate and left
-          //  the flags of every later thread unapplied.
-          const why = String(e && e.message)
-          if (/Message-ID|already contains a message/i.test(why)) {
-            //  the message IS in the folder — that is what the refusal
-            //  says — so find it by name rather than recording a hole.
-            const rec = {
-              tbId: null, folder: item.folder,
-              read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
-            }
-            await headerFor(item.msg.id, rec)
-            imported[item.msg.id] = rec
-            importedIds.add(item.msg.id)
-          } else throw e
-        }
+      for (const item of planThread(thread, byThread.get(id), ship, importedIds)) {
+        plans.push({ item, flags })
+        importedIds.add(item.msg.id)
+      }
+    }
+
+    const files = await attachmentBytes(api, plans.map((p) => p.item.msg))
+    for (const { item, flags } of plans) {
+      try {
+        await importOne(item, folders, imported, flags, files)
+        added += 1
+      } catch (e) {
+        //  Thunderbird refuses a duplicate Message-ID in a folder,
+        //  which is a mirror that lost its bookkeeping and not a
+        //  failure. Both wordings, because Thunderbird 147 says
+        //  "Destination folder already contains a message with id"
+        //  and does not use the word Message-ID at all — a sync that
+        //  did not know that aborted on the first duplicate and left
+        //  the flags of every later thread unapplied.
+        const why = String(e && e.message)
+        if (/Message-ID|already contains a message/i.test(why)) {
+          //  the message IS in the folder — that is what the refusal
+          //  says — so find it by name rather than recording a hole.
+          const rec = {
+            tbId: null, folder: item.folder,
+            read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
+          }
+          await headerFor(item.msg.id, rec)
+          imported[item.msg.id] = rec
+        } else throw e
       }
     }
 
@@ -330,8 +401,9 @@ async function syncNow() {
         if (!rec) continue
         const header = await headerFor(id, rec)
         if (!header) continue
-        //  the record moves FIRST, so the onUpdated this provokes sees a
-        //  flag that already matches and posts nothing back.
+        //  the record moves FIRST — in the map onUpdated reads — so the
+        //  onUpdated this provokes sees a flag that already matches and
+        //  posts nothing back.
         rec.read = read
         try { await browser.messages.update(rec.tbId, { read }) } catch { /* gone */ }
       }
@@ -368,6 +440,7 @@ async function syncNow() {
     if (added) notify('Auspex', `${added} new message${added === 1 ? '' : 's'} mirrored.`)
     return { added, threads: entries.length }
   } catch (e) {
+    setup = null
     await classify(e)
     return { error: e && e.message ? e.message : String(e) }
   } finally {
@@ -509,42 +582,41 @@ function startBeacon() {
 //  `streaming` stays true, so nothing in this file would ever notice.
 //  Aborting the held connection lets the loop open a fresh one, and the
 //  fresh one's `old` frame says whether anything was missed. One request.
-function cycleBeacon() {
-  try { if (streamAbort) streamAbort.abort() } catch { /* already gone */ }
-}
+function cycleBeacon() { streamAbort?.abort() }
 
 function stopBeacon() {
   stopStream = true
-  try { if (streamAbort) streamAbort.abort() } catch { /* already gone */ }
+  cycleBeacon()
 }
 
 //  ── read state, local → ship ────────────────────────────────────────
 //
-//  Debounced, and one request for the batch: the nexus writer is the ship's
-//  single serialisation point for mail, and a request per message is a full
-//  mailbox scan per message.
-const pendingRead = new Set()
-const pendingUnread = new Set()
+//  Debounced, and one request per thread and direction: the nexus writer is
+//  the ship's single serialisation point for mail, a request per message is
+//  a mailbox scan per message, and a request that names its thread scans
+//  only that thread. The last state of an id inside the debounce wins.
+const pendingRead = new Map()   // auspex id → {read, threadId}
 let readTimer = null
 
-function queueReadState(id, read) {
-  ;(read ? pendingRead : pendingUnread).add(id)
-  ;(read ? pendingUnread : pendingRead).delete(id)
+function queueReadState(id, read, threadId) {
+  pendingRead.set(id, { read, threadId })
   if (readTimer) clearTimeout(readTimer)
   readTimer = setTimeout(flushReadState, 2000)
 }
 
 async function flushReadState() {
   readTimer = null
-  const read = [...pendingRead]
-  const unread = [...pendingUnread]
+  const batches = new Map()   // `${read}\0${threadId}` → {read, threadId, ids}
+  for (const [id, { read, threadId }] of pendingRead) {
+    const key = `${read}\u0000${threadId}`
+    if (!batches.has(key)) batches.set(key, { read, threadId, ids: [] })
+    batches.get(key).ids.push(id)
+  }
   pendingRead.clear()
-  pendingUnread.clear()
-  if (!read.length && !unread.length) return
+  if (!batches.size) return
   try {
     const api = await apiFor()
-    await api.markRead(read)
-    await api.markUnread(unread)
+    for (const b of batches.values()) await api.setRead(b.ids, b.read, b.threadId)
   } catch (e) { await classify(e) }
 }
 
@@ -586,10 +658,14 @@ async function flushFlags() {
 //  import by lib/rfc822.js and every mirrored message has one, including
 //  the ones imported by a version that had never heard of labels — which
 //  is the whole reason the thread is not a field on the record.
-async function threadOf(tbId) {
+const threadOf = (tbId) => headerOf(tbId, 'x-auspex-thread')
+
+//  One header of a message, trimmed, or null — for a header it lacks and
+//  for a message Thunderbird will not hand over.
+async function headerOf(tbId, name) {
   try {
     const full = await browser.messages.getFull(tbId)
-    const h = (full.headers && full.headers['x-auspex-thread']) || []
+    const h = (full.headers && full.headers[name]) || []
     return h.length ? String(h[0]).trim() : null
   } catch { return null }
 }
@@ -610,20 +686,20 @@ browser.messages.onUpdated.addListener(async (message, changed) => {
   if (!touched.length) return
   const id = idFromMessageId(message.headerMessageId)
   if (!id) return
-  const state = await getState()
-  const rec = state.imported[id]
+  const rec = (await importedMap())[id]
   if (!rec) return                                    // not ours
-  let moved = false
   let threadId
   for (const key of touched) {
     if (!!rec[key] === !!message[key]) continue       // already what we recorded
     rec[key] = !!message[key]
-    moved = true
-    if (key === 'read') { queueReadState(id, !!message.read); continue }
+    saveImportedSoon()
     if (threadId === undefined) threadId = await threadOf(message.id)
-    if (threadId) queueFlag(threadId, key, !!message[key])
+    //  every mirrored message carries its thread, and the ship needs it:
+    //  a mark that cannot name one is not relayed.
+    if (!threadId) continue
+    if (key === 'read') queueReadState(id, rec.read, threadId)
+    else queueFlag(threadId, key, rec[key])
   }
-  if (moved) await setState({ imported: state.imported })
 })
 
 //  ── send ────────────────────────────────────────────────────────────
@@ -638,32 +714,28 @@ const refuse = (why) => {
 //  what starts a thread.
 async function prevFor(details) {
   if (details.relatedMessageId === undefined || details.relatedMessageId === null) return null
-  try {
-    const full = await browser.messages.getFull(details.relatedMessageId)
-    const h = (full.headers && full.headers['message-id']) || []
-    return h.length ? idFromMessageId(h[0]) : null
-  } catch { return null }
+  return idFromMessageId(await headerOf(details.relatedMessageId, 'message-id'))
 }
 
 //  HTML → text, and the ceiling is right here. Thunderbird's own composer
 //  can be an HTML one; auspex carries a signed plain-text body and nothing
-//  else. A tag strip and an entity decode is what this does, and it is not
-//  a renderer: a table comes out as its cells run together, and a message
-//  whose meaning is in its formatting loses that meaning. Compose in plain
-//  text (the identity this extension creates does) and none of this runs.
+//  else. The document's text with a line break after each block is what
+//  this does, and it is not a renderer: a table comes out as its cells run
+//  together, and a message whose meaning is in its formatting loses that
+//  meaning. Compose in plain text (the identity this extension creates
+//  does) and none of this runs.
+//
+//  The browser's own parser, not a tag strip: it decodes every entity
+//  there is, and a `>` inside an attribute cannot end a tag early. A
+//  DOMParser document is inert — nothing in it runs or loads.
 function htmlToText(html) {
-  const withBreaks = String(html)
-    .replace(/<\s*(br|\/p|\/div|\/tr|\/li|\/h[1-6])\s*\/?\s*>/gi, '\n')
-    .replace(/<\s*(script|style)[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-  const stripped = withBreaks.replace(/<[^>]*>/g, '')
-  const entities = {
-    amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–',
+  const doc = new DOMParser().parseFromString(String(html), 'text/html')
+  for (const el of doc.querySelectorAll('script, style')) el.remove()
+  for (const el of doc.querySelectorAll('br, p, div, tr, li, h1, h2, h3, h4, h5, h6')) {
+    el.after('\n')
   }
-  return stripped
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&([a-z]+);/gi, (m, name) => (name.toLowerCase() in entities
-      ? entities[name.toLowerCase()] : m))
+  return doc.body.textContent
+    .replace(/\u00a0/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
@@ -710,6 +782,18 @@ async function handleSend(tab, details) {
     ? (details.plainTextBody || '')
     : htmlToText(details.body || '')
 
+  //  NO REPLY TO A FORGERY. The mirror imports the best-verdict copy of an
+  //  id, so a forged one here means EVERY copy the ship holds is forged,
+  //  and the writer will not chain a message onto that: it answers 200 and
+  //  sends nothing. Refused here, while the message is still on screen,
+  //  rather than lost there.
+  const prev = await prevFor(details)
+  if (prev && await headerOf(details.relatedMessageId, 'x-auspex-verdict') === 'forged') {
+    return refuse('The message you are replying to or forwarding is forged: no copy '
+      + 'of it carries a valid signature, so the ship will not send anything chained '
+      + 'to it. Start a new message instead; yours is still here.')
+  }
+
   let api
   try { api = new Api(state.origin) } catch (e) { return refuse(e.message) }
 
@@ -738,14 +822,21 @@ async function handleSend(tab, details) {
     return refuse(`Attachment upload failed: ${e && e.message ? e.message : e}`)
   }
 
-  const prev = await prevFor(details)
-
+  let refused
   try {
-    await api.send(to, details.subject || '', body, prev, refs)
+    refused = await api.send(to, details.subject || '', body, prev, refs)
   } catch (e) {
     await classify(e)
     return refuse(`The ship refused the send: ${e && e.message ? e.message : e}. `
       + 'Nothing was sent; your message is still here.')
+  }
+  //  SENT, BUT PERHAPS NOT TO EVERYONE. The ship skips a recipient whose
+  //  published limits refuse this message rather than failing the send,
+  //  and a message the user believes went out whole must say who it did
+  //  not reach — the line the web composer shows.
+  if (refused.length) {
+    notify('Auspex: not sent to everyone',
+      `Sent, except ${refused.map((r) => `${r.ship}: ${r.why}`).join('; ')}`)
   }
 
   //  SENT. Thunderbird must not also try to deliver it by SMTP — there is
@@ -767,12 +858,7 @@ const VERDICT_UI = {
 }
 
 browser.messageDisplay.onMessageDisplayed.addListener(async (tab, message) => {
-  let verdict = null
-  try {
-    const full = await browser.messages.getFull(message.id)
-    const h = (full.headers && full.headers['x-auspex-verdict']) || []
-    verdict = h.length ? String(h[0]).trim() : null
-  } catch { /* not one of ours */ }
+  const verdict = await headerOf(message.id, 'x-auspex-verdict')
   const ui = VERDICT_UI[verdict]
   const set = browser.messageDisplayAction
   if (!ui) {
@@ -815,8 +901,9 @@ async function connect(rawOrigin, code) {
     const ship = await api.whoami()
     await setState({ origin: api.origin, ship, status: 'connected', lastError: '' })
     lastNotifiedStatus = 'connected'
-    await ensureFolders()
+    const folders = await ensureFolders()
     await ensureIdentity(ship)
+    setup = { origin: api.origin, ship, folders }
     //  THE SEED, and the only sync this extension asks for by itself. Not
     //  the same thing as a stream reconnect, which mirrors nothing: this
     //  is a person pressing Connect on a mailbox nothing has mirrored
@@ -882,7 +969,7 @@ browser.alarms.onAlarm.addListener(async (a) => {
         beacon: {
           log: beaconLog, start: startBeacon, stop: stopBeacon,
           running: () => streaming,
-          abort: () => { try { if (streamAbort) streamAbort.abort() } catch { /* */ } },
+          abort: cycleBeacon,
         },
       })
       return
@@ -895,4 +982,3 @@ browser.alarms.onAlarm.addListener(async (a) => {
   if (origin) { syncNow(); startBeacon() }
 })()
 
-export { syncNow, connect, htmlToText }

@@ -8,7 +8,7 @@
 //  that nothing is granted until this moment; it never asks for
 //  <all_urls> outright.
 
-import { patternFor } from './lib/api.js'
+import { normaliseOrigin, patternFor } from './lib/api.js'
 const $ = (id) => document.getElementById(id)
 const say = (text, bad = false) => {
   $('status').textContent = text
@@ -36,7 +36,7 @@ $('connect').addEventListener('click', async () => {
   const code = $('code').value.trim()
   if (!raw || !code) { say('A ship URL and an access code, please.', true); return }
   let origin
-  try { origin = new URL(raw).origin } catch { say('That is not a URL.', true); return }
+  try { origin = normaliseOrigin(raw) } catch { say('That is not an http or https URL.', true); return }
 
   say('Asking Thunderbird for permission to talk to that origin…')
   let granted = false

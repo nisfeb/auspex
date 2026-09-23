@@ -110,20 +110,12 @@ function framesIn(buf) {
   return { frames: parts.slice(0, -1), rest: parts[parts.length - 1] }
 }
 
-//  The undithered delay for the nth consecutive failure: 3, 6, 12, 24,
-//  30, 30 … seconds.
-function backoffFor(attempt) {
-  return Math.min(BACKOFF_MAX, BACKOFF_MIN * 2 ** Math.max(0, attempt))
-}
-
-//  0.5–1.5× it. `rand` is a parameter so the jitter can be tested rather
-//  than believed.
-function jittered(ms, rand) {
-  return Math.round(ms * (0.5 + rand))
-}
-
+//  The wait after the nth consecutive failure: 3, 6, 12, 24, 30, 30 …
+//  seconds, then spread over 0.5–1.5× of itself. `rand` is a parameter so
+//  the jitter can be tested rather than believed.
 function nextDelay(attempt, rand = Math.random()) {
-  return jittered(backoffFor(attempt), rand)
+  const base = Math.min(BACKOFF_MAX, BACKOFF_MIN * 2 ** Math.max(0, attempt))
+  return Math.round(base * (0.5 + rand))
 }
 
 //  What the count becomes after an attempt that lasted `livedMs`. An
@@ -135,5 +127,5 @@ function nextAttempt(attempt, livedMs) {
 
 export {
   BEACON_PATH, BACKOFF_MIN, BACKOFF_MAX, LIVED_MS, MAX_ATTEMPT,
-  isChange, revIn, framesIn, backoffFor, jittered, nextDelay, nextAttempt,
+  isChange, revIn, framesIn, nextDelay, nextAttempt,
 }

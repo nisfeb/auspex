@@ -2,6 +2,8 @@
 //  button: sync it now, open the client that owns the features this mirror
 //  does not, and get to the options.
 
+import { BASE } from './lib/api.js'
+
 const $ = (id) => document.getElementById(id)
 
 async function render() {
@@ -34,7 +36,7 @@ $('sync').addEventListener('click', async () => {
 //  one of them.
 $('web').addEventListener('click', async () => {
   const s = await browser.runtime.sendMessage({ kind: 'state' })
-  if (s.origin) browser.windows.openDefaultBrowser(`${s.origin}/apps/auspex/`)
+  if (s.origin) browser.windows.openDefaultBrowser(`${s.origin}${BASE}/`)
 })
 
 $('opts').addEventListener('click', () => browser.runtime.openOptionsPage())

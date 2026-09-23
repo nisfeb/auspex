@@ -203,7 +203,7 @@ behind your back or holding two copies of it.
 
 **Read state, the star and the flame** all go both ways, and all three by the
 same rule: **only where the two sides differ.** Marking a message read in
-Thunderbird posts `/api/read` (debounced, one request for the batch) and
+Thunderbird posts `/api/read` (debounced, one request per thread) and
 starring one posts `/api/label` (debounced, per thread); in the other
 direction a flag is written locally *only* when it actually differs from
 what is there. That is what stops the two sides echoing a mark back and
@@ -225,15 +225,22 @@ Refused, with the reason in a notification:
   and a Bcc would silently become a visible one. Put everyone in To, or send
   twice;
 - more than 16 attachments, or one over 262144 bytes (the file is named);
+- a reply to (or forward of) a message whose verdict is **forged**: every
+  copy the ship holds is forged, and the ship will not chain a message onto
+  one;
 - being signed out.
+
+A send the ship accepts but does not carry to every recipient (a peer's
+published limits refuse it) goes out to the rest, and a notification names
+each one it skipped and why.
 
 `prev` — which message this one answers, and so where it hangs in the tree —
 is taken from the message the composer was opened from (reply or forward). A
 fresh compose has `prev: null` and starts a thread.
 
 **The HTML ceiling.** Auspex carries a signed plain-text body. If you compose
-in HTML, the body is reduced to text by a tag strip and an entity decode
-before it is signed. That is not a renderer: a table comes out as its cells
+in HTML, the body is reduced to text by the browser's own HTML parser (its
+text, a line break after each block) before it is signed. That is not a renderer: a table comes out as its cells
 run together. The identity this extension creates composes in plain text, and
 that is the shape auspex actually has.
 

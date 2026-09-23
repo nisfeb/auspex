@@ -23,40 +23,27 @@
 //     (RFC 5322 caps a line at 998 octets and a signed body has no such
 //     cap) and through any transfer that would normalise CRLF.
 
-const DOMAIN = 'auspex.urbit'
+import { DOMAIN } from './address.js'
+
 const CRLF = '\r\n'
 
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
-//  base64 over bytes, written out rather than borrowed: `btoa` is a browser
-//  global and `Buffer` is a node one, and this file has to run in both.
+//  base64 over bytes. `btoa` takes a binary string, built in slices so a
+//  large attachment never spreads past the engine's argument limit.
 function base64(bytes) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-  let out = ''
-  let i = 0
-  for (; i + 2 < b.length; i += 3) {
-    const n = (b[i] << 16) | (b[i + 1] << 8) | b[i + 2]
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63]
-  }
-  const rem = b.length - i
-  if (rem === 1) {
-    const n = b[i] << 16
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + '=='
-  } else if (rem === 2) {
-    const n = (b[i] << 16) | (b[i + 1] << 8)
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + '='
-  }
-  return out
+  let s = ''
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000))
+  return btoa(s)
 }
 
 const utf8 = (s) => new TextEncoder().encode(s)
 
 //  base64 in 76-character lines, which is what every MIME reader expects
 //  and what keeps a 200KB attachment from becoming one 270KB line.
-function base64Lines(bytes, width = 76) {
+function base64Lines(bytes) {
   const s = base64(bytes)
   const out = []
-  for (let i = 0; i < s.length; i += width) out.push(s.slice(i, i + width))
+  for (let i = 0; i < s.length; i += 76) out.push(s.slice(i, i + 76))
   return out.join(CRLF)
 }
 
@@ -169,18 +156,6 @@ function idFromMessageId(header) {
   return m ? m[1] : null
 }
 
-//  Every id in a References (or In-Reply-To) value, in order. The order is
-//  the whole point: References is root-to-parent, and that is what makes
-//  Thunderbird's threaded view draw the tree rather than a flat list.
-function parseReferences(value) {
-  if (typeof value !== 'string') return []
-  const out = []
-  const re = /<([^<>@\s]+)@auspex\.urbit>/g
-  let m
-  while ((m = re.exec(value)) !== null) out.push(m[1])
-  return out
-}
-
 //  A multipart boundary. Derived from the message id, not random: an
 //  import is idempotent only if the bytes are, and a random boundary would
 //  make the same message produce a different file on every sync.
@@ -284,5 +259,5 @@ const notFetchedNote = (a) =>
 export {
   DOMAIN, CRLF, base64, base64Lines, utf8, encodeWords, foldHeader,
   headerLine, safeName, dispositionFilename, rfc5322Date, messageId,
-  idFromMessageId, parseReferences, buildMessage, notFetchedNote,
+  idFromMessageId, buildMessage, notFetchedNote,
 }

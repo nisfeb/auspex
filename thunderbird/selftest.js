@@ -18,6 +18,20 @@
 import { patternFor, setTap } from './lib/api.js'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+//  Every message in one of our folders, every page of it.
+async function listFolderOf(api, name) {
+  const folders = (await api.getState()).folders
+  const page = await browser.messages.list(folders[name])
+  let msgs = page.messages.slice()
+  let id = page.id
+  while (id) {
+    const next = await browser.messages.continueList(id)
+    msgs = msgs.concat(next.messages)
+    id = next.id
+  }
+  return msgs
+}
+
 export async function runSelftest(cfg, api) {
   const log = async (step, ok, detail) => {
     const line = JSON.stringify({ step, ok, detail, at: Date.now() })
@@ -142,19 +156,7 @@ export async function runSelftest(cfg, api) {
     return JSON.stringify({ r, counts: s.counts, folders: s.folders, status: s.status })
   })
 
-  const folderIds = (await api.getState()).folders
-
-  const listFolder = async (name) => {
-    const page = await browser.messages.list(folderIds[name])
-    let msgs = page.messages.slice()
-    let id = page.id
-    while (id) {
-      const next = await browser.messages.continueList(id)
-      msgs = msgs.concat(next.messages)
-      id = next.id
-    }
-    return msgs
-  }
+  const listFolder = (name) => listFolderOf(api, name)
 
   await step('folders', async () => {
     const out = {}
@@ -416,18 +418,7 @@ async function runBeaconTest(cfg, api, log, step) {
   setTap((path) => requests.push({ at: Date.now(), path }))
   const since = (t) => requests.filter((r) => r.at >= t)
 
-  const listFolder = async (name) => {
-    const folders = (await api.getState()).folders
-    const page = await browser.messages.list(folders[name])
-    let msgs = page.messages.slice()
-    let id = page.id
-    while (id) {
-      const next = await browser.messages.continueList(id)
-      msgs = msgs.concat(next.messages)
-      id = next.id
-    }
-    return msgs
-  }
+  const listFolder = (name) => listFolderOf(api, name)
 
   //  A sync that actually ran. `connect` starts one in the background, so
   //  the first explicit syncNow answers `{skipped: true}` and anything

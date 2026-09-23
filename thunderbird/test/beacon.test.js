@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  isChange, revIn, framesIn, backoffFor, jittered, nextDelay, nextAttempt,
+  isChange, revIn, framesIn, nextDelay, nextAttempt,
   BACKOFF_MIN, BACKOFF_MAX, LIVED_MS, MAX_ATTEMPT, BEACON_PATH,
 } from '../lib/beacon.js'
 
@@ -98,20 +98,22 @@ test('a partial frame stays in the buffer until it is whole', () => {
 test('the wait doubles from three seconds to a thirty-second cap', () => {
   //  A fixed retry delay turns one outage into a steady drum against a
   //  ship that is least able to answer.
-  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map(backoffFor), [3000, 6000, 12000, 24000, 30000, 30000, 30000])
-  assert.equal(backoffFor(0), BACKOFF_MIN)
-  assert.equal(backoffFor(MAX_ATTEMPT), BACKOFF_MAX)
+  //  rand 0.5 is the undithered middle, so the shape is visible
+  const base = (n) => nextDelay(n, 0.5)
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map(base), [3000, 6000, 12000, 24000, 30000, 30000, 30000])
+  assert.equal(base(0), BACKOFF_MIN)
+  assert.equal(base(MAX_ATTEMPT), BACKOFF_MAX)
   //  a nonsense count is the minimum, not NaN: this feeds a setTimeout
-  assert.equal(backoffFor(-3), BACKOFF_MIN)
+  assert.equal(base(-3), BACKOFF_MIN)
 })
 
 test('every wait is spread over half to one and a half times itself', () => {
   //  A pier restart drops every client at the same instant. Without the
   //  jitter a well-shaped backoff still brings them all back on the same
   //  tick, and keeps doing it.
-  assert.equal(jittered(3000, 0), 1500)
-  assert.equal(jittered(3000, 0.5), 3000)
-  assert.equal(jittered(3000, 0.999), 4497)
+  assert.equal(nextDelay(0, 0), 1500)
+  assert.equal(nextDelay(0, 0.5), 3000)
+  assert.equal(nextDelay(0, 0.999), 4497)
   for (let i = 0; i < 500; i += 1) {
     const d = nextDelay(2)
     assert.ok(d >= 12000 * 0.5 && d <= 12000 * 1.5, `${d} outside 0.5–1.5× of 12s`)

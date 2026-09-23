@@ -91,27 +91,25 @@ class Api {
     this.origin = normaliseOrigin(origin)
   }
 
-  //  The match pattern this origin needs, for permissions.request. Exactly
-  //  one origin — never <all_urls>, and never a wildcard host.
-  get pattern() { return patternFor(this.origin) }
-
   //  EVERY URL IN THIS FILE COMES THROUGH HERE. `path` is written by this
   //  file; anything interpolated into it is encoded by its caller.
   url(path) { return `${this.origin}${BASE}${path}` }
 
-  async raw(path, init = {}) {
-    let res
-    tapped(path)
+  //  EVERY FETCH GOES THROUGH HERE: tapped, and a fetch that never left is
+  //  UnreachableError. `credentials` LAST, so no caller can drop it by
+  //  accident: every route on this surface is owner-gated behind the
+  //  session cookie, and a request without it is a 403 with a confusing
+  //  story.
+  async reach(tap, url, init = {}) {
+    tapped(tap)
     try {
-      //  `credentials` LAST, so no caller can drop it by accident: every
-      //  route on this surface is owner-gated behind the session cookie,
-      //  and a request without it is a 403 with a confusing story.
-      res = await fetch(this.url(path), { ...init, credentials: 'include' })
+      return await fetch(url, { ...init, credentials: 'include' })
     } catch (e) {
       throw new UnreachableError(e && e.message ? e.message : 'no answer')
     }
-    return res
   }
+
+  raw(path, init = {}) { return this.reach(path, this.url(path), init) }
 
   //  The nexus answers JSON on every path, errors included, so a failure
   //  carries the ship's own reason rather than a bare status code.
@@ -144,18 +142,11 @@ class Api {
   //  it. The code is a parameter here and a local in the caller; it
   //  reaches no storage, no log and no header.
   async login(code) {
-    let res
-    tapped('/~/login')
-    try {
-      res = await fetch(`${this.origin}/~/login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: `password=${encodeURIComponent(code)}`,
-      })
-    } catch (e) {
-      throw new UnreachableError(e && e.message ? e.message : 'no answer')
-    }
+    const res = await this.reach('/~/login', `${this.origin}/~/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `password=${encodeURIComponent(code)}`,
+    })
     if (!res.ok) throw new ApiError(res.status, `login refused (HTTP ${res.status})`)
   }
 
@@ -185,18 +176,10 @@ class Api {
   //  sends nothing for minutes, and treating silence as death is the
   //  exact bug this whole change exists to avoid.
   async beacon(signal) {
-    let res
-    tapped(BEACON_PATH)
-    try {
-      //  `credentials` LAST, for the reason `raw` gives.
-      res = await fetch(`${this.origin}${BEACON_PATH}`, {
-        headers: { accept: 'text/event-stream' },
-        signal,
-        credentials: 'include',
-      })
-    } catch (e) {
-      throw new UnreachableError(e && e.message ? e.message : 'no answer')
-    }
+    const res = await this.reach(BEACON_PATH, `${this.origin}${BEACON_PATH}`, {
+      headers: { accept: 'text/event-stream' },
+      signal,
+    })
     if (!res.ok) throw new ApiError(res.status, `beacon ${res.status}`)
     if (!res.body) throw new UnreachableError('beacon answered without a body')
     return res
@@ -204,24 +187,17 @@ class Api {
 
   //  ── reads ─────────────────────────────────────────────────────────
 
-  inbox(view = 'all', offset = 0, limit = 100) {
-    const p = new URLSearchParams({ view, offset: String(offset), limit: String(limit) })
-    return this.json(`/api/inbox?${p.toString()}`)
-  }
-
-  //  Every page of one view, walked. `total` counts the whole view and the
-  //  page carries its own offset, so the loop is over `total` and not over
-  //  a hasMore flag the route does not send.
-  async allThreads(view = 'all', limit = 100) {
+  //  Every page of the `all` view, walked. `total` counts the whole view
+  //  and the page carries its own offset, so the loop is over `total` and
+  //  not over a hasMore flag the route does not send.
+  async allThreads() {
     const out = []
-    let offset = 0
     for (;;) {
-      const page = await this.inbox(view, offset, limit)
-      out.push(...(page.threads || []))
-      offset += page.threads ? page.threads.length : 0
-      if (!page.threads || !page.threads.length || offset >= page.total) {
-        return { threads: out, total: page.total }
-      }
+      const p = new URLSearchParams({ view: 'all', offset: String(out.length), limit: '200' })
+      const page = await this.json(`/api/inbox?${p.toString()}`)
+      const got = page.threads || []
+      out.push(...got)
+      if (!got.length || out.length >= page.total) return out
     }
   }
 
@@ -264,22 +240,26 @@ class Api {
 
   //  `attachments` is omitted entirely when there are none, so a send with
   //  nothing attached is byte-for-byte the request the web client makes.
-  send(to, subject, body, prev, attachments = []) {
-    return this.post('/api/send', {
+  //
+  //  Answers the recipients the ship would NOT carry, `[{ship, why}]`: the
+  //  nexus screens each one against what that peer published and skips the
+  //  refused rather than failing the whole send (all of them refused is a
+  //  400, which throws). Decoded defensively, as ui/src/api.ts does, so an
+  //  odd shape can never turn a send that happened into a thrown error.
+  async send(to, subject, body, prev, attachments = []) {
+    const res = await this.post('/api/send', {
       to, subject, body, prev,
       ...(attachments.length ? { attachments } : {}),
     })
+    const refused = res && Array.isArray(res.refused) ? res.refused : []
+    return refused.filter((r) => r && typeof r.ship === 'string' && typeof r.why === 'string')
   }
 
-  //  One request for the whole batch: the nexus writer is the ship's single
-  //  serialisation point for mail, and one id per request is one full
-  //  mailbox scan per message.
-  markRead(ids) {
-    return ids.length ? this.post('/api/read', { 'msg-ids': ids }) : Promise.resolve()
-  }
-
-  markUnread(ids) {
-    return ids.length ? this.post('/api/unread', { 'msg-ids': ids }) : Promise.resolve()
+  //  Read or unread, one request for a batch, naming the thread the ids are
+  //  in: the nexus writer is the ship's single serialisation point for
+  //  mail, and it reads only that thread to apply the mark.
+  setRead(ids, read, threadId) {
+    return this.post(read ? '/api/read' : '/api/unread', { 'msg-ids': ids, 'thread-id': threadId })
   }
 
   //  LOCAL STATE, PER THREAD. The same two routes the web client uses

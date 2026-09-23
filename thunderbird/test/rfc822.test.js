@@ -3,9 +3,15 @@ import assert from 'node:assert/strict'
 import {
   base64, encodeWords, foldHeader, headerLine, safeName,
   dispositionFilename, rfc5322Date, messageId, idFromMessageId,
-  parseReferences, buildMessage, notFetchedNote,
+  buildMessage, notFetchedNote,
 } from '../lib/rfc822.js'
 import { referencesFor } from '../lib/sync.js'
+
+//  Every auspex id in a References value, in order. The order is the whole
+//  point: References is root-to-parent, and that is what makes
+//  Thunderbird's threaded view draw the tree rather than a flat list.
+const parseReferences = (value) =>
+  [...value.matchAll(/<([^<>@\s]+)@auspex\.urbit>/g)].map((m) => m[1])
 
 const headersOf = (raw) => {
   const head = raw.split('\r\n\r\n')[0]
