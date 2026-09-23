@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ownWords } from './quote'
 import type { Message, Verdict } from './api'
 import VerdictBadge from './VerdictBadge'
@@ -68,10 +68,16 @@ export const copiesOf = (ms: Message[], id: string): Message[] =>
 // for the same reason: `sent` is a signed field the AUTHOR picks, so
 // letting a forged copy speak lets whoever poked the chain choose what
 // a node says it is.
+//
+// Among the copies of that newest message, a %verified one over an
+// %unverified one. Copies of one id say the same thing and differ only
+// in signature, so this changes no word shown — only the badge, which
+// should be the best this ship holds, as it is on the listing's row.
 export const speaker = (copies: Message[]): Message => {
   const honest = copies.filter((m) => m.verdict !== 'forged')
   const from = honest.length ? honest : copies
-  return from[from.length - 1]
+  const newest = from[from.length - 1]
+  return from.find((m) => m.id === newest.id && m.verdict === 'verified') ?? newest
 }
 
 // True when every stored copy of this id failed its signature. Such a
@@ -188,7 +194,9 @@ export default function ThreadTree({
   selected: string
   onSelect: (id: string) => void
 }) {
-  const { nodes, rows, cols } = layout(messages)
+  // Once per thread, not per render: the reply box below re-renders the
+  // pane on every keystroke, and the layout is quadratic in copies.
+  const { nodes, rows, cols } = useMemo(() => layout(messages), [messages])
   const byId = new Map(nodes.map((n) => [n.id, n]))
 
   // THE PATH THAT WOULD TRAVEL. Root to selected, which is exactly what

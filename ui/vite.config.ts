@@ -75,14 +75,14 @@ const inlineCss = (): Plugin => ({
     // output directory is a grub the nexus will not serve, and the app
     // would 404 on it at runtime with nothing but a missing module in
     // the console — so fail the build instead.
-    const stray = readdirSync(OUT)
-      .filter((f) => ![...SERVED, 'app.css'].includes(f))
+    const emitted = readdirSync(OUT)
+    const stray = emitted.filter((f) => ![...SERVED, 'app.css'].includes(f))
     if (stray.length) {
       throw new Error(`build emitted files the nexus does not serve: ${stray.join(', ')}`)
     }
     // And the other direction: a file the nexus routes and the build
     // stopped emitting is a 404 on a route that answers 200 today.
-    const missing = SERVED.filter((f) => !readdirSync(OUT).includes(f))
+    const missing = SERVED.filter((f) => !emitted.includes(f))
     if (missing.length) {
       throw new Error(`build did not emit files the nexus serves: ${missing.join(', ')}`)
     }

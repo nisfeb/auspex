@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import Loading from './Loading'
 import {
-  canSign, deleteThread, garbled, isShip, markRead, markUnread, NO_KEYS_LINE,
-  ourShip, refusalLine, send, setArchived, setLabel, thread, unreachable,
+  canSign, deleteThread, markRead, markUnread, NO_KEYS_LINE,
+  ourShip, refusalLine, send, sendFailure, setArchived, setLabel, thread,
   uploadAll,
   type MailList, type Message, type Thread,
 } from './api'
 import { FilePicker } from './Attachments'
 import MessageCard from './MessageCard'
+import ShipChips, { commitShip } from './ShipChips'
 import ThreadTree, { allForged, copiesOf, speaker } from './ThreadTree'
-import type { ForwardIntent } from './Compose'
+import { IncludedMessages, type ForwardIntent } from './Compose'
 import { when } from './ThreadList'
-import { fuzzyHas, quoteInto } from './quote'
+import { quoteInto } from './quote'
 
 // The default reply audience.
 //
@@ -47,8 +48,9 @@ export default function ThreadView({
   // The labels in use on this ship, offered as a label is typed.
   knownLabels?: string[]
   id: string
-  // Called once the read mark opening this thread has landed on the
-  // ship, so the listing can un-bold the row without a refetch.
+  // Called once a read mark this view made has landed on the ship and
+  // left nothing in the thread unread, so the listing can un-bold the row
+  // without a refetch.
   onRead: (threadId: string) => void
   onSent: (notice?: string | null) => void
   onDeleted: () => void
@@ -76,6 +78,9 @@ export default function ThreadView({
   onSaveList: (l: MailList) => Promise<void>
 }) {
   const [t, setT] = useState<Thread | null>(null)
+  // The messages the effect below last loaded, so a beacon refetch can
+  // tell mail that just arrived from mail already on screen.
+  const loaded = useRef<Message[]>([])
   const [notFound, setNotFound] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reply, setReply] = useState('')
@@ -105,10 +110,10 @@ export default function ThreadView({
   // messages, so a quote is taken only from text selected in them.
   const replyRef = useRef<HTMLTextAreaElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
-  // The rest of what travels with a reply, unrolled on request.
-  const [showIncluded, setShowIncluded] = useState(false)
-  // A label being typed, or null while the field is shut.
+  // A label being typed, or null while the field is shut, and the DOM id
+  // of the suggestions it offers.
   const [labelDraft, setLabelDraft] = useState<string | null>(null)
+  const labelsId = useId()
   const [hint, setHint] = useState<string | null>(null)
   // The node the tree has selected, by message id — null until the user
   // picks one, when it stands for "whatever the list would have replied
@@ -117,8 +122,8 @@ export default function ThreadView({
   const [picked, setPicked] = useState<string | null>(null)
 
   // Tracks the id the effect below most recently committed to, so
-  // onReply's post-send refetch (see below) can tell whether the user has
-  // since navigated to a different thread. Updated synchronously inside
+  // `file`'s refetch (see below) can tell whether the user has since
+  // navigated to a different thread. Updated synchronously inside
   // the effect, before any async work, so it's always current by the time
   // any later promise resolves.
   const idRef = useRef(id)
@@ -152,6 +157,11 @@ export default function ThreadView({
   // inside the effect provides (each call gets its own closure; nothing
   // later can reach in and reset it) - the same reason `App.tsx`'s
   // subscription cleanup uses a per-invocation `cancelled`, not a ref.
+  //
+  // `onRead` through an effect event: the mark lands after the listing
+  // may have been refreshed, and App decides the unread count off the
+  // rows it holds NOW, not the ones it held when this effect started.
+  const readEvent = useEffectEvent(onRead)
   useEffect(() => {
     let cancelled = false
     idRef.current = id
@@ -159,11 +169,14 @@ export default function ThreadView({
     // this run may seed. A re-run for the SAME thread - which is what a
     // beacon event produces - may not.
     const fresh = seededFor.current !== id
-    setT(null)
     setNotFound(false)
     setLoadError(null)
-    setSendError(null)
+    // A beacon refetch keeps the thread on screen until the new copy lands,
+    // and keeps what the reply box last said - an unrelated delivery must
+    // not erase why a send failed. Only a different thread starts over.
     if (fresh) {
+      setSendError(null)
+      setT(null)
       setRecipients([])
       setPending('')
       setPicked(null)
@@ -174,33 +187,35 @@ export default function ThreadView({
         setNotFound(true)
         return
       }
+      // WHAT THIS LOAD MARKS READ. Opening a thread marks every unread
+      // message in it. A beacon refetch of the thread already open marks
+      // only what was not on screen before it — mail that arrived while
+      // it was open. The beacon does not name a thread, so ANY delivery
+      // re-runs this, and marking the whole thread again would silently
+      // undo a Mark unread the user had just set.
+      const before = new Set(fresh ? [] : loaded.current.map((m) => m.id))
+      loaded.current = th.messages
+      const unread = th.messages.filter((m) => !m.read && !before.has(m.id)).map((m) => m.id)
       setT(th)
       if (fresh) {
         setRecipients(defaultRecipients(th))
         setPending('')
         seededFor.current = id
       }
-      // One request for the whole batch, not one per message: the
-      // writer serialises every mutation and each poke costs it a full
-      // mailbox scan.
-      // The ship marks a thread read as it SERVES it, so by the time this
-      // response is in hand the row is no longer unread on the ship — and
-      // nothing else will tell the listing (a read mark does not move the
-      // beacon, deliberately). Un-bold it now; the explicit mark below is
-      // for whatever the serve left unread.
-      onRead(th.id)
-      const unread = th.messages.filter((m) => !m.read).map((m) => m.id)
       if (unread.length > 0) {
-        markRead(unread).then(() => {
-          if (cancelled) return
+        // One request for the whole batch, not one per message, naming
+        // the thread: the writer serialises every mutation.
+        markRead(th.id, unread).then(() => {
           // A read mark does not move the change beacon (deliberately:
           // opening a thread must not refetch the thread), so nothing
-          // tells the list or this view that the row is no longer bold.
-          // The tab that made the mark is the one that knows.
-          setT((cur) => cur && cur.id === th.id
-            ? { ...cur, messages: cur.messages.map((m) => ({ ...m, read: true })) }
-            : cur)
-          onRead(th.id)
+          // tells the listing that the row is no longer bold — the tab
+          // that made the mark is the one that knows. Told even if this
+          // view has moved on, because the mark landed either way; not
+          // told while an honest message the user left unread is still
+          // unread, because then the row is still bold on the ship.
+          const left = th.messages.some((m) =>
+            !m.read && m.verdict !== 'forged' && before.has(m.id))
+          if (!left) readEvent(th.id)
         }).catch(console.error)
       }
     }).catch((e) => {
@@ -267,10 +282,9 @@ export default function ThreadView({
 
   const onLabel = (l: string, add: boolean) => file(setLabel(id, l, add))
 
-  // A LABEL IS TYPED IN PLACE, and the ones already in use narrow to
-  // what it could be as it is typed, letters in order ("inv" finds
-  // "invoices"): most labels are picked, not spelled. It was a browser
-  // prompt that offered nothing.
+  // A LABEL IS TYPED IN PLACE, and the browser's own suggestion list
+  // offers the ones already in use as it is typed: most labels are
+  // picked, not spelled. It was a browser prompt that offered nothing.
   const addLabel = (raw: string) => {
     const l = raw.trim()
     if (!l) { setLabelDraft(null); return }
@@ -283,19 +297,16 @@ export default function ThreadView({
     void onLabel(l, true)
   }
 
-  // MARK UNREAD, the exact inverse of the read mark opening the thread
-  // laid down. Forged copies are excluded from both directions for the
-  // same reason they never count toward unread: a message whose
-  // signature failed has no business bolding an inbox row.
+  // MARK UNREAD, the inverse of the read mark opening the thread laid
+  // down. Forged copies are excluded, for the same reason they never
+  // count toward unread: a message whose signature failed has no
+  // business bolding an inbox row. The thread stays open: a beacon
+  // refetch marks only mail that is new since, so nothing here undoes it.
   const onUnread = async () => {
     const ids = t.messages.filter((m) => m.verdict !== 'forged').map((m) => m.id)
     try {
-      await markUnread(ids)
+      await markUnread(id, ids)
       onFiled()
-      // Leave the thread: staying would re-run the effect that marks it
-      // read again, and the user would watch the mark they just set
-      // undo itself.
-      onDeleted()
     } catch (e) {
       console.error(e)
       setSendError('Could not mark this unread.')
@@ -377,10 +388,7 @@ export default function ThreadView({
   // message as its parent — and amputate the genuine branch from what
   // the recipient receives. Fall back to the raw newest only when every
   // copy is forged, where there is nothing honest to choose.
-  const honest = t.messages.filter((m) => m.verdict !== 'forged')
-  const last = (honest.length ? honest : t.messages)[
-    (honest.length ? honest : t.messages).length - 1
-  ]
+  const last = speaker(t.messages)
 
   // How many DISTINCT MESSAGES actually travel when `last` is forwarded:
   // the path from the thread root to it, which is what the nexus ships.
@@ -426,15 +434,13 @@ export default function ThreadView({
   const pickedCopies = picked ? copiesOf(t.messages, picked) : []
   // Picked from the tree, or by a message's own Reply in either view.
   const target = pickedCopies.length ? speaker(pickedCopies) : last
-  // Only ever true in the tree view — and true of the DEFAULT selection
-  // too, not just a clicked one. On a thread where every copy is forged
-  // `last` above falls back to a forged message, so the node the tree
-  // opens on is a node nothing may point at, and it has to say so from
-  // the first render rather than only after the user clicks it. The list
-  // view keeps its long-standing behaviour: with no way to say "that
-  // one" it has nowhere else to fall back to, and that is not something
-  // to change here.
-  const targetForged = (mode === 'tree' || picked !== null) && allForged(copiesOf(t.messages, target.id))
+  // In EVERY view, and of the DEFAULT target too, not just a clicked one.
+  // On a thread where every copy is forged `last` above falls back to a
+  // forged message, so the reply box opens aimed at a message nothing
+  // may point at, and it has to say so from the first render. The writer
+  // refuses such a send anyway — after the route has answered 200, so
+  // offering it here would be a "sent" that never left.
+  const targetForged = allForged(copiesOf(t.messages, target.id))
   const noTarget = targetForged
     ? 'Every stored copy of this message failed its signature, so nothing can'
       + ' point at it: a reply naming it would carry a chain nobody signed.'
@@ -445,7 +451,6 @@ export default function ThreadView({
   const travels = path.length
   const replyTo = (mid: string) => {
     setPicked(mid)
-    setShowIncluded(false)
     requestAnimationFrame(() => {
       replyRef.current?.focus()
       replyRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -493,44 +498,23 @@ export default function ThreadView({
     />
   )
 
-  // A @p typed but not yet committed to a chip would otherwise vanish on
-  // send. Fold it in rather than silently dropping a recipient the user
-  // clearly meant to add.
-  const commitPending = (): string[] => {
-    const v = pending.trim().replace(/,$/, '')
-    if (!v) return recipients
-    // RECIPIENT VALIDATION, BEFORE THE POKE. The nexus parses `to` as a
-    // set of @p and refuses the whole send on a bad one, so a typo here
-    // would surface as a refusal with nothing pointing at the field that
-    // caused it. Checked at the keystroke instead, where it is still a
-    // typo. The nexus keeps its own check; this is a convenience and
-    // never the boundary.
-    if (!isShip(v)) {
-      setSendError(`${v} is not a ship name.`)
-      return recipients
-    }
-    setSendError(null)
-    if (recipients.includes(v)) { setPending(''); return recipients }
-    const next = [...recipients, v]
-    setRecipients(next)
-    setPending('')
-    return next
-  }
-
   const onReply = async () => {
-    const forId = id
-    const to = commitPending()
+    // A @p typed but not yet committed to a chip is still a recipient the
+    // user meant, and a typo refuses the send rather than dropping out of
+    // it - the same fold the composer does.
+    const { ships: to, error: chipError } = commitShip(recipients, pending)
+    if (chipError) {
+      setSendError(chipError)
+      return
+    }
+    setRecipients(to)
+    setPending('')
     if (to.length === 0) {
       setSendError('Add at least one recipient.')
       return
     }
     setSending(true)
     setSendError(null)
-    // The send poke and the post-send refetch are different failures.
-    // Only the poke failing means the reply wasn't sent - draft kept, and
-    // safe to retry. If it succeeds but the refetch then fails, the reply
-    // already went out; clearing the draft and saying so (not "could not
-    // send") avoids the user resending a message that already landed.
     // THE BYTES GO UP FIRST. An upload signs nothing and moves no
     // message, so a file that will not upload leaves the reply exactly
     // where it was, with an error naming the file.
@@ -539,10 +523,8 @@ export default function ThreadView({
       refs = await uploadAll(files, (i, n) => { setUpload(`uploading ${i} of ${n}`) })
     } catch (e) {
       console.error(e)
-      // punctuated, for the reason Compose.tsx gives.
-      const why = e instanceof Error ? e.message : 'An attachment could not be uploaded'
       setSendError(
-        `${why.replace(/[.!?]?$/, '.')}`
+        `${e instanceof Error ? e.message : 'An attachment could not be uploaded.'}`
         + ' Nothing has been sent — your reply and its files are still here.',
       )
       setUpload(null)
@@ -564,15 +546,7 @@ export default function ThreadView({
       // never touches a POST, so a reply whose request did not arrive
       // was not signed and did not leave. See Compose.tsx.
       console.error(e)
-      setSendError(garbled(e)
-        // Reached the ship, no readable answer: it may have gone out.
-        // Sending it again on a "not sent" would be the duplicate.
-        ? 'The ship answered but the reply was unreadable — check Sent before'
-          + ' resending. Your reply is still here.'
-        : unreachable(e)
-          ? 'Offline — not sent. The ship did not answer; nothing was signed and your'
-            + ' reply is still here.'
-          : 'Could not send that reply. Try again.')
+      setSendError(sendFailure(e, 'Your reply is still here.'))
       setSending(false)
       return
     }
@@ -580,16 +554,11 @@ export default function ThreadView({
     setFiles([])
     // Sent: the next reply answers the conversation as it now stands.
     setPicked(null)
-    setShowIncluded(false)
-    onSent(notice)
-    try {
-      const th = await thread(forId)
-      if (idRef.current === forId && th !== null) setT(th)
-    } catch (e) {
-      console.error(e)
-      setSendError('Sent, but could not refresh this view. Reload to see it.')
-    }
     setSending(false)
+    // No refetch of our own. The writer bumps the change beacon before it
+    // fans the reply out, and the beacon refetches this thread and the
+    // listing both — a second fetch here was the same request twice.
+    onSent(notice)
   }
 
   return (
@@ -637,15 +606,13 @@ export default function ThreadView({
         >
           {t.archived ? 'Unarchive' : 'Archive'}
         </button>
-        {/* Always offered: a thread that is open is a thread the ship has
-            marked read as it served it, so there is always something to
-            un-read. (The listing's stale bold row was what made this look
-            wrong; it un-bolds on load now.) */}
+        {/* Always offered: opening a thread marks it read, so there is
+            always something to un-read. */}
         <button
           type="button"
           onClick={onUnread}
-          title="Mark every message here unread and go back to the list. Messages whose
-            signature failed are left alone: a forgery never counts toward unread."
+          title="Mark every message here unread. Messages whose signature failed are left
+            alone: a forgery never counts toward unread."
           className="btn shrink-0"
         >
           Mark unread
@@ -684,37 +651,29 @@ export default function ThreadView({
             + label
           </button>
         ) : (
-          <>
+          // A FORM, so Enter is the form's own submit and not a keydown:
+          // a browser that takes Enter to pick from the suggestion list
+          // cancels the submit, where a keydown handler could see the
+          // Enter first and file the half-typed text.
+          <form onSubmit={(e) => { e.preventDefault(); addLabel(labelDraft) }}>
             <input
               autoFocus
               value={labelDraft}
               onChange={(e) => setLabelDraft(e.target.value.toLowerCase())}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); addLabel(labelDraft) }
-                if (e.key === 'Escape') setLabelDraft(null)
-              }}
+              onKeyDown={(e) => { if (e.key === 'Escape') setLabelDraft(null) }}
               onBlur={() => { if (!labelDraft.trim()) setLabelDraft(null) }}
+              list={labelsId}
               placeholder="label"
               aria-label="Label this conversation"
               title="Labels are local: they never travel, and no other ship can see them. Lowercase letters, digits and hyphens."
               className="field w-32"
             />
-            {(knownLabels ?? [])
-              .filter((l) => !t.labels.includes(l) && fuzzyHas(l, labelDraft.trim()))
-              .slice(0, 8)
-              .map((l) => (
-                <button
-                  key={l}
-                  type="button"
-                  // Before the field's blur can shut it.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => addLabel(l)}
-                  className="btn btn-outline"
-                >
-                  + {l}
-                </button>
+            <datalist id={labelsId}>
+              {(knownLabels ?? []).filter((l) => !t.labels.includes(l)).map((l) => (
+                <option key={l} value={l} />
               ))}
-          </>
+            </datalist>
+          </form>
         )}
       </div>
       {/* Messages stored on this ship that this build cannot read. The
@@ -751,8 +710,10 @@ export default function ThreadView({
       {/* WHAT THE REPLY ANSWERS, AND WHAT GOES WITH IT. The message it
           answers is marked above; the rest of what travels, every signed
           message from the start of the conversation down to it, is here
-          to read before sending, and other branches are not in it. */}
-      <div className="mb-1 mt-3 flex flex-wrap items-center gap-1 text-[12px]">
+          to read before sending, and other branches are not in it. Keyed
+          on the target: another message is another path, and it opens
+          shut. */}
+      <IncludedMessages key={target.id} earlier={path.slice(0, -1)} className="mb-1 mt-3">
         <span className="text-ink-dim">Replying to</span>
         <span className="font-medium">{target.from}</span>
         <span className="text-ink-faint">{when(target.sent)}</span>
@@ -761,64 +722,17 @@ export default function ThreadView({
             Reply to the newest instead
           </button>
         )}
-        {path.length > 1 && (
-          <button
-            type="button"
-            onClick={() => setShowIncluded(!showIncluded)}
-            aria-expanded={showIncluded}
-            className="btn ml-auto"
-          >
-            {showIncluded
-              ? 'Hide included messages'
-              : `Show ${path.length - 1} included ${path.length - 1 === 1 ? 'message' : 'messages'}`}
-          </button>
-        )}
-      </div>
-      {showIncluded && (
-        <div className="mb-2 max-h-72 overflow-y-auto rounded-sm bg-sunken p-2 ring-1 ring-line">
-          {path.slice(0, -1).map((m) => (
-            <div key={m.id} className="mb-2 last:mb-0">
-              <p className="text-[11px] text-ink-faint">
-                {m.from} · {new Date(m.sent).toLocaleString()}
-              </p>
-              <p className="whitespace-pre-wrap break-words text-ink-dim">{m.body}</p>
-            </div>
-          ))}
-        </div>
-      )}
+      </IncludedMessages>
       <div className="mb-1 rounded-sm border border-line p-2">
-        <div className="mb-1 flex flex-wrap items-center gap-1">
-          <span className="text-ink-dim">To</span>
-          {recipients.map((r) => (
-            <span
-              key={r}
-              className="flex max-w-full items-center gap-1 rounded-sm bg-sunken py-0.5 pl-2 pr-1"
-            >
-              <span className="min-w-0 truncate">{r}</span>
-              <button
-                type="button"
-                onClick={() => setRecipients(recipients.filter((x) => x !== r))}
-                aria-label={`Remove ${r}`}
-                title={`Remove ${r} from this reply`}
-                className="touch shrink-0 px-0.5 text-ink-dim hover:text-danger"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          <input
-            value={pending}
-            onChange={(e) => setPending(e.target.value)}
-            onBlur={commitPending}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ',') {
-                e.preventDefault()
-                commitPending()
-              }
-            }}
-            placeholder="~sampel-palnet"
-            aria-label="Add a recipient"
-            className="field min-w-32 flex-1 border-b-0"
+        <div className="mb-1">
+          <ShipChips
+            ships={recipients}
+            pending={pending}
+            onShips={setRecipients}
+            onPending={setPending}
+            onError={setSendError}
+            lists={lists}
+            label="To"
           />
         </div>
         <p className="text-[11px] text-ink-dim">

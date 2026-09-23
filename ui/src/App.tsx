@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   deleteDraft as apiDeleteDraft, deleteList, deleteRule, drafts as apiDrafts,
   lists as apiLists, onCachedMail, pageOf, rules as apiRules, saveList, saveRule,
@@ -65,8 +65,6 @@ export default function App() {
   // of the mailbox.
   const [notice, setNotice] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
-  const [composing, setComposing] = useState(false)
-  const [resume, setResume] = useState<Draft | null>(null)
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [rules, setRules] = useState<Rule[]>([])
   // The mailing lists this ship holds. Sidebar state, like the rules and
@@ -74,15 +72,13 @@ export default function App() {
   // they are fetched with the sidebar and not with a view.
   const [lists, setLists] = useState<MailList[]>([])
   // Every label any thread carries, which is the label list the sidebar
-  // shows. Derived from the ALL view rather than stored: a label exists
-  // exactly as long as some thread carries it, so a separate registry
-  // could only ever drift from the threads it claims to describe. This
-  // is one of the two remaining users of `all`, which is why the view
-  // stayed an API primitive after it left the sidebar.
+  // shows, and the unread count beside Inbox. Both are the SHIP's, sent
+  // with every listing and taken over the whole mailbox whatever view or
+  // page was asked for. Labels are derived rather than stored: a label
+  // exists exactly as long as some thread carries it, so a separate
+  // registry could only ever drift from the threads it claims to describe.
   const [labels, setLabels] = useState<string[]>([])
-  // Unread in the inbox, as the sidebar's listing of everything last
-  // counted it: what the count says while another view is open.
-  const [allUnread, setAllUnread] = useState(0)
+  const [unread, setUnread] = useState(0)
 
   // ── the shell's own state ──────────────────────────────────────────
 
@@ -194,11 +190,14 @@ export default function App() {
   // silently dropped. A counter is guaranteed distinct every call.
   const [threadUpdate, setThreadUpdate] = useState<number | null>(null)
 
-  // Non-null while the composer is open as a forward. Held here rather
-  // than in ThreadView so the forward composer is the same panel as the
-  // compose one — one composer, one code path, one place where the
-  // recipient list is built (from nothing).
-  const [forwarding, setForwarding] = useState<ForwardIntent | null>(null)
+  // THE COMPOSER: shut, blank, a forward or a resumed draft. One value,
+  // so a forward and a resumed draft can never both be open. Held here
+  // rather than in ThreadView so the forward composer is the same panel
+  // as the compose one — one composer, one code path, one place where
+  // the recipient list is built (from nothing).
+  const [composer, setComposer] = useState<
+    { forward?: ForwardIntent, resume?: Draft } | null
+  >(null)
 
   const isThreadPane = pane !== 'drafts' && pane !== 'rules' && pane !== 'lists'
   // A SEARCH LEAVES THE PANE. The nexus ANDs the query with the view
@@ -210,7 +209,7 @@ export default function App() {
   // searchable and that no rule can hide a failed signature; both were
   // true of the nexus and false of the box the user types into.
   //
-  // This is the other user of `all`, and the reason it is still a view:
+  // This is the one user of `all`, and the reason it is still a view:
   // it is what a search escapes INTO, not a folder anyone visits.
   const searching = applied.trim() !== ''
 
@@ -233,33 +232,32 @@ export default function App() {
         setInboxError(null)
         setEntries(p.threads)
         setTotal(p.total)
+        setLabels(p.labels)
+        setUnread(p.unread)
       })
       .catch((e) => { console.error(e); setInboxError('Could not reach the ship.') })
       .finally(() => { if (seq === listSeq.current) setListLoading(false) })
   }, [pane, label, applied, offset, isThreadPane, searching])
 
-  // The label list and the draft count are sidebar state, not list
-  // state: they have to be right whatever pane is open, so they are
-  // fetched separately from whichever view is on screen.
+  // Drafts alone: all an autosave changes, and it runs at every pause in
+  // typing — the full sidebar refresh below is three requests.
+  const refreshDrafts = useCallback(() => apiDrafts().then(setDrafts), [])
+
+  // Drafts, filters and lists are sidebar state, not list state: they
+  // have to be right whatever pane is open, so they are fetched apart
+  // from whichever view is on screen. The labels and the unread count
+  // ride on the listing itself (see `refresh`).
   const refreshSidebar = useCallback(() => {
-    pageOf('all', { limit: 200 })
-      .then((p) => {
-        const seen = new Set<string>()
-        for (const e of p.threads) for (const l of e.labels) seen.add(l)
-        setLabels([...seen].sort())
-        setAllUnread(p.threads.filter((e) => e.unread && !e.archived).length)
-      })
-      .catch((e) => { console.error(e) })
     //  allSettled, not all: one of these failing still means the wait is
     //  over for the other two, and each pane already renders its own
     //  emptiness. A refresh after the first never re-arms the flag —
     //  those panes have content to keep showing.
     void Promise.allSettled([
-      apiDrafts().then(setDrafts),
+      refreshDrafts(),
       apiRules().then(setRules),
       apiLists().then(setLists),
     ]).then(() => setMetaLoaded(true))
-  }, [])
+  }, [refreshDrafts])
 
   const onChange = useCallback(() => {
     refresh()
@@ -310,14 +308,20 @@ export default function App() {
     return () => { navigator.serviceWorker.removeEventListener('controllerchange', claimed) }
   }, [onChange])
 
+  // ONE STREAM FOR THE LIFE OF THE TAB. The handlers are rebuilt on every
+  // pane click, page and search; subscribing on them tore the held stream
+  // down and opened a fresh keep on the ship each time. Effect events
+  // always call the current ones without being dependencies.
+  const beaconEvent = useEffectEvent(onBeacon)
+  const changeEvent = useEffectEvent(onChange)
   useEffect(() => {
     // subscribeChanges is synchronous and hands back its own teardown, so
     // there is no window in which an unmount (or StrictMode's dev-only
     // double effect) can race an in-flight subscribe and leak a stream.
     // The cheap handler for a change; the full one for coming back from
     // a hidden tab, where anything may have moved unobserved.
-    return subscribeChanges(onBeacon, onChange)
-  }, [onBeacon, onChange])
+    return subscribeChanges(() => { beaconEvent() }, () => { changeEvent() })
+  }, [])
 
   // Debounce the search box. A search is a read and runs on its own
   // request fiber, so it never queues behind the writer — but it is
@@ -337,14 +341,9 @@ export default function App() {
   }
 
   // UNREAD, WHERE IT CAN BE SEEN FROM ANYWHERE: beside Inbox and in the
-  // tab's title, so new mail is noticed without opening the inbox. While
-  // the inbox's first page is on screen it is counted from that listing,
-  // which every delivery refreshes, so it costs the ship nothing more;
-  // elsewhere from the sidebar's listing of everything, which is read
-  // anyway for the labels. ponytail: counts the page on screen, so it
-  // tops out at PER_PAGE there; a count route would lift it.
-  const inboxShown = pane === 'inbox' && !searching && offset === 0
-  const unread = inboxShown ? entries.filter((e) => e.unread).length : allUnread
+  // tab's title, so new mail is noticed without opening the inbox. The
+  // ship counts it over the whole mailbox on every listing, which every
+  // delivery refreshes, so it costs nothing beyond the listing on screen.
   useEffect(() => {
     document.title = unread > 0 ? `(${unread}) Auspex` : 'Auspex'
   }, [unread])
@@ -468,13 +467,11 @@ export default function App() {
             drafts={drafts.length}
             rules={rules.length}
             lists={lists.length}
-            counts={{ inbox: unread }}
+            unread={unread}
             onView={goto}
             onCompose={() => {
-              setResume(null); setForwarding(null); setComposing(true); setNavOpen(false)
+              setComposer({}); setNavOpen(false)
             }}
-            onFilters={() => goto('rules')}
-            onLists={() => goto('lists')}
             theme={theme}
             onTheme={() => {
               // A REAL CHOICE, and the only thing that makes one stick.
@@ -554,9 +551,9 @@ export default function App() {
                 <Drafts
                   drafts={drafts}
                   loading={!metaLoaded}
-                  onOpen={(d) => { setForwarding(null); setComposing(false); setResume(d) }}
+                  onOpen={(d) => { setComposer({ resume: d }) }}
                   onDelete={(id) => {
-                    apiDeleteDraft(id).then(refreshSidebar).catch(console.error)
+                    apiDeleteDraft(id).then(refreshDrafts).catch(console.error)
                   }}
                 />
               ) : (
@@ -604,11 +601,22 @@ export default function App() {
                 ? (
                   <ThreadView
                     id={selected}
-                    onSent={(n) => { setNotice(n ?? null); refresh() }}
+                    // No refresh: a send moves the change beacon, and
+                    // the beacon refetches the listing.
+                    onSent={(n) => { setNotice(n ?? null) }}
                     onDeleted={() => { setSelected(null); refresh() }}
-                    onForward={(f) => { setComposing(false); setResume(null); setForwarding(f) }}
-                    onFiled={() => { refresh(); refreshSidebar() }}
-                    onRead={(tid) => setEntries((es) => es.map((e) => e.id === tid ? { ...e, unread: false } : e))}
+                    onForward={(f) => { setComposer({ forward: f }) }}
+                    // The listing carries the labels and the count too.
+                    onFiled={refresh}
+                    onRead={(tid) => {
+                      // A read mark does not move the beacon, so the
+                      // ship's count is adjusted here by the one row
+                      // read. A thread not on this page just waits for
+                      // the next refresh.
+                      const row = entries.find((e) => e.id === tid)
+                      if (row?.unread && !row.archived) setUnread((n) => Math.max(0, n - 1))
+                      setEntries((es) => es.map((e) => e.id === tid ? { ...e, unread: false } : e))
+                    }}
                     updatedAt={threadUpdate}
                     lists={lists}
                     onSaveList={async (l) => { await saveList(l); refreshSidebar() }}
@@ -621,23 +629,25 @@ export default function App() {
         )}
       </div>
 
-      {(composing || forwarding || resume) && (
+      {composer && (
         // Keyed so that hitting Forward while a blank compose is open
         // remounts the panel instead of retrofitting a `prev` onto a
         // draft whose subject and recipients were typed for something
         // else. The initial state of a forward composer, and of a
         // resumed draft, is only correct on mount.
         <Compose
-          key={forwarding ? `forward:${forwarding.prev}` : resume ? `draft:${resume.id}` : 'compose'}
-          forward={forwarding}
-          resume={resume}
+          key={composer.forward ? `forward:${composer.forward.prev}`
+            : composer.resume ? `draft:${composer.resume.id}` : 'compose'}
+          forward={composer.forward}
+          resume={composer.resume}
           lists={lists}
-          onDraftsChanged={refreshSidebar}
-          onClose={() => { setComposing(false); setForwarding(null); setResume(null) }}
+          onDraftsChanged={() => { refreshDrafts().catch(console.error) }}
+          onClose={() => { setComposer(null) }}
           onSent={(n) => {
-            setComposing(false); setForwarding(null); setResume(null)
+            setComposer(null)
             setNotice(n ?? null)
-            refresh(); refreshSidebar()
+            // The drafts were refreshed by onDraftsChanged, and the send
+            // moves the change beacon, which refetches the listing.
           }}
         />
       )}

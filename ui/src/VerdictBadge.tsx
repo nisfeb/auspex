@@ -31,15 +31,13 @@ import type { Verdict } from './api'
 // read out. `role="img"` is the role for "a graphic whose meaning is
 // its label", which is exactly what a check, a ring and a stamped word
 // each are here.
-export default function VerdictBadge({ verdict, from, className = '' }: {
+export default function VerdictBadge({ verdict, from: who }: {
   verdict: Verdict
   // The sender this verdict is about. The tooltip names the ship,
   // because "verified" alone answers a question nobody asked: what a
   // reader wants to know is verified as WHOM.
-  from?: string
-  className?: string
+  from: string
 }) {
-  const who = from ?? 'this sender'
 
   if (verdict === 'forged') {
     return (
@@ -47,7 +45,7 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
         role="img"
         title={`A key was available for ${who} and the signature failed against it. This message is not from the ship it claims.`}
         aria-label={`Forged: the signature failed against ${who}'s registered key`}
-        className={`shrink-0 rounded-sm bg-forged-bg px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-forged-ink ring-1 ring-forged-line ${className}`}
+        className="shrink-0 rounded-sm bg-forged-bg px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-forged-ink ring-1 ring-forged-line"
       >
         forged
       </span>
@@ -60,7 +58,7 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
         role="img"
         title={`Signed by ${who}, signature verified against their key.`}
         aria-label={`Verified: signed by ${who}, signature verified against their key`}
-        className={`shrink-0 text-[13px] leading-none text-ok ${className}`}
+        className="shrink-0 text-[13px] leading-none text-ok"
       >
         ✓
       </span>
@@ -84,7 +82,7 @@ export default function VerdictBadge({ verdict, from, className = '' }: {
       role="img"
       title={why}
       aria-label={`Unverified: ${why}`}
-      className={`shrink-0 text-[13px] leading-none text-ink-faint ${className}`}
+      className="shrink-0 text-[13px] leading-none text-ink-faint"
     >
       ○
     </span>

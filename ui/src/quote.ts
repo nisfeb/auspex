@@ -7,7 +7,7 @@
 /** A body as runs of its own words and of quoted lines, the "> " taken off. */
 export function quoteBlocks(body: string): { quoted: boolean, text: string }[] {
   const out: { quoted: boolean, lines: string[] }[] = []
-  for (const line of body.replace(/\s+$/, '').split('\n')) {
+  for (const line of body.trimEnd().split('\n')) {
     const t = line.trimStart()
     const quoted = t.startsWith('>')
     const text = quoted ? t.slice(1).replace(/^ /, '') : line
@@ -22,7 +22,7 @@ export function quoteBlocks(body: string): { quoted: boolean, text: string }[] {
 
 /** [text] as a quote: each line set with "> ", a blank one with ">". */
 export function asQuote(text: string): string {
-  return text.replace(/\s+$/, '').split('\n').map((l) => (l.trim() ? `> ${l}` : '>')).join('\n')
+  return text.trimEnd().split('\n').map((l) => (l.trim() ? `> ${l}` : '>')).join('\n')
 }
 
 /**
@@ -30,8 +30,8 @@ export function asQuote(text: string): string {
  * either side, and where the cursor should go after it.
  */
 export function quoteInto(body: string, quote: string, at: number): { body: string, cursor: number } {
-  const before = body.slice(0, at).replace(/\s+$/, '')
-  const after = body.slice(at).replace(/^\s+/, '')
+  const before = body.slice(0, at).trimEnd()
+  const after = body.slice(at).trimStart()
   const head = (before ? `${before}\n\n` : '') + asQuote(quote) + '\n\n'
   return { body: head + after, cursor: head.length }
 }
@@ -39,11 +39,4 @@ export function quoteInto(body: string, quote: string, at: number): { body: stri
 /** A message's own words, without its quotes or blank lines. */
 export function ownWords(body: string): string {
   return quoteBlocks(body).filter((b) => !b.quoted).map((b) => b.text).join(' ').replace(/\s+/g, ' ').trim()
-}
-
-/** Whether every letter of [q] is in [s], in order: "inv" is in "invoices". */
-export function fuzzyHas(s: string, q: string): boolean {
-  let i = 0
-  for (const c of s) if (i < q.length && c === q[i]) i++
-  return i === q.length
 }

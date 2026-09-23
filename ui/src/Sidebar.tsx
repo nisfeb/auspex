@@ -38,8 +38,8 @@ const FIXED: { view: View; name: string; hint: string }[] = [
 ]
 
 export default function Sidebar({
-  view, label, labels, drafts, rules, lists, counts, onView, onCompose, onFilters,
-  onLists, theme, onTheme, installable, onInstall,
+  view, label, labels, drafts, rules, lists, unread, onView, onCompose,
+  theme, onTheme, installable, onInstall,
 }: {
   view: View | 'drafts' | 'rules' | 'lists'
   label: string
@@ -47,11 +47,10 @@ export default function Sidebar({
   drafts: number
   rules: number
   lists: number
-  counts: Record<string, number>
+  // Unread threads in the inbox, the only view that shows a count.
+  unread: number
   onView: (v: View | 'drafts' | 'rules' | 'lists', label?: string) => void
   onCompose: () => void
-  onFilters: () => void
-  onLists: () => void
   theme: 'light' | 'dark'
   onTheme: () => void
   // Only true once the browser has actually offered the prompt. There is
@@ -100,7 +99,7 @@ export default function Sidebar({
 
       <nav className="mt-2 min-h-0 flex-1 overflow-y-auto px-1">
         {FIXED.map((f) =>
-          row(view === f.view, f.name, f.hint, counts[f.view] ?? null,
+          row(view === f.view, f.name, f.hint, f.view === 'inbox' ? unread : null,
             () => onView(f.view), true))}
         {row(
           view === 'drafts',
@@ -126,7 +125,7 @@ export default function Sidebar({
       <div className="flex flex-col items-start gap-0.5 border-t border-line px-1 pt-2">
         <button
           type="button"
-          onClick={onFilters}
+          onClick={() => onView('rules')}
           title="Rules applied to mail as it arrives. A filter may add labels and
             archive; it can never delete a message, mark one read, or hide one whose
             signature failed."
@@ -139,7 +138,7 @@ export default function Sidebar({
             is, it is a thing you keep. */}
         <button
           type="button"
-          onClick={onLists}
+          onClick={() => onView('lists')}
           title="Names for sets of ships, kept on this ship. A list name never
             travels: picking one in the composer puts its members in the To field
             as ordinary recipients, and everyone on it sees everyone else."

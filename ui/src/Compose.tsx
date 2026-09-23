@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  canSign, deleteDraft, garbled, isShip, newId, NO_KEYS_LINE, refusalLine,
-  saveDraft, send, sendDraft, unreachable, uploadAll,
+  canSign, deleteDraft, isShip, newId, NO_KEYS_LINE, refusalLine,
+  saveDraft, send, sendFailure, uploadAll,
   type Draft, type MailList, type Message } from './api'
 import { FilePicker } from './Attachments'
 import ShipChips, { commitShip } from './ShipChips'
@@ -29,6 +29,51 @@ export interface ForwardIntent {
   // Those messages, root first, where the thread was open to hand them
   // over; the last is the one being forwarded. Absent on a resumed draft.
   path?: Message[]
+}
+
+// THE REST OF WHAT TRAVELS, unrolled on request: every message on the
+// path above the one being answered or forwarded, root first. One
+// component for the reply box and the forward composer, because it is
+// one question — what goes with this? — and should read the same in
+// both. `children` is the caller's own line ("Replying to …"); the
+// toggle sits at its end and the messages open below it.
+export function IncludedMessages({ earlier, className = '', children }: {
+  earlier: Message[]
+  className?: string
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <div className={`flex flex-wrap items-center gap-1 text-[12px] ${className}`}>
+        {children}
+        {earlier.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            className="btn ml-auto"
+          >
+            {open
+              ? 'Hide included messages'
+              : `Show ${earlier.length} included ${earlier.length === 1 ? 'message' : 'messages'}`}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mb-2 max-h-72 overflow-y-auto rounded-sm bg-sunken p-2 ring-1 ring-line">
+          {earlier.map((m) => (
+            <div key={m.id} className="mb-2 last:mb-0">
+              <p className="text-[11px] text-ink-faint">
+                {m.from} · {new Date(m.sent).toLocaleString()}
+              </p>
+              <p className="whitespace-pre-wrap break-words text-ink-dim">{m.body}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
 }
 
 // How long the composer sits still before it saves. Long enough that
@@ -60,8 +105,6 @@ export default function Compose({
   // inside the control so Send can fold it in.
   const [to, setTo] = useState<string[]>(resume ? resume.to : [])
   const [pending, setPending] = useState('')
-  // The rest of the forwarded path, unrolled on request.
-  const [showIncluded, setShowIncluded] = useState(false)
   const [subject, setSubject] = useState(
     resume ? resume.subject : forward ? `fwd: ${forward.subject}` : '',
   )
@@ -74,17 +117,10 @@ export default function Compose({
   // itself is the only thing left.
   const [upload, setUpload] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Who the ship would not carry this to, carried out through onSent.
-  // A ref and not state: it is written once, on the way out of a
-  // component that is about to unmount, and a setState there would be
-  // a render nobody sees.
-  const refused = useRef<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   // ATTACHMENTS DO NOT SURVIVE A DRAFT. A draft is a local grub with no
-  // files field, and the writer's %save-draft carries none — so a
-  // composer with a file attached takes the direct /api/send path and
-  // never the save-then-send-draft one. Resuming a draft starts with no
-  // files for the same reason: there were never any on disk to restore,
+  // files field, and the writer's %save-draft carries none. Resuming a
+  // draft starts with no files: there were never any on disk to restore,
   // and pretending otherwise would send a message the user believes
   // carries a file it does not.
   const [files, setFiles] = useState<File[]>([])
@@ -93,6 +129,7 @@ export default function Compose({
   // a new id per save would lay one grub per keystroke burst and leave
   // the user a folder full of half-sentences.
   const draftId = useRef(resume ? resume.id : newId())
+  const prev = forward?.prev ?? resume?.prev ?? null
   // Whether anything has actually been written under that id yet, so
   // closing an untouched composer does not delete a draft that never
   // existed and does not poke the writer for nothing.
@@ -134,7 +171,7 @@ export default function Compose({
         to: named,
         subject: s,
         body: b,
-        prev: forward ? forward.prev : resume ? resume.prev : null,
+        prev,
       })
       written.current = true
       onDraftsChanged()
@@ -170,73 +207,38 @@ export default function Compose({
     }
     setTo(list)
     setPending('')
-    // RECIPIENT VALIDATION, BEFORE THE POKE, KEPT. Every chip came
-    // through `commitShip` and so is a ship already — this is the belt to
-    // that brace, and the thing that would catch a chip arriving from
-    // anywhere else (a resumed draft, a list's members). The nexus keeps
-    // its own check and stays the boundary.
-    const wrong = list.filter((s) => !isShip(s))
-    if (wrong.length > 0) {
-      setError(`Not a ship name: ${wrong.join(', ')}`)
-      return
-    }
     setSending(true)
     try {
-      // A FILE ON THE COMPOSER TAKES THE DIRECT PATH. %send-draft signs
-      // what is on disk, and what is on disk has no files: routing an
-      // attached send through it would drop every attachment silently
-      // and report success. The draft, if one was written, is deleted
-      // after the send the way discarding one is.
+      // THE BYTES GO UP FIRST, AND A FAILURE HERE ABORTS BEFORE THE
+      // SEND. An upload stores bytes under their content address and
+      // signs nothing, so a file that will not upload is a composer
+      // that stays open with its files and an error naming the one
+      // that failed — never a half-sent message.
+      let refs
       if (files.length > 0) {
-        // THE BYTES GO UP FIRST, AND A FAILURE HERE ABORTS BEFORE THE
-        // SEND. An upload stores bytes under their content address and
-        // signs nothing, so a file that will not upload is a composer
-        // that stays open with its files and an error naming the one
-        // that failed — never a half-sent message.
-        let refs
         try {
           refs = await uploadAll(files, (i, n) => { setUpload(`uploading ${i} of ${n}`) })
         } catch (e) {
           console.error(e)
-          // The ship's own reason, PUNCTUATED. It arrives as a bare
-          // clause ("blocked by the test") and runs straight into the
-          // sentence after it otherwise.
-          const why = e instanceof Error ? e.message : 'An attachment could not be uploaded'
           setError(
-            `${why.replace(/[.!?]?$/, '.')}`
+            `${e instanceof Error ? e.message : 'An attachment could not be uploaded.'}`
             + ' Nothing has been sent — every word and every file is still here.',
           )
           return
         } finally {
           setUpload(null)
         }
-        const res = await send(
-          list, subject, body, forward ? forward.prev : resume ? resume.prev : null, refs,
-        )
-        refused.current = refusalLine(list, res.refused)
-        if (written.current) {
-          try { await deleteDraft(draftId.current) } catch (e) { console.error(e) }
-        }
-      } else if (written.current) {
-        // SIGN THE DRAFT AND DELETE IT, in one action at the writer.
-        // Saving first means the message that goes out is exactly the
-        // one on disk, and the writer deletes the draft only if the
-        // send actually happened — a refused send leaves it intact.
-        await saveDraft({
-          id: draftId.current,
-          to: list,
-          subject,
-          body,
-          prev: forward ? forward.prev : resume ? resume.prev : null,
-        })
-        await sendDraft(draftId.current)
-      } else {
-        // `prev` is the only thing that makes this a forward rather than
-        // a compose. The nexus resolves it to its containing thread and
-        // ships the path leading to it; there is no separate forward
-        // action.
-        const res = await send(list, subject, body, forward ? forward.prev : null)
-        refused.current = refusalLine(list, res.refused)
+      }
+      // ONE SEND PATH, drafts included. `prev` is the only thing that
+      // makes this a forward rather than a compose; the nexus resolves it
+      // to its containing thread and ships the path leading to it.
+      //
+      // The draft, if one was written, is deleted after the send the way
+      // discarding one is — a refused send throws first and leaves it.
+      const res = await send(list, subject, body, prev, refs)
+      const notice = refusalLine(list, res.refused)
+      if (written.current) {
+        try { await deleteDraft(draftId.current) } catch (e) { console.error(e) }
       }
       onDraftsChanged()
       // A SEND WITH REFUSALS IS A SEND. The panel closes and the draft
@@ -247,7 +249,7 @@ export default function Compose({
       // The all-refused case never reaches here: the route answers 400,
       // which arrives as an ApiError and lands in the catch below with
       // the panel open and every word still in it.
-      onSent(refused.current)
+      onSent(notice)
     } catch (e) {
       // Leave the panel open with the draft intact — a failed send (an
       // unreachable ship, a malformed @p the route's parser rejects)
@@ -264,20 +266,9 @@ export default function Compose({
       //
       // AND THE THIRD CASE, which is neither: `fetch` resolved and the
       // body did not parse. The ship answered, so the poke arrived, so
-      // this send may have gone out — see `garbled` in api.ts.
+      // this send may have gone out — see `sendFailure` in api.ts.
       console.error(e)
-      setError(
-        garbled(e)
-          // THE REQUEST LANDED AND THE ANSWER DID NOT PARSE. The poke
-          // reached the writer, so this may well have been sent — and
-          // "not sent, try again" here is how a message goes out twice.
-          ? 'The ship answered but the reply was unreadable — check Sent before'
-            + ' resending. Every word is still in this panel.'
-          : unreachable(e)
-            ? 'Offline — not sent. The ship did not answer, nothing here has been'
-              + ' signed, and every word is still in this panel. Try again when it is back.'
-            : e instanceof Error ? e.message : 'Could not send. Check the recipient and try again.',
-      )
+      setError(sendFailure(e, 'Every word is still in this panel.'))
     } finally {
       setSending(false)
     }
@@ -336,38 +327,13 @@ export default function Compose({
             it. A count of messages is not something to review. */}
         {forward?.path && forward.path.length > 0 && (() => {
           const fwd = forward.path[forward.path.length - 1]
-          const earlier = forward.path.slice(0, -1)
           return (
             <div className="mb-2 space-y-1">
-              <div className="flex flex-wrap items-center gap-1 text-[12px]">
+              <IncludedMessages earlier={forward.path.slice(0, -1)}>
                 <span className="text-ink-dim">Forwarding</span>
                 <span className="font-medium">{fwd.from}</span>
                 <span className="text-ink-faint">{new Date(fwd.sent).toLocaleString()}</span>
-                {earlier.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowIncluded(!showIncluded)}
-                    aria-expanded={showIncluded}
-                    className="btn ml-auto"
-                  >
-                    {showIncluded
-                      ? 'Hide included messages'
-                      : `Show ${earlier.length} included ${earlier.length === 1 ? 'message' : 'messages'}`}
-                  </button>
-                )}
-              </div>
-              {showIncluded && (
-                <div className="max-h-72 overflow-y-auto rounded-sm bg-sunken p-2 ring-1 ring-line">
-                  {earlier.map((m) => (
-                    <div key={m.id} className="mb-2 last:mb-0">
-                      <p className="text-[11px] text-ink-faint">
-                        {m.from} · {new Date(m.sent).toLocaleString()}
-                      </p>
-                      <p className="whitespace-pre-wrap break-words text-ink-dim">{m.body}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              </IncludedMessages>
               <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-sm border border-line p-2">
                 {fwd.body}
               </p>

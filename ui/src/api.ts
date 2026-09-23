@@ -146,6 +146,30 @@ export const unreachable = (e: unknown): boolean =>
 // `unreachable`, or don't — they are exclusive by construction.
 export const garbled = (e: unknown): boolean => e instanceof GarbledError
 
+// What is wrong with a (trimmed, lowercased) list name, or null. The
+// same rule the nexus enforces, checked at the keystroke: the name
+// becomes a path segment on the ship, so it is lowercase letters, digits
+// and hyphens and nothing else. The nexus keeps its own check and stays
+// the boundary.
+export const listNameError = (n: string): string | null =>
+  !n ? 'A list needs a name.'
+    : /^[a-z0-9-]{1,64}$/.test(n) ? null
+      : 'A list name is 1–64 lowercase letters, digits or hyphens.'
+
+// WHAT A FAILED SEND SAYS, by which of the three ways it failed. `kept`
+// names what is still on screen; the composer and the reply box word
+// that differently and say everything else the same.
+export const sendFailure = (e: unknown, kept: string): string =>
+  garbled(e)
+    // THE REQUEST LANDED AND THE ANSWER DID NOT PARSE. The poke reached
+    // the writer, so this may well have been sent — and "not sent, try
+    // again" here is how a message goes out twice.
+    ? `The ship answered but the reply was unreadable — check Sent before resending. ${kept}`
+    : unreachable(e)
+      ? `Offline — not sent. The ship did not answer and nothing was signed. ${kept}`
+      // The ship's own reason: a bad @p, every recipient refused.
+      : e instanceof Error ? e.message : 'Could not send. Try again.'
+
 async function jsonOf(res: Response): Promise<unknown> {
   if (!res.ok) {
     // The nexus answers every route with JSON, errors included
@@ -368,9 +392,10 @@ export const uploadAll = async (
       // eslint-disable-next-line no-await-in-loop
       refs.push(await uploadBlob(files[i]))
     } catch (e) {
-      throw new Error(
-        `${files[i].name}: ${e instanceof Error ? e.message : 'could not be uploaded'}`,
-      )
+      // PUNCTUATED. The ship's reason arrives as a bare clause ("blocked
+      // by the test"), and every caller follows it with a sentence.
+      const why = e instanceof Error ? e.message : 'could not be uploaded'
+      throw new Error(`${files[i].name}: ${why.replace(/[.!?]?$/, '.')}`)
     }
   }
   return refs
@@ -494,14 +519,7 @@ const dispositionName = (h: string | null): string | null => {
 export const getAttachment = async (a: Attachment): Promise<Download | null> => {
   const res = await fetch(blobUrl(a), { headers: { accept: '*/*' } })
   if (res.status === NOT_FETCHED) return null
-  if (!res.ok) {
-    let why = `HTTP ${res.status}`
-    try {
-      const j = await res.json()
-      if (j && typeof j.error === 'string') why = j.error
-    } catch { /* the error path is JSON; a non-JSON body keeps the code */ }
-    throw new ApiError(res.status, why)
-  }
+  if (!res.ok) await jsonOf(res) // throws the ship's reason
   // The hash is the fallback, which is also what +safe-name falls back
   // to: a file that arrives with no usable name downloads as its content
   // address rather than as a string nobody checked.
@@ -545,14 +563,15 @@ export const saveBlob = (d: Download) => {
 export const deleteThread = (id: string) =>
   post('/api/delete-thread', { 'thread-id': id })
 
-// One request for the whole batch. Opening a thread marks every unread
-// message in it, and the nexus writer is the ship's single serialisation
-// point for mail: one id per request meant one writer event and one full
-// mailbox scan per message. An empty list is not sent at all.
-export const markRead = (ids: string[]) =>
+// One request for the whole batch, naming the thread. Opening a thread
+// marks every unread message in it, and the nexus writer is the ship's
+// single serialisation point for mail: one id per request meant one
+// writer event per message, and an id with no thread beside it meant a
+// walk of the whole mailbox to find it. An empty list is not sent at all.
+export const markRead = (threadId: string, ids: string[]) =>
   ids.length === 0
     ? Promise.resolve()
-    : post('/api/read', { 'msg-ids': ids }).then(() => undefined)
+    : post('/api/read', { 'thread-id': threadId, 'msg-ids': ids }).then(() => undefined)
 
 // Grubbery's own keep-SSE endpoint for one nexus grub. The nexus bumps
 // /beacon/rev on every mutation EXCEPT a read-mark, so this stream is
@@ -595,11 +614,18 @@ const jitter = (ms: number) => Math.round(ms * (0.5 + Math.random()))
 // stream — the same shape lattice's live-view script uses. The stream
 // carries the whole /beacon directory, hence the ' /rev' filter, and the
 // first event ('old ...') is the current value rather than a change, so
-// acting on it would refetch everything on every mount.
+// acting on it would refetch everything on every mount — unless it names
+// a revision other than the last one this tab saw, which is the ship
+// having moved while the stream was down. The rules are
+// thunderbird/lib/beacon.js's (`framesIn`, `revIn`, `isChange`); the
+// three readers of this stream must agree on what a change is.
 export const subscribeChanges = (onEvent: () => void, onResume?: () => void) => {
   let stopped = false
   let ac: AbortController | null = null
   let wait = RETRY_MIN_MS
+  // The last revision any frame carried. Memory only: a new tab fetches
+  // everything on mount anyway.
+  let lastRev: string | null = null
 
   const hidden = () => typeof document !== 'undefined' && document.hidden
 
@@ -646,15 +672,25 @@ export const subscribeChanges = (onEvent: () => void, onResume?: () => void) => 
           const { done, value } = await reader.read()
           if (done) break
           buf += dec.decode(value, { stream: true })
-          const frames = buf.split('\n\n')
+          // A blank line ends a frame, and SSE allows CRLF as well as LF.
           // The trailing element is a partial frame, not a whole one.
+          const frames = buf.split(/\r?\n\r?\n/)
           buf = frames.pop() ?? ''
           for (const f of frames) {
-            const ev = f.split('\n').find((l) => l.startsWith('event: '))?.slice(7)
+            const lines = f.split(/\r?\n/)
+            const ev = lines.find((l) => l.startsWith('event:'))?.slice(6).trim() ?? ''
+            const rev = lines.find((l) => l.startsWith('data:'))?.slice(5).trim()
+            if (!ev.endsWith(' /rev') || rev === undefined) continue
             // `old …` is the current revision replayed at registration,
-            // not a change. Ignoring it is what makes a reconnect cost
-            // exactly one request and do no work.
-            if (ev && ev.endsWith(' /rev') && !ev.startsWith('old')) onEvent()
+            // not a change — so a reconnect that missed nothing costs
+            // exactly one request and does no work. One whose revision
+            // differs from the last seen reconnected to a ship that moved
+            // meanwhile, and a visible tab would otherwise show the stale
+            // listing until some later change. The first frame ever is
+            // neither: the mount has just fetched everything.
+            const moved = lastRev !== null && rev !== lastRev
+            lastRev = rev
+            if (moved || !ev.startsWith('old')) onEvent()
           }
         }
       } catch {
@@ -701,12 +737,22 @@ export type View = 'inbox' | 'sent' | 'archived' | 'all' | 'label'
 
 // The listing response. `total` counts the whole view, `threads` is one
 // page of it, so the UI can render controls without fetching everything.
+//
+// `unread` and `labels` are not about the page at all: the ship counts
+// them over the WHOLE MAILBOX whatever view, query or page was asked
+// for, so the sidebar reads them off whichever listing is on screen
+// instead of walking everything a second time.
 export interface Page {
   total: number
   offset: number
   limit: number
   view: string
   threads: InboxEntry[]
+  // Inbox threads (not archived) holding an unread message that is not
+  // forged: the count beside Inbox and in the tab's title.
+  unread: number
+  // Every label on any thread, sorted.
+  labels: string[]
 }
 
 export interface Draft {
@@ -767,7 +813,7 @@ export const isShip = (s: string): boolean => {
   return parts.length === 1 || parts.every((p) => p.length === 6)
 }
 
-export const pageOf = (
+export const pageOf = async (
   view: View,
   opts: { label?: string; q?: string; offset?: number; limit?: number } = {},
 ) => {
@@ -776,7 +822,17 @@ export const pageOf = (
   if (opts.q) p.set('q', opts.q)
   if (opts.offset) p.set('offset', String(opts.offset))
   if (opts.limit) p.set('limit', String(opts.limit))
-  return get<Page>(`/api/inbox?${p.toString()}`, true)
+  const page = await get<Page>(`/api/inbox?${p.toString()}`, true)
+  // Decoded defensively, as `refused` is: a nexus older than these two
+  // fields omits them, and that must read as nothing unread and no
+  // labels rather than as NaN in the tab's title.
+  return {
+    ...page,
+    unread: typeof page.unread === 'number' ? page.unread : 0,
+    labels: Array.isArray(page.labels)
+      ? page.labels.filter((l): l is string => typeof l === 'string')
+      : [],
+  }
 }
 
 // Local state, so none of these move the change beacon: they alter a
@@ -789,8 +845,10 @@ export const setLabel = (threadId: string, label: string, add: boolean) =>
 export const setArchived = (threadId: string, archived: boolean) =>
   post('/api/archive', { 'thread-id': threadId, archived })
 
-export const markUnread = (ids: string[]) =>
-  ids.length === 0 ? Promise.resolve() : post('/api/unread', { 'msg-ids': ids })
+export const markUnread = (threadId: string, ids: string[]) =>
+  ids.length === 0
+    ? Promise.resolve()
+    : post('/api/unread', { 'thread-id': threadId, 'msg-ids': ids })
 
 export const drafts = () => get<Draft[]>('/api/drafts')
 
@@ -813,12 +871,6 @@ export const saveDraft = (d: Omit<Draft, 'at'>) =>
   post('/api/draft', { id: d.id, to: d.to, subject: d.subject, body: d.body, prev: d.prev })
 
 export const deleteDraft = (id: string) => post('/api/draft-delete', { id })
-
-// Signs it at this moment and deletes it. A refused send leaves the
-// draft where it was - the nexus gates the delete on the send actually
-// having happened, so a message is never destroyed at the moment the
-// ship declines to carry it.
-export const sendDraft = (id: string) => post('/api/draft-send', { id })
 
 export const rules = () => get<Rule[]>('/api/rules')
 

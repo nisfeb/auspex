@@ -144,19 +144,27 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
 
-  const download = async () => {
-    setState({ at: 'busy', why: 'Opening…' })
+  // One ask for the bytes: saved, or the failure said. False only when
+  // the ship does not hold them (yet).
+  const tryOnce = async (): Promise<boolean> => {
     try {
       const b = await getAttachment(a)
-      if (!alive.current) return
-      if (b === null) { setState({ at: 'absent' }); return }
+      if (!alive.current) return true
+      if (b === null) return false
       saveBlob(b)
       setState({ at: 'idle' })
     } catch (e) {
       console.error(e)
-      if (!alive.current) return
-      setState({ at: 'error', why: e instanceof Error ? e.message : 'Could not open that file.' })
+      if (alive.current) {
+        setState({ at: 'error', why: e instanceof Error ? e.message : 'Could not open that file.' })
+      }
     }
+    return true
+  }
+
+  const download = async () => {
+    setState({ at: 'busy', why: 'Opening…' })
+    if (!(await tryOnce()) && alive.current) setState({ at: 'absent' })
   }
 
   // Queue the keen, then keep asking. The route answers as soon as the
@@ -175,20 +183,7 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
     for (let i = 0; i < POLL_TRIES; i += 1) {
       await new Promise((r) => { setTimeout(r, POLL_MS) })
       if (!alive.current) return
-      try {
-        const b = await getAttachment(a)
-        if (!alive.current) return
-        if (b !== null) {
-          saveBlob(b)
-          setState({ at: 'idle' })
-          return
-        }
-      } catch (e) {
-        console.error(e)
-        if (!alive.current) return
-        setState({ at: 'error', why: e instanceof Error ? e.message : 'Could not open that file.' })
-        return
-      }
+      if (await tryOnce()) return
     }
     setState({
       at: 'error',

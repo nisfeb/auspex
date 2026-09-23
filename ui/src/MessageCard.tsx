@@ -1,8 +1,8 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { AttachmentRow } from './Attachments'
 import VerdictBadge from './VerdictBadge'
-import ShipChips, { commitShip } from './ShipChips'
-import { ourShip, type MailList, type Message } from './api'
+import ShipChips, { addMembers, commitShip } from './ShipChips'
+import { listNameError, type MailList, type Message } from './api'
 import { quoteBlocks } from './quote'
 
 // ONE MESSAGE, RENDERED ONCE. The list view stacks these in `sent`
@@ -51,20 +51,15 @@ export default function MessageCard({
   // reconstruct and nothing to get wrong: these are the ships the
   // message actually went to, and saving them under a name is the only
   // honest thing the data supports.
-  const seed = () => {
-    const all = [m.from, ...m.to]
-    const out: string[] = []
-    for (const s of all) {
-      if (s === ourShip) continue
-      if (!out.includes(s)) out.push(s)
-    }
-    return out
-  }
+  const seed = () => addMembers([], [m.from, ...m.to])
   const [name, setName] = useState('')
   const [members, setMembers] = useState<string[]>([])
   const [pending, setPending] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  // Parsed once per body: the thread re-renders every card on each
+  // keystroke in its reply box, and a body can be 100,000 characters.
+  const blocks = useMemo(() => quoteBlocks(m.body), [m.body])
 
   const open = () => {
     setName('')
@@ -82,11 +77,8 @@ export default function MessageCard({
 
   const save = async () => {
     const n = name.trim().toLowerCase()
-    if (!n) { setError('A list needs a name.'); return }
-    if (!/^[a-z0-9-]{1,64}$/.test(n)) {
-      setError('A list name is 1–64 lowercase letters, digits or hyphens.')
-      return
-    }
+    const bad = listNameError(n)
+    if (bad) { setError(bad); return }
     // The half-typed member nobody committed is still a member they meant.
     const { ships: final, error: chipError } = commitShip(members, pending)
     if (chipError) { setError(chipError); return }
@@ -136,7 +128,7 @@ export default function MessageCard({
           A QUOTE IS SET OFF, a rule beside it and quieter text: lines
           somebody took from an earlier message, inside what this
           sender says. Still plain text, still React-escaped. */}
-      {quoteBlocks(m.body).map((b, i) => b.quoted ? (
+      {blocks.map((b, i) => b.quoted ? (
         <blockquote
           key={i}
           className="my-1 whitespace-pre-wrap break-words border-l-2 border-line-strong pl-2 text-ink-dim"

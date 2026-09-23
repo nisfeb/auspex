@@ -15,7 +15,7 @@ ship who it is.
 | `GET /apps/auspex/api/inbox` | the thread listing |
 | `GET /apps/auspex/api/thread/<id>` | one thread, every message with its own verdict |
 | `POST /apps/auspex/api/send` | compose, reply and forward — all one action |
-| `POST /apps/auspex/api/read` | mark one message read |
+| `POST /apps/auspex/api/read` | mark messages read, naming their thread |
 | `POST /apps/auspex/api/delete-thread` | remove a thread from this ship |
 | `GET /grubbery/api/keep/apps/auspex.auspex_app/beacon/rev` | grubbery's keep-SSE stream over the nexus's change beacon |
 

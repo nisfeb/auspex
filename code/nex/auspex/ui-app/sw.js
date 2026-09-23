@@ -5,12 +5,12 @@
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `fffefddd58a7` is stamped by vite.config.ts at copy time. It is
+// `e446d89033f6` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = 'fffefddd58a7'
+const VERSION = 'e446d89033f6'
 const SHELL = `auspex-shell-${VERSION}`
 // NOT versioned, unlike the shell. Mail is not part of the build: a
 // deploy that changes one line of CSS has nothing to say about the
@@ -72,8 +72,7 @@ self.addEventListener('activate', (e) => {
   })())
 })
 
-const isShell = (p) => p === BASE || p === `${BASE}/` || p === `${BASE}/app.js`
-  || p === `${BASE}/manifest.json`
+const isShell = (p) => p === BASE || SHELL_URLS.includes(p)
 
 // The listing and one thread: the two reads that make an offline app
 // show mail rather than an empty frame. Network-first, so a live ship
@@ -113,19 +112,15 @@ self.addEventListener('fetch', (e) => {
       // arriving at /apps/auspex (no slash) offline gets a miss for a
       // document that is sitting in the cache.
       const key = p === BASE ? `${BASE}/` : p
+      // CACHE-FIRST, AND NO BACKGROUND REFRESH. VERSION is a hash of
+      // exactly these files (see vite.config.ts), so a changed shell is
+      // always a changed sw.js: the browser's own update check on
+      // navigation installs it, the install precaches the new shell
+      // under a new key, and activate says 'updated'. Refreshing here
+      // re-downloaded the whole shell (~280 KB) on every load, only to
+      // write it into a cache the next activate deletes.
       const hit = await caches.match(key)
-      if (hit) {
-        // Cache-first, then refresh in the background: the shell is two
-        // grubs replaced wholesale, so serving the cached one costs a
-        // reload of staleness and buys an app that opens offline.
-        e.waitUntil((async () => {
-          try {
-            const res = await fetch(req)
-            if (res.ok) await (await caches.open(SHELL)).put(key, res.clone())
-          } catch { /* offline: the cached shell is the answer */ }
-        })())
-        return hit
-      }
+      if (hit) return hit
       const res = await fetch(req)
       if (res.ok) (await caches.open(SHELL)).put(key, res.clone())
       return res

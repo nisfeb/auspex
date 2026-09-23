@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { MailList } from './api'
+import { listNameError, type MailList } from './api'
 import ShipChips, { commitShip } from './ShipChips'
 
 // WHAT A MAILING LIST IS AND IS NOT, said on the panel rather than in a
@@ -25,10 +25,6 @@ function ListRow({
 }) {
   const [pending, setPending] = useState('')
   const [error, setError] = useState<string | null>(null)
-  // Deleting a list destroys an audience the user assembled by hand and
-  // no undo exists, so the control asks once. It is the same two-step
-  // the thread delete uses: one click arms it, the next does it.
-  const [armed, setArmed] = useState(false)
 
   const write = async (members: string[]) => {
     try {
@@ -45,34 +41,21 @@ function ListRow({
         <span className="shrink-0 text-[11px] text-ink-faint">
           {l.members.length} {l.members.length === 1 ? 'member' : 'members'}
         </span>
-        {armed ? (
-          <>
-            <button
-              type="button"
-              onClick={onDelete}
-              className="btn btn-danger ml-auto shrink-0"
-            >
-              Delete “{l.name}”
-            </button>
-            <button
-              type="button"
-              onClick={() => setArmed(false)}
-              className="btn shrink-0"
-            >
-              Keep
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setArmed(true)}
-            title={`Delete the list ${l.name}. The ships in it are not affected —`
-              + ' a list is only a name for an audience.'}
-            className="btn ml-auto shrink-0"
-          >
-            Delete
-          </button>
-        )}
+        {/* Deleting a list destroys an audience the user assembled by
+            hand and no undo exists, so the control asks once — a
+            confirm, as the thread delete does. */}
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm(`Delete the list “${l.name}”? The ships in it are not`
+              + ' affected — a list is only a name for an audience.')) onDelete()
+          }}
+          title={`Delete the list ${l.name}. The ships in it are not affected —`
+            + ' a list is only a name for an audience.'}
+          className="btn ml-auto shrink-0"
+        >
+          Delete
+        </button>
       </div>
       {l.members.length === 0 && (
         <p className="mb-1 text-[11px] text-ink-faint">
@@ -109,18 +92,8 @@ export default function Lists({
   const add = async () => {
     setError(null)
     const n = name.trim().toLowerCase()
-    if (!n) {
-      setError('A list needs a name.')
-      return
-    }
-    // The same rule the nexus enforces, checked at the keystroke: the
-    // name becomes a path segment on the ship, so it is lowercase
-    // letters, digits and hyphens and nothing else. The nexus keeps its
-    // own check and stays the boundary.
-    if (!/^[a-z0-9-]{1,64}$/.test(n)) {
-      setError('A list name is 1–64 lowercase letters, digits or hyphens.')
-      return
-    }
+    const bad = listNameError(n)
+    if (bad) { setError(bad); return }
     if (lists.some((l) => l.name === n)) {
       setError(`A list called “${n}” already exists. Edit it below, or pick`
         + ' another name.')
