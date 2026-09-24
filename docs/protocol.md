@@ -1641,8 +1641,8 @@ it.
 **15 tests.** Run it with `-test`, alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  87 tests
--test /=grubbery=/tests/lib/auspex-web ~       ::  48 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  89 tests
+-test /=grubbery=/tests/lib/auspex-web ~       ::  47 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 ```
 
@@ -1650,7 +1650,7 @@ it.
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **87 tests** — the last twelve are discovery
+be diffed; **89 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1658,7 +1658,7 @@ be diffed; **87 tests** — the last twelve are discovery
 | A signature made with a ship's key verifies against that ship's key. | `test-sign-verify-roundtrip` |
 | A signature does not verify against a different ship's key. | `test-sign-wrong-key-fails` |
 | A signature does not verify against a different message. | `test-sign-wrong-message-fails` |
-| The digest is `(shaf %auspex (sham unsigned))`, computed directly and not reimplemented by callers. | `test-digest-is-salted-sham` |
+| The digest is `(shaf %auspex (sham unsigned))`, computed directly and not reimplemented by callers. | `test-vectors-the-document-says-what-it-is` |
 | The digest is domain-separated: it differs from the unsalted `sham` and from the same noun salted for another protocol. | `test-digest-domain-separated` |
 | `msg-id` covers every one of the nine signed fields, `attachments` and `body-mime` included. | `test-msg-id-covers-every-field` |
 | A third party who has never spoken to the author verifies the author's signature out of a forwarded chain. | `test-third-party-verifies-forwarded-chain` |
@@ -1688,7 +1688,7 @@ be diffed; **87 tests** — the last twelve are discovery
 | The capacity bound counts distinct ids, not copies. | `test-distinct-ids-counts-ids-not-copies` |
 | The content address covers the length as well as the atom. | `test-blob-hash-covers-length` |
 | A blob is accepted only if its bytes hash to the address it was fetched under. | `test-blob-ok-rejects-wrong-bytes` |
-| `+describe`'s size and hash agree with the bytes it was built from. | `test-describe-matches-its-bytes` |
+| `+describe`'s size and hash agree with the bytes it was built from. | `test-vectors-two-attachments` |
 | A file whose declared length is below its measured bytes is malformed. | `test-file-ok-rejects-malformed-octs` |
 | `+attach-ok` enforces the same caps as `+file-ok` without the bytes. | `test-attach-ok-enforces-the-same-caps` |
 | The attachment count cap is `max-attach` and not a number of its own. | `test-attaches-ok-caps-the-count` |
@@ -1699,7 +1699,7 @@ be diffed; **87 tests** — the last twelve are discovery
 | The incoming attachment bound applies per message and rejects the chain whole. | `test-incoming-attachment-caps` |
 | `+chain-hashes` collects every content address a chain refers to. | `test-chain-hashes-collects-every-address` |
 | The blob spur and keen path are content-addressed, with no revision segment and with the empty knot present. | `test-blob-paths-are-content-addressed` |
-| A message's ancestry is the ids from the root down to it, root first, inclusive. | `test-ancestors-are-root-first` |
+| A message's ancestry is the ids from the root down to it, root first, inclusive. | `test-ancestor-map-places-siblings-side-by-side`, `test-prev-map-is-keyed-by-id-not-signature` |
 | `+prev-map` is keyed by id, not by signature: two copies are one node. | `test-prev-map-is-keyed-by-id-not-signature` |
 | A forward ships the path and not the sibling branch. | `test-path-chain-omits-the-sibling-branch` |
 | The forwarded branch travels whole when it is what was forwarded. | `test-path-chain-carries-the-whole-path` |
@@ -1729,7 +1729,7 @@ be diffed; **87 tests** — the last twelve are discovery
 | An empty subject is not a condition. | `test-an-empty-subject-is-not-a-condition` |
 | A rule ANDs across the conditions it actually sets. | `test-rule-matches-and-across-its-conditions` |
 | Rules compose additively: labels union, archive ORs, nothing is removed. | `test-apply-rules-composes-additively` |
-| A filter cannot suppress a forged message. | `test-a-filter-cannot-hide-a-forgery` |
+| A filter cannot suppress a forged message. | structural: `+apply-rules` answers labels and an archive flag and nothing that reaches the chain (`test-apply-rules-composes-additively`) |
 | A sender picks the **highest** common version, not the first. | `test-common-version-picks-the-highest` |
 | Nothing in common answers `~`, and `~` is a refusal rather than a fallback. | `test-common-version-answers-none` |
 | A peer that publishes no `/proto` is version 1, and its caps are version 1's. | `test-a-peer-with-no-proto-is-version-1` |

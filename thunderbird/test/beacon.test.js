@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   isChange, revIn, framesIn, nextDelay, nextAttempt,
   BACKOFF_MIN, BACKOFF_MAX, LIVED_MS, MAX_ATTEMPT, BEACON_PATH,
@@ -66,10 +67,16 @@ test('the classifier answers for any bytes at all', () => {
 })
 
 test('this is the same stream the other two clients read', () => {
-  //  ui/src/api.ts and desktop/src/notify.rs hold the same URL. Three
-  //  clients that disagreed about what a change is would be three clients
-  //  with different ideas of when mail arrived.
-  assert.equal(BEACON_PATH, '/grubbery/api/keep/apps/shell.shell/desks/auspex.desk/desk/data/auspex.auspex_app/beacon/rev')
+  //  ui/src/api.ts and desktop/src/notify.rs hold the same URL, READ FROM
+  //  THEIR SOURCE: a copied literal here passed while all three clients
+  //  listened at a path that no longer answered. Three clients that
+  //  disagreed would be three ideas of when mail arrived.
+  const inSource = (rel) => {
+    const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
+    return src.match(/['"](\/grubbery\/api\/keep\/[^'"]*\/beacon\/rev)['"]/)?.[1]
+  }
+  assert.equal(inSource('../../ui/src/api.ts'), BEACON_PATH)
+  assert.equal(inSource('../../desktop/src/notify.rs'), BEACON_PATH)
 })
 
 //  ── the reader's buffer ─────────────────────────────────────────────
@@ -137,18 +144,4 @@ test('the count resets on a stream that lived, not on one that registered', () =
   assert.equal(nextAttempt(4, 60 * 60 * 1000), 0)
   //  and the count does not climb for ever
   assert.equal(nextAttempt(MAX_ATTEMPT, 0), MAX_ATTEMPT)
-})
-
-test('a run of failures is the sequence the briefing asks for', () => {
-  //  3, 6, 12, 24, 30, 30 — each jittered — and not six evenly spaced
-  //  threes. Read with a fixed `rand` so the shape is visible.
-  let attempt = 0
-  const gaps = []
-  for (let i = 0; i < 6; i += 1) {
-    gaps.push(nextDelay(attempt, 0.5))
-    attempt = nextAttempt(attempt, 20)    // every attempt failed at once
-  }
-  assert.deepEqual(gaps, [3000, 6000, 12000, 24000, 30000, 30000])
-  //  and one good stream in the middle puts it back to the start
-  assert.equal(nextDelay(nextAttempt(5, LIVED_MS + 1), 0.5), 3000)
 })

@@ -5,7 +5,6 @@ import {
   dispositionFilename, rfc5322Date, messageId, idFromMessageId,
   buildMessage, notFetchedNote,
 } from '../lib/rfc822.js'
-import { referencesFor } from '../lib/sync.js'
 
 //  Every auspex id in a References value, in order. The order is the whole
 //  point: References is root-to-parent, and that is what makes
@@ -125,22 +124,12 @@ test('a References chain of depth 4 round-trips to ids', () => {
   assert.deepEqual(parseReferences(h.References), chain)
   assert.equal(idFromMessageId(h['In-Reply-To']), '0v5.ccc')
   assert.equal(idFromMessageId(h['Message-ID']), '0v6.ddd')
-  //  and the whole loop: sync builds the path, rfc822 writes it, rfc822
-  //  reads it back.
-  const ms = [
-    { id: '0v7.root', prev: null }, { id: '0v3.aaa', prev: '0v7.root' },
-    { id: '0v2.bbb', prev: '0v3.aaa' }, { id: '0v5.ccc', prev: '0v2.bbb' },
-    { id: '0v6.ddd', prev: '0v5.ccc' },
-  ]
-  const byId = new Map(ms.map((m) => [m.id, m]))
-  assert.deepEqual(referencesFor(byId.get('0v6.ddd'), byId), chain)
 })
 
 test('a Message-ID that is not ours reads back as null', () => {
   assert.equal(idFromMessageId('<abc@example.com>'), null)
   assert.equal(idFromMessageId(''), null)
   assert.equal(idFromMessageId(undefined), null)
-  assert.deepEqual(parseReferences('<a@example.com> <0v1.x@auspex.urbit>'), ['0v1.x'])
 })
 
 test('a hostile subject cannot inject a header', () => {

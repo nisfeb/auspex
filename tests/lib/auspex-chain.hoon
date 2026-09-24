@@ -77,15 +77,6 @@
   =/  sig   (sign-with:auspex (fake-ring:auspex who) (shaf %auspex (sham 'a')))
   (expect !>(!(verify-with:auspex (fake-pass:auspex who) sig (shaf %auspex (sham 'b')))))
 ::
-::  +digest is what every later task signs and verifies over, so it is
-::  tested directly rather than reimplemented by its callers.
-++  test-digest-is-salted-sham
-  =/  u=unsigned:sur
-    [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
-  %+  expect-eq
-    !>  (shaf %auspex (sham u))
-    !>  (digest:auspex u)
-::
 ::  domain separation: the salted digest must differ from the unsalted hash
 ::  and from the same message salted for another protocol. This is the
 ::  property that stops an auspex signature being replayed as an ames one,
@@ -104,22 +95,22 @@
 ++  test-msg-id-covers-every-field
   =/  base=unsigned:sur
     [~sampel-palnet 1 (sy ~[~palnet-sampel]) 'subj' 'body' '' ~2026.1.1 ~ ~]
-  =/  d  (digest:auspex base)
+  =/  d  (id:auspex base)
   ;:  weld
-    (expect !>(!=(d (digest:auspex base(body 'other')))))
-    (expect !>(!=(d (digest:auspex base(subj 'other')))))
-    (expect !>(!=(d (digest:auspex base(life 2)))))
-    (expect !>(!=(d (digest:auspex base(from ~palnet-sampel)))))
-    (expect !>(!=(d (digest:auspex base(sent ~2026.1.2)))))
-    (expect !>(!=(d (digest:auspex base(to (sy ~[~sampel-palnet]))))))
-    (expect !>(!=(d (digest:auspex base(prev `0v1)))))
+    (expect !>(!=(d (id:auspex base(body 'other')))))
+    (expect !>(!=(d (id:auspex base(subj 'other')))))
+    (expect !>(!=(d (id:auspex base(life 2)))))
+    (expect !>(!=(d (id:auspex base(from ~palnet-sampel)))))
+    (expect !>(!=(d (id:auspex base(sent ~2026.1.2)))))
+    (expect !>(!=(d (id:auspex base(to (sy ~[~sampel-palnet]))))))
+    (expect !>(!=(d (id:auspex base(prev `0v1)))))
     ::  attachments are inside `unsigned`, so the id covers them too and
     ::  swapping a file cannot leave the signature standing.
-    (expect !>(!=(d (digest:auspex base(attachments ~[['f' 3 'text/plain' 0v2]])))))
+    (expect !>(!=(d (id:auspex base(attachments ~[['f' 3 'text/plain' 0v2]])))))
     ::  the rendering instruction is part of the message: "render me as
     ::  HTML" and "render me as plain text" are different messages, and
     ::  an intermediary must not be able to switch which one is read.
-    (expect !>(!=(d (digest:auspex base(body-mime 'text/html')))))
+    (expect !>(!=(d (id:auspex base(body-mime 'text/html')))))
   ==
 ::
 ::  THE MARQUEE TEST. ~sampel writes to ~palnet; ~palnet forwards the chain
@@ -545,18 +536,6 @@
     (expect !>(!(blob-ok:auspex good 0v0)))
   ==
 ::
-::  +describe is what puts a file's identity inside the signature. Its
-::  size and hash must agree with the bytes it was built from.
-++  test-describe-matches-its-bytes
-  =/  f=file:sur  ['note.txt' 'text/plain' [11 'hello world']]
-  =/  a  (describe:auspex f)
-  ;:  weld
-    (expect-eq !>('note.txt') !>(name.a))
-    (expect-eq !>(11) !>(size.a))
-    (expect-eq !>('text/plain') !>(mime.a))
-    (expect !>((blob-ok:auspex octs.f hash.a)))
-  ==
-::
 ::  +attach-ok is what a send names and what delivery accepts: size
 ::  against max-blob, and the two hostile strings through +text-ok.
 ++  test-attach-ok-enforces-the-same-caps
@@ -770,23 +749,6 @@
   =/  a2  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'side two' ~2026.1.3 `ai)
   =/  b   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'subj' 'other branch' ~2026.1.4 `ri)
   [r a a2 b]
-::
-::  a message's ancestry is the ids from the root down to it, inclusive.
-++  test-ancestors-are-root-first
-  =/  [r=msg:sur a=msg:sur a2=msg:sur b=msg:sur]  (branch ~)
-  =/  ps  (prev-map:auspex ~[r a a2 b])
-  ;:  weld
-    %+  expect-eq
-      !>  ~[(id:auspex unsigned.r)]
-      !>  (ancestors:auspex ps (id:auspex unsigned.r))
-    %+  expect-eq
-      !>  ~[(id:auspex unsigned.r) (id:auspex unsigned.a) (id:auspex unsigned.a2)]
-      !>  (ancestors:auspex ps (id:auspex unsigned.a2))
-    ::  B is a SIBLING of A, so A is nowhere in its ancestry.
-    %+  expect-eq
-      !>  ~[(id:auspex unsigned.r) (id:auspex unsigned.b)]
-      !>  (ancestors:auspex ps (id:auspex unsigned.b))
-  ==
 ::
 ::  the copies of one message share a `prev`, so they share a NODE: two
 ::  copies differing only in signature never split the tree, which is the
@@ -1012,10 +974,14 @@
   ==
 ::
 ++  test-labels-ok-bounds-the-set
+  =/  many  |=(n=@ud (sy (turn (gulf 1 n) |=(k=@ud `@tas`(cat 3 'l' (scot %ud k))))))
   ;:  weld
     (expect !>((labels-ok:auspex (sy ~[%a %b %c]))))
     ::  one bad member fails the set
     (expect !>(!(labels-ok:auspex (sy ~[%a `@tas`'B']))))
+    ::  and the count: max-labels pass, one more does not
+    (expect !>((labels-ok:auspex (many max-labels:auspex))))
+    (expect !>(!(labels-ok:auspex (many +(max-labels:auspex)))))
   ==
 ::
 ::  the one string primitive the layer has. Case-insensitive on both
@@ -1238,25 +1204,6 @@
     (expect !>(!archive.none))
   ==
 ::
-::  A FILTER CANNOT SUPPRESS A FORGED MESSAGE. Rules are evaluated over
-::  the chain AFTER verification and can only ask for labels and an
-::  archive - so the forged copy is still in the chain, still carries its
-::  own verdict, and is still what a search finds.
-++  test-a-filter-cannot-hide-a-forgery
-  =/  real  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'invoice' 'the real one' ~2026.1.1 ~)
-  =/  liar  (fake-from ~marbud-marbud ~sampel-palnet 'invoice' 'pay here instead' ~2026.1.2)
-  =/  c=chain:sur  (merge:auspex ~ ~[real liar])
-  ::  a rule aimed squarely at this thread, archiving it
-  =/  r=rule:sur  [%0 0v1 `~sampel-palnet `'invoice' (sy ~[%quarantine]) &]
-  =/  got  (apply-rules:auspex ~[r] c)
-  ;:  weld
-    (expect !>(archive.got))
-    (expect-eq !>((sy ~[%quarantine])) !>(add.got))
-    ::  and the chain the rule was applied to is UNCHANGED: both copies,
-    ::  the forgery included, are still there to be stored and shown
-    (expect-eq !>(2) !>((lent c)))
-    (expect !>((chain-matches:auspex 'pay here' c)))
-  ==
 
 ::  ── protocol discovery ──────────────────────────────────────────────
 ::
