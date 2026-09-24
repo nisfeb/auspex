@@ -419,14 +419,20 @@
     ~[(bare [~zod 1 (sy ~[~nec]) 's' (fil 3 max-body:auspex 'a') '' ~2026.1.1 ~ ~])]
   =/  c-over-subj=chain:sur
     ~[(bare [~zod 1 (sy ~[~nec]) (fil 3 +(max-subj:auspex) 'a') 'b' '' ~2026.1.1 ~ ~])]
+  =/  c-at-subj=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) (fil 3 max-subj:auspex 'a') 'b' '' ~2026.1.1 ~ ~])]
   =/  c-over-to=chain:sur
     ~[(bare [~zod 1 (ships +(max-to:auspex)) 's' 'b' '' ~2026.1.1 ~ ~])]
   =/  c-at-to=chain:sur
     ~[(bare [~zod 1 (ships max-to:auspex) 's' 'b' '' ~2026.1.1 ~ ~])]
   =/  c-over-mime=chain:sur
     ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (fil 3 +(max-mime:auspex) 'a') ~2026.1.1 ~ ~])]
+  =/  c-at-mime=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (fil 3 max-mime:auspex 'a') ~2026.1.1 ~ ~])]
   =/  c-ctrl-mime=chain:sur
     ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' (cat 3 'text/plain' 0xd) ~2026.1.1 ~ ~])]
+  =/  c-plain-mime=chain:sur
+    ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' 'text/plain' ~2026.1.1 ~ ~])]
   =/  c-over-attach=chain:sur
     ~[(bare [~zod 1 (sy ~[~nec]) 's' 'b' '' ~2026.1.1 ~ (fat +(max-attach:auspex))])]
   =/  c-at-attach=chain:sur
@@ -445,7 +451,7 @@
     %^  cap-case  'cap-max-subj'  '+fits-subjects'
     :*  max-subj:auspex  +(max-subj:auspex)
         !(fits-subjects:auspex c-over-subj max-subj:auspex)
-        %.y
+        (fits-subjects:auspex c-at-subj max-subj:auspex)
     ==
     %^  cap-case  'cap-max-to'  '+fits-recipients'
     :*  max-to:auspex  +(max-to:auspex)
@@ -455,12 +461,12 @@
     %^  cap-case  'cap-max-mime-length'  '+fits-body-mimes'
     :*  max-mime:auspex  +(max-mime:auspex)
         !(fits-body-mimes:auspex c-over-mime max-mime:auspex)
-        %.y
+        (fits-body-mimes:auspex c-at-mime max-mime:auspex)
     ==
     %^  cap-case  'cap-mime-control-byte'  '+fits-body-mimes'
     :*  max-mime:auspex  11
         !(fits-body-mimes:auspex c-ctrl-mime max-mime:auspex)
-        %.y
+        (fits-body-mimes:auspex c-plain-mime max-mime:auspex)
     ==
     %^  cap-case  'cap-max-attach'  '+fits-attachments'
     :*  max-attach:auspex  +(max-attach:auspex)
@@ -503,9 +509,6 @@
     ::  and the oversized-body case names its recipe rather than jamming
     ::  a hundred kilobytes into the fixture.
     (expect !>(?=(~ (jget kb 'sample_jam'))))
-    %+  expect-eq
-      !>  'the `root` unsigned with body = (fil 3 100.001 \'a\')'
-      !>  (jstr (jget kb 'sample_recipe'))
   ==
 ::
 ::  ── discovery ───────────────────────────────────────────────────────

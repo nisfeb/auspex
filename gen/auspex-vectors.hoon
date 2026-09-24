@@ -363,14 +363,24 @@
   ~[(bare [zod 1 (sy ~[nec]) 's' (fil 3 max-body:ac 'a') '' ~2026.1.1 ~ ~])]
 =/  c-over-subj=chain:ac
   ~[(bare [zod 1 (sy ~[nec]) (fil 3 +(max-subj:ac) 'a') 'b' '' ~2026.1.1 ~ ~])]
+=/  c-at-subj=chain:ac
+  ~[(bare [zod 1 (sy ~[nec]) (fil 3 max-subj:ac 'a') 'b' '' ~2026.1.1 ~ ~])]
 =/  c-over-to=chain:ac
   ~[(bare [zod 1 (ships +(max-to:ac)) 's' 'b' '' ~2026.1.1 ~ ~])]
 =/  c-at-to=chain:ac
   ~[(bare [zod 1 (ships max-to:ac) 's' 'b' '' ~2026.1.1 ~ ~])]
 =/  c-over-mime=chain:ac
   ~[(bare [zod 1 (sy ~[nec]) 's' 'b' (fil 3 +(max-mime:ac) 'a') ~2026.1.1 ~ ~])]
+=/  c-at-mime=chain:ac
+  ~[(bare [zod 1 (sy ~[nec]) 's' 'b' (fil 3 max-mime:ac 'a') ~2026.1.1 ~ ~])]
 =/  c-ctrl-mime=chain:ac
   ~[(bare [zod 1 (sy ~[nec]) 's' 'b' (cat 3 'text/plain' 0xd) ~2026.1.1 ~ ~])]
+=/  c-plain-mime=chain:ac
+  ~[(bare [zod 1 (sy ~[nec]) 's' 'b' 'text/plain' ~2026.1.1 ~ ~])]
+::  THE RECIPES, built from the caps and from the literal every sample
+::  above starts from, so a cap change cannot leave the text behind.
+=/  base=@t  'the unsigned [~zod 1 (sy ~[~nec]) \'s\' \'b\' \'\' ~2026.1.1 ~ ~]'
+=/  ud  |=(n=@ud `@t`(scot %ud n))
 =/  c-over-depth=chain:ac  (deep +(max-depth:ac))
 =/  c-at-depth=chain:ac    (deep max-depth:ac)
 =/  c-over-signers=chain:ac  (signers-chain +(max-signers:ac))
@@ -563,7 +573,7 @@
               !(fits-length:ac c-over-chain max-chain:ac)
               (fits-length:ac c-at-chain max-chain:ac)
               c-over-chain
-              'a chain of 1.001 copies of the `root` case above'
+              (rap 3 ~['a chain of ' (ud +(max-chain:ac)) ' copies of the `root` case above'])
           ==
           %^    case-cap
               'cap-max-body'
@@ -572,16 +582,16 @@
               !(fits-bodies:ac c-over-body max-body:ac)
               (fits-bodies:ac c-at-body max-body:ac)
               c-over-body
-              'the `root` unsigned with body = (fil 3 100.001 \'a\')'
+              (rap 3 ~[base ' with body = (fil 3 ' (ud +(max-body:ac)) ' \'a\')'])
           ==
           %^    case-cap
               'cap-max-subj'
             'subject measured with (met 3 subj)'
           :*  'max-subj'  max-subj:ac  +(max-subj:ac)  '+fits-subjects'
               !(fits-subjects:ac c-over-subj max-subj:ac)
-              %.y
+              (fits-subjects:ac c-at-subj max-subj:ac)
               c-over-subj
-              'the `root` unsigned with subj = (fil 3 1.001 \'a\')'
+              (rap 3 ~[base ' with subj = (fil 3 ' (ud +(max-subj:ac)) ' \'a\')'])
           ==
           %^    case-cap
               'cap-max-to'
@@ -590,25 +600,25 @@
               !(fits-recipients:ac c-over-to max-to:ac)
               (fits-recipients:ac c-at-to max-to:ac)
               c-over-to
-              'the `root` unsigned with to = (sy (turn (gulf 1 101) |=(k=@ `@p`k)))'
+              (rap 3 ~[base ' with to = (sy (turn (gulf 1 ' (ud +(max-to:ac)) ') |=(k=@ `@p`k)))'])
           ==
           %^    case-cap
               'cap-max-mime-length'
             'body-mime is a signed field a recipient cannot repair'
           :*  'max-mime'  max-mime:ac  +(max-mime:ac)  '+fits-body-mimes'
               !(fits-body-mimes:ac c-over-mime max-mime:ac)
-              %.y
+              (fits-body-mimes:ac c-at-mime max-mime:ac)
               c-over-mime
-              'the `root` unsigned with body-mime = (fil 3 129 \'a\')'
+              (rap 3 ~[base ' with body-mime = (fil 3 ' (ud +(max-mime:ac)) ' \'a\')'])
           ==
           %^    case-cap
               'cap-mime-control-byte'
             'a CR in body-mime is a header-injection primitive: refused'
           :*  'max-mime'  max-mime:ac  11  '+fits-body-mimes'
               !(fits-body-mimes:ac c-ctrl-mime max-mime:ac)
-              %.y
+              (fits-body-mimes:ac c-plain-mime max-mime:ac)
               c-ctrl-mime
-              'the `root` unsigned with body-mime = (cat 3 \'text/plain\' 0xd)'
+              (rap 3 ~[base ' with body-mime = (cat 3 \'text/plain\' 0xd)'])
           ==
           %^    case-cap
               'cap-max-attach'
@@ -617,7 +627,7 @@
               !(fits-attachments:ac c-over-attach max-attach:ac)
               (fits-attachments:ac c-at-attach max-attach:ac)
               c-over-attach
-              'the `root` unsigned with 17 attachments, each [\'f\' 1 \'text/plain\' 0v<n>]'
+              (rap 3 ~[base ' with ' (ud +(max-attach:ac)) ' attachments, each [\'f\' 1 \'text/plain\' 0v<n>]'])
           ==
           %^    case-cap
               'cap-max-blob'
@@ -626,7 +636,7 @@
               !(fits-attachments:ac c-over-blob max-attach:ac)
               (attach-ok:ac ['ok.bin' max-blob:ac 'application/octet-stream' 0v2])
               c-over-blob
-              'the `root` unsigned with one attachment of size 262.145'
+              (rap 3 ~[base ' with one attachment [\'big.bin\' ' (ud +(max-blob:ac)) ' \'application/octet-stream\' 0v2]'])
           ==
           %^    case-cap
               'cap-max-depth'
@@ -635,7 +645,7 @@
               !(fits-depth:ac c-over-depth max-depth:ac)
               (fits-depth:ac c-at-depth max-depth:ac)
               c-over-depth
-              'a linear chain 65 deep, each message prev-pointing at the one before'
+              (rap 3 ~['a linear chain ' (ud +(max-depth:ac)) ' deep, each message prev-pointing at the one before'])
           ==
           %^    case-cap
               'cap-max-signers'
@@ -644,7 +654,7 @@
               !(fits-signers:ac c-over-signers max-signers:ac)
               (fits-signers:ac c-at-signers max-signers:ac)
               c-over-signers
-              '129 messages, each from a distinct ship 1..129 at life 1'
+              (rap 3 ~[(ud +(max-signers:ac)) ' messages, each from a distinct ship 1..' (ud +(max-signers:ac)) ' at life 1'])
           ==
       ==
   ==
