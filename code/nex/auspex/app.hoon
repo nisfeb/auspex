@@ -1155,7 +1155,7 @@
     ::  local reader never waits on a remote ship - and answers %.n so the
     ::  writer's loop does not bump a second time.
     %send           (do-send root to.a subject.a body.a prev.a refs.a)
-    %read           (do-mark root ids.a tid.a &)
+    %read           (do-mark root ids.a tid.a %read &)
     %delete-thread  (do-delete root thread-id.a)
     %fetch-blob     (do-fetch-blob root hash.a from.a)
   ::  %forget-peer drops one discovery record so the next send re-probes.
@@ -1171,7 +1171,9 @@
   ::  that made the change refetches on its own anyway.
     %label          (do-label root thread-id.a label.a add.a)
     %archive        (do-archive root thread-id.a archived.a)
-    %unread         (do-mark root ids.a tid.a |)
+    %unread         (do-mark root ids.a tid.a %read |)
+    %fold           (do-mark root ids.a tid.a %folded &)
+    %unfold         (do-mark root ids.a tid.a %folded |)
     %save-draft     (do-save-draft root draft.a)
     %delete-draft   (do-delete-leaf root (draft-rail root id.a) 'delete-draft' id.a)
     %save-rule      (do-save-rule root rule.a)
@@ -1338,7 +1340,7 @@
   ::  actually on disk.
   =/  place=(list msg-id:uc)  (place-of:uc (merge:uc full ~[mg]) (id:uc u))
   ;<  ~  bind:m  (write-msg root rid place mg %verified)
-  ;<  ~  bind:m  (mark-read root rid (sy ~[(id:uc u)]) &)
+  ;<  ~  bind:m  (mark-read root rid (sy ~[(id:uc u)]) %read &)
   ;<  ~  bind:m  (touch-idx root rid)
   ;<  ~  bind:m  (note root 'send' & (scot %uv rid))
   ::  BUMP BEFORE THE FAN-OUT. Everything local has landed by here. A
@@ -1372,7 +1374,8 @@
 ::
 ::  +do-mark: mark a SET of messages read (`rd` &) or unread (|), in one
 ::  pass, with one rewrite of each affected thread's meta however many of
-::  its messages were named.
+::  its messages were named. `k` picks the set: %read, or %folded for
+::  %fold and %unfold, which are the same walk over a different field.
 ::
 ::    ONE THREAD IS READ, NOT THE MAILBOX. Opening a thread marks what it
 ::    shows and the client knows which thread that is, so finding it again
@@ -1390,7 +1393,7 @@
 ::    read again - a loop, not a burst.
 ::
 ++  do-mark
-  |=  [root=@ud ids=(set msg-id:uc) tid=thread-id:uc rd=?]
+  |=  [root=@ud ids=(set msg-id:uc) tid=thread-id:uc k=?(%read %folded) rd=?]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ?:  =(~ ids)  (pure:m |)
@@ -1398,7 +1401,7 @@
     (read-one-thread root tid)
   =/  hits  (group-ids loaded ids)
   ?~  hits  (reject root 'unknown message')
-  ;<  ~  bind:m  (mark-read-loop root hits rd)
+  ;<  ~  bind:m  (mark-read-loop root hits k rd)
   (pure:m |)
 ::
 ::  +read-one-thread: one thread's copies, in the shape +read-threads
@@ -2641,12 +2644,12 @@
 ::  cannot find the trap.
 ::
 ++  mark-read-loop
-  |=  [root=@ud xs=(list [t=thread-id:uc is=(set msg-id:uc)]) rd=?]
+  |=  [root=@ud xs=(list [t=thread-id:uc is=(set msg-id:uc)]) k=?(%read %folded) rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
-  ;<  ~  bind:m  (mark-read root t.i.xs is.i.xs rd)
-  (mark-read-loop root t.xs rd)
+  ;<  ~  bind:m  (mark-read root t.i.xs is.i.xs k rd)
+  (mark-read-loop root t.xs k rd)
 ::
 ::  +mark-read: fold a set of ids into one thread's read marks, in ONE
 ::  rewrite of its meta grub however many ids are named.
@@ -2656,15 +2659,17 @@
 ::    what keeps them from disagreeing about what a set of ids names.
 ::
 ++  mark-read
-  |=  [root=@ud t=thread-id:uc is=(set msg-id:uc) rd=?]
+  |=  [root=@ud t=thread-id:uc is=(set msg-id:uc) k=?(%read %folded) rd=?]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  =/  nex=(set msg-id:uc)  ?:(rd (~(uni in read.mt) is) (~(dif in read.mt) is))
+  =/  old=(set msg-id:uc)  ?-(k %read read.mt, %folded folded.mt)
+  =/  nex=(set msg-id:uc)  ?:(rd (~(uni in old) is) (~(dif in old) is))
   ::  a mark that changes nothing writes nothing: a thread opened twice,
   ::  or a relay echoing a mark back, is not a meta rewrite.
-  ?:  =(nex read.mt)  (pure:m ~)
-  (put-file (meta-rail root t) [/auspex %meta] mt(read nex))
+  ?:  =(nex old)  (pure:m ~)
+  %^  put-file  (meta-rail root t)  [/auspex %meta]
+  ?-(k %read mt(read nex), %folded mt(folded nex))
 ::
 ++  touch-idx
   |=  [root=@ud t=thread-id:uc]
@@ -3202,8 +3207,10 @@
   ?~  jon  (send-err eyre-id 400 'not json')
   ?+  suffix  (send-err eyre-id 404 'not found')
       [%api %send ~]             (do-web-send eyre-id u.jon)
-      [%api %read ~]             (do-web-mark eyre-id u.jon &)
-      [%api %unread ~]           (do-web-mark eyre-id u.jon |)
+      [%api %read ~]             (do-web-mark eyre-id u.jon %read)
+      [%api %unread ~]           (do-web-mark eyre-id u.jon %unread)
+      [%api %fold ~]             (do-web-mark eyre-id u.jon %fold)
+      [%api %unfold ~]           (do-web-mark eyre-id u.jon %unfold)
       [%api %'fetch-blob' ~]     (do-web-fetch eyre-id u.jon)
     ::  forget one discovery record, so the next send re-probes. The
     ::  user-facing half of +proto-refusal-ttl: a cap refusal is not
@@ -3727,6 +3734,7 @@
     ::  signed what.
       ['archived' [%b archived.mt]]
       ['labels' (labels-json:uc labels.mt)]
+      ['folded' (ids-json:uc folded.mt)]
   ==
 ::
 ::  +inbox-json: the listing. Deliberately not the full chains - the list
@@ -4146,18 +4154,26 @@
       ['size' (numb:enjs:format size)]
   ==
 ::
-::  +do-web-mark: POST /api/read and /api/unread: the ids and the thread
-::  they are in, so the writer reads one thread and not the mailbox.
+::  +do-web-mark: POST /api/read, /api/unread, /api/fold and /api/unfold:
+::  the ids and the thread they are in, so the writer reads one thread
+::  and not the mailbox.
 ::
 ++  do-web-mark
-  |=  [eyre-id=@ta jon=json rd=?]
+  |=  [eyre-id=@ta jon=json a=?(%read %unread %fold %unfold)]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   =/  i=(unit (set @uv))  (de-read:uw jon)
   ?~  i  (send-err eyre-id 400 'bad msg-ids')
   =/  t=(unit @uv)  (de-uv-field:uw jon %'thread-id')
   ?~  t  (send-err eyre-id 400 'bad thread-id')
-  ;<  ~  bind:m  (poke-writer ?:(rd [%read u.i u.t] [%unread u.i u.t]))
+  ;<  ~  bind:m
+    %-  poke-writer
+    ?-  a
+      %read    [%read u.i u.t]
+      %unread  [%unread u.i u.t]
+      %fold    [%fold u.i u.t]
+      %unfold  [%unfold u.i u.t]
+    ==
   (send-ok eyre-id)
 ::
 ++  do-web-forget

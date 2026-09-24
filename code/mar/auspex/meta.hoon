@@ -1,6 +1,6 @@
 ::  mar/auspex/meta: a thread's LOCAL state, at /mail/thread/<tid>/meta.
 ::
-::    read marks, archive state and labels. None of it is signed and none
+::    read marks, archive state, labels and folds. None of it is signed and none
 ::    of it travels: two ships may disagree about every field here and
 ::    still agree, byte for byte, about who signed what.
 ::
@@ -22,13 +22,14 @@
     ?~  got  [%s 'unreadable']
     =/  mt  u.got
     %-  pairs:enjs:format
-    :~  ['read' [%a (turn ~(tap in read.mt) |=(i=@uv `^json`[%s (scot %uv i)]))]]
+    :~  ['read' (ids-json:uc read.mt)]
         ['archived' [%b archived.mt]]
         ['labels' (labels-json:uc labels.mt)]
         ::  set when the thread arrived through a DELIVERY POKE. Inbox is
         ::  participant OR direct, because a BCC'd recipient is in neither
         ::  `from` nor `to` and their mail would otherwise be invisible.
         ['direct' [%b direct.mt]]
+        ['folded' (ids-json:uc folded.mt)]
     ==
   --
 ++  grab

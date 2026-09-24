@@ -191,6 +191,11 @@
     ::  unread is a no-op on every surface a user sees - which is the
     ::  correct behaviour and not a special case anywhere.
       [%unread ids=(set msg-id) tid=thread-id]
+    ::  %fold and %unfold: which messages a reader collapsed, kept here
+    ::  rather than in the browser so every client of this ship shows the
+    ::  same thread the same way. Same shape and same pass as %read.
+      [%fold ids=(set msg-id) tid=thread-id]
+      [%unfold ids=(set msg-id) tid=thread-id]
     ::  drafts. A draft is sent by %send like any other message, and the
     ::  client deletes it once the send is taken.
       [%save-draft =draft]
@@ -372,7 +377,9 @@
 ::    and a BCC'd recipient is in neither `from` nor `to` - their mail
 ::    would be invisible. Inbox is therefore participant OR direct.
 ::
-::    Version 2, and versions 1 and 0 ARE upgraded in place. None of
+::    `folded` is the messages a reader collapsed (see %fold).
+::
+::    Version 3, and versions 2, 1 and 0 ARE upgraded in place. None of
 ::    this is covered by a signature, so supplying defaults - or, for a
 ::    %1, dropping the record of who we blind-copied, which only a
 ::    dojo-only send could ever write - misrepresents nothing. That is
@@ -380,6 +387,14 @@
 ::    local state out of `unsigned`.
 ::
 +$  meta
+  $:  %3
+      read=(set msg-id)
+      archived=$~(%.n ?)
+      labels=(set @tas)
+      direct=$~(%.n ?)
+      folded=(set msg-id)
+  ==
++$  meta-2
   $:  %2
       read=(set msg-id)
       archived=$~(%.n ?)
@@ -405,13 +420,15 @@
 ++  meta-from-noun
   |=  n=*
   ^-  (unit meta)
-  =/  r2  (mole |.(;;(meta n)))
-  ?^  r2  r2
+  =/  r3  (mole |.(;;(meta n)))
+  ?^  r3  r3
+  =/  r2  (mole |.(;;(meta-2 n)))
+  ?^  r2  `[%3 read.u.r2 archived.u.r2 labels.u.r2 direct.u.r2 ~]
   =/  r1  (mole |.(;;(meta-1 n)))
-  ?^  r1  `[%2 read.u.r1 archived.u.r1 labels.u.r1 direct.u.r1]
+  ?^  r1  `[%3 read.u.r1 archived.u.r1 labels.u.r1 direct.u.r1 ~]
   =/  r0  (mole |.(;;(meta-0 n)))
   ?~  r0  ~
-  `[%2 read.u.r0 archived.u.r0 labels.u.r0 |]
+  `[%3 read.u.r0 archived.u.r0 labels.u.r0 | ~]
 ::
 ::  $mail-idx: the derived inbox order, at /mail/idx. Newest first.
 ::
@@ -1650,6 +1667,11 @@
   |=  s=(set ship)
   ^-  json
   [%a (turn ~(tap in s) |=(w=ship `json`[%s (scot %p w)]))]
+::
+++  ids-json
+  |=  s=(set msg-id)
+  ^-  json
+  [%a (turn ~(tap in s) |=(i=msg-id `json`[%s (scot %uv i)]))]
 ::
 ++  labels-json
   |=  ls=(set @tas)

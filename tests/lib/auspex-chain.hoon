@@ -1511,4 +1511,21 @@
     ::  that is not made to the other fails here rather than in the field.
     (expect-eq !>(proto-spur:auspex) !>((slag 6 k)))
   ==
+::
+::  every older meta reads as the current one, keeping what it had and
+::  folding nothing: a reader that dropped a version would lose that
+::  thread's labels and archive flag without a word.
+++  test-the-meta-ladder-upgrades
+  =/  a=(set msg-id:sur)  (sy ~[0v1 0v2])
+  =/  n3=meta:sur  [%3 a & (sy ~[%work]) & (sy ~[0v1])]
+  ;:  weld
+    (expect-eq !>(`n3) !>((meta-from-noun:auspex n3)))
+    %+  expect-eq  !>(`meta:sur`[%3 a & (sy ~[%work]) & ~])
+    !>((need (meta-from-noun:auspex [%2 a & (sy ~[%work]) &])))
+    %+  expect-eq  !>(`meta:sur`[%3 a & (sy ~[%work]) & ~])
+    !>((need (meta-from-noun:auspex [%1 a & (sy ~[%work]) & ~])))
+    %+  expect-eq  !>(`meta:sur`[%3 a & (sy ~[%work]) | ~])
+    !>((need (meta-from-noun:auspex [%0 a & (sy ~[%work])])))
+    (expect-eq !>(~) !>((meta-from-noun:auspex [%9 ~])))
+  ==
 --

@@ -58,6 +58,9 @@ export interface Thread {
   unreadable: number
   archived: boolean
   labels: string[]
+  // The messages a reader collapsed. Kept on the ship, not in the
+  // browser, so every device and tab shows the thread folded the same way.
+  folded: string[]
 }
 
 export interface InboxEntry {
@@ -857,6 +860,9 @@ export const markUnread = (threadId: string, ids: string[]) =>
   ids.length === 0
     ? Promise.resolve()
     : post('/api/unread', { 'thread-id': threadId, 'msg-ids': ids })
+
+export const setFolded = (threadId: string, ids: string[], fold: boolean) =>
+  post(fold ? '/api/fold' : '/api/unfold', { 'thread-id': threadId, 'msg-ids': ids })
 
 export const drafts = () => get<Draft[]>('/api/drafts')
 

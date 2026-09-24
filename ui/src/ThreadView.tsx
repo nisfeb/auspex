@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import Loading from './Loading'
 import {
-  canSign, deleteThread, markRead, markUnread, NO_KEYS_LINE,
+  canSign, deleteThread, markRead, markUnread, NO_KEYS_LINE, setFolded,
   ourShip, refusalLine, send, sendFailure, setArchived, setLabel, thread,
   uploadAll,
   type MailList, type Message, type Thread,
@@ -486,10 +486,26 @@ export default function ThreadView({
   // genuine, others forged): keyed on the position in the fixed,
   // backend-ordered list, not `m.id`, or React's key collision folds
   // distinct verified and forged copies into one node.
+  // FOLDING shows at once and is saved behind it. Like a read mark it
+  // does not move the change beacon, so another open tab sees it on its
+  // next load of this thread, not live.
+  const onFold = (mid: string, fold: boolean) => {
+    setT((cur) => cur && {
+      ...cur,
+      folded: fold ? [...cur.folded, mid] : cur.folded.filter((f) => f !== mid),
+    })
+    setFolded(id, [mid], fold).catch((e) => {
+      console.error(e)
+      setSendError('Could not save that fold.')
+    })
+  }
+
   const card = (m: Message, i: number) => (
     <MessageCard
       key={i}
       m={m}
+      folded={t.folded.includes(m.id)}
+      onFold={(fold) => onFold(m.id, fold)}
       lists={lists}
       onSaveList={onSaveList}
       onReply={m.verdict === 'forged' ? undefined : () => replyTo(m.id)}
