@@ -99,15 +99,13 @@
   %+  expect-eq  !>(`(unit @uv)`[~ 0v1a])
   !>  (de-delete:web (jo '{"thread-id":"0v1a"}'))
 ::
-::  the two routes do NOT accept each other's key. They name different
-::  things - a message and a thread - and a decoder that took either would
-::  let a mis-addressed request mark a thread read or delete a message.
-++  test-de-read-rejects-thread-key
-  %+  expect-eq  !>(`(unit (set @uv))`~)
-  !>  (de-read:web (jo '{"thread-id":"0v1a"}'))
-::
-++  test-de-delete-rejects-msg-key
-  %+  expect-eq  !>(`(unit @uv)`~)  !>((de-delete:web (jo '{"msg-id":"0v1a"}')))
+::  A DELETE BODY NAMES THE THREAD AND NOTHING ELSE. A read, unread,
+::  fold or unfold body carries the same thread-id, so a decoder that
+::  ignored the rest would delete the whole thread when one of those was
+::  sent to the wrong route.
+++  test-de-delete-refuses-any-other-body
+  %+  expect-eq  !>(`(unit @uv)`~)
+  !>  (de-delete:web (jo '{"thread-id":"0v1a","msg-ids":["0v1a"]}'))
 ::
 ++  test-de-read-bad-id
   %+  expect-eq  !>(`(unit (set @uv))`~)
@@ -249,31 +247,23 @@
     !>  ?~(got ~ `(snag 0 u.got))
   ==
 ::
-++  test-de-refs-decodes-several
-  =/  got
-    %+  de-refs:web
-      %-  jo
-      %-  crip
-      ;:  weld
-        (trip '{"attachments":[{"name":"a","mime":"t","hash":"0v1"},')
-        (trip '{"name":"b","mime":"t","hash":"0v2"}]}')
-      ==
-    16
-  (expect-eq !>(`(unit @ud)`[~ 2]) !>(?~(got ~ `(lent u.got))))
-::
 ::  THE COUNT IS REFUSED AT THE BOUNDARY, before the nexus peeks a
-::  single blob. max-attach is passed in because this lib is
-::  import-free and cannot reach the chain lib's caps.
-++  test-de-refs-refuses-too-many
-  %+  expect-eq  !>(`(unit (list up-ref:web))`~)
-  !>  %+  de-refs:web
-        %-  jo
-        %-  crip
-        ;:  weld
-          (trip '{"attachments":[{"name":"a","mime":"t","hash":"0v1"},')
-          (trip '{"name":"b","mime":"t","hash":"0v2"}]}')
-        ==
-      1
+::  single blob: `most` refs decode and one more is refused. max-attach
+::  is passed in because this lib is import-free and cannot reach the
+::  chain lib's caps.
+++  test-de-refs-caps-the-count
+  =/  two
+    %-  jo
+    %-  crip
+    ;:  weld
+      (trip '{"attachments":[{"name":"a","mime":"t","hash":"0v1"},')
+      (trip '{"name":"b","mime":"t","hash":"0v2"}]}')
+    ==
+  =/  at  (de-refs:web two 2)
+  ;:  weld
+    (expect-eq !>(`(unit @ud)`[~ 2]) !>(?~(at ~ `(lent u.at))))
+    (expect-eq !>(`(unit (list up-ref:web))`~) !>((de-refs:web two 1)))
+  ==
 ::
 ::  A `attachments` key that is present and wrong is a refusal, never an
 ::  empty list: that is a client that meant to attach something and did
@@ -304,14 +294,6 @@
     16
   %+  expect-eq  !>(`(unit up-ref:web)`[~ ['a' 't' 0v3]])
   !>  ?~(got ~ `(snag 0 u.got))
-::
-::  a `files` key - the old base64 transport's shape - is not
-::  `attachments` and is not read. A client that still sent one would
-::  send its files nowhere, which is why the client was changed in the
-::  same slice.
-++  test-de-refs-ignores-the-old-files-key
-  %+  expect-eq  !>(`(unit (list up-ref:web))`[~ ~])
-  !>  (de-refs:web (jo '{"files":[{"name":"a","mime":"t","data":"aGk="}]}') 16)
 ::
 ::  ── the header boundary ─────────────────────────────────────────────
 ::

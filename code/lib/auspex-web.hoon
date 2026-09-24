@@ -82,11 +82,17 @@
   %.  jon
   (ot:dejs:format ~[['msg-ids' (as:dejs:format (se:dejs:format %uv))]])
 ::
-::  +de-delete: {"thread-id": "0v..."} -> the id.
+::  +de-delete: {"thread-id": "0v..."} -> the id, and ONLY that body.
+::
+::    A read, unread, fold or unfold body carries the same thread-id, so a
+::    decoder that ignored the other keys would delete the whole thread
+::    when one of those was sent here. The destructive route is the one
+::    that refuses what it was not written for.
 ::
 ++  de-delete
   |=  jon=json
   ^-  (unit @uv)
+  ?.  &(?=([%o *] jon) =(1 ~(wyt by p.jon)))  ~
   (de-uv-field jon %'thread-id')
 ::
 ::  ── the mail-client requests ────────────────────────────────────────
