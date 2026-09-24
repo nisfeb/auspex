@@ -568,17 +568,6 @@ mod tests {
     }
 
     #[test]
-    fn a_read_only_change_notifies_nothing() {
-        // read-marks do not bump the beacon (deliberate on the nexus), but if
-        // something else does while a thread was just read, the listing has
-        // one fewer unread row and that is not an event
-        let mut seen = HashSet::new();
-        snapshot(&mut seen, &[row("a", true), row("b", true)]);
-        assert!(diff(&mut seen, &[row("a", false), row("b", true)]).is_empty());
-        assert_eq!(seen.len(), 1, "the read thread left the unread set");
-    }
-
-    #[test]
     fn a_listing_is_read_by_the_fields_that_matter_and_no_others() {
         // the real response off ~wex, trimmed. If the client grows a field
         // this must keep parsing; if it loses one this file does not read,

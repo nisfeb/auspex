@@ -28,7 +28,7 @@ pub struct Config {
 /// is what people actually type, and without a scheme `Url::parse` fails and
 /// the whole flow reports "cannot reach this ship" about a ship that is fine.
 pub fn normalise_url(raw: &str) -> String {
-    let t = raw.trim().trim_end_matches('/').trim();
+    let t = raw.trim().trim_end_matches(|c: char| c == '/' || c.is_whitespace());
     if t.is_empty() {
         return String::new();
     }
@@ -154,19 +154,10 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip() {
-        // The config is two fields, and losing either one is a relaunch that
-        // lands on the connect page with a live session sitting right there.
-        let p = tmp("roundtrip");
-        let c = Config { url: "http://localhost:8081".into(), ship: "~wex".into() };
-        save_at(&p, &c).unwrap();
-        let back = load_at(&p);
-        assert_eq!(back.url, c.url);
-        assert_eq!(back.ship, c.ship);
-        std::fs::remove_file(&p).ok();
-
+    fn update_at_creates_the_file_and_keeps_earlier_writes() {
         // update_at is load-modify-save: what it writes must be what comes
-        // back, and it must create the file (and its directory) from nothing
+        // back, and it must create the file (and its directory) from nothing.
+        // Save -> load of any config is `config_roundtrips` below.
         let p2 = tmp("update");
         update_at(&p2, |c| c.url = "http://localhost:8080".into()).unwrap();
         update_at(&p2, |c| c.ship = "~feb".into()).unwrap();
@@ -210,6 +201,9 @@ mod tests {
         // nothing typed is nothing configured, not "http://"
         assert_eq!(normalise_url("   "), "");
         assert_eq!(normalise_url("/"), "");
+        // slashes and spaces mixed at the end all go, not one layer of each
+        assert_eq!(normalise_url("localhost:8081/ /"), "http://localhost:8081");
+        assert_eq!(normalise_url("/ /"), "");
     }
 
     use proptest::prelude::*;
