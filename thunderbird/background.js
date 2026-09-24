@@ -178,13 +178,15 @@ async function ensureIdentity(ship) {
 
 //  ── the mirror ──────────────────────────────────────────────────────
 
-//  The bytes of every attachment on `msgs`, by hash; a file the ship could
-//  not get is absent. On a 409 the ship is asked to keen for it, and the
-//  misses are then polled TOGETHER — ten rounds, three seconds apart, which
-//  is a shape a per-case-probe deadline can actually finish inside. Polled
-//  one file at a time, each unfetched attachment was its own thirty
-//  seconds, in turn. A file still absent gets a placeholder, and the
-//  placeholder is PERMANENT for that import: a message is imported once.
+//  The bytes of every attachment on `msgs` THE SHIP ALREADY HOLDS, by hash;
+//  a file it does not hold is absent. This never asks the ship to fetch:
+//  which files download on their own is the owner's rule, set on the ship
+//  (Attachments in the web client), and an extension that fetched every
+//  file of every mirrored message would undo it for any stranger who sends
+//  one. A 409 is instead polled — ten rounds, three seconds apart, all the
+//  misses TOGETHER — because a file the rules allow may still be arriving.
+//  A file still absent gets a placeholder, and the placeholder is PERMANENT
+//  for that import: a message is imported once.
 //
 //  ponytail: holds a whole sync's files at once (each at most MAX_BLOB);
 //  chunk the plan if seeding a mailbox with hundreds of them ever strains
@@ -198,7 +200,6 @@ async function attachmentBytes(api, msgs) {
       const bytes = await api.blob(a.hash, a.name, a.mime)
       if (bytes) { got.set(a.hash, bytes); continue }
       missing.set(a.hash, a)
-      try { await api.fetchBlob(a.hash, m.from) } catch { /* a miss costs a placeholder */ }
     }
   }
   for (let i = 0; i < 10 && missing.size; i += 1) {

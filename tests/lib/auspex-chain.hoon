@@ -563,8 +563,8 @@
   ;:  weld
     (expect !>((attach-ok:auspex ['a' 11 'text/plain' 0v1])))
     ::  size against max-blob
-    (expect !>((attach-ok:auspex ['a' 262.144 'text/plain' 0v1])))
-    (expect !>(!(attach-ok:auspex ['a' 262.145 'text/plain' 0v1])))
+    (expect !>((attach-ok:auspex ['a' max-blob:auspex 'text/plain' 0v1])))
+    (expect !>(!(attach-ok:auspex ['a' +(max-blob:auspex) 'text/plain' 0v1])))
     ::  name and mime through +text-ok, same caps
     (expect !>(!(attach-ok:auspex [(crip (reap 300 'n')) 1 'text/plain' 0v1])))
     (expect !>(!(attach-ok:auspex ['a' 1 (crip (reap 200 'm')) 0v1])))
@@ -577,7 +577,7 @@
     (expect !>((attaches-ok:auspex (reap 16 one))))
     (expect !>(!(attaches-ok:auspex (reap 17 one))))
     ::  and one bad member fails the list, however short it is
-    (expect !>(!(attaches-ok:auspex ~[one ['a' 262.145 'text/plain' 0v1]])))
+    (expect !>(!(attaches-ok:auspex ~[one ['a' +(max-blob:auspex) 'text/plain' 0v1]])))
   ==
 ::
 ::  name and mime are attacker-supplied and arrive PRE-SIGNED, so a
@@ -660,20 +660,20 @@
     ~[[0v1 ~2026.1.1 10] [0v2 ~2026.1.2 20]]
   ;:  weld
     ::  fits already: no shedding, and nothing is culled speculatively
-    (expect-eq !>([%.y ~]) !>((shed-for:auspex held (sy ~[0v1 0v2]) 0 0)))
+    (expect-eq !>([%.y ~]) !>((shed-for:auspex held (sy ~[0v1 0v2]) 0 0 default-budget:auspex)))
     ::  over the COUNT bound and nothing is unreferenced: refuse, and
     ::  refuse with an empty drop list, so a caller that culls first and
     ::  checks second cannot lose files for nothing
-    (expect-eq !>([%.n ~]) !>((shed-for:auspex held (sy ~[0v1 0v2]) max-blobs:auspex 0)))
+    (expect-eq !>([%.n ~]) !>((shed-for:auspex held (sy ~[0v1 0v2]) max-blobs:auspex 0 default-budget:auspex)))
     ::  over the COUNT bound, and shedding the unreferenced one is enough
-    (expect-eq !>([%.y ~[0v2]]) !>((shed-for:auspex held (sy ~[0v1]) (dec max-blobs:auspex) 0)))
+    (expect-eq !>([%.y ~[0v2]]) !>((shed-for:auspex held (sy ~[0v1]) (dec max-blobs:auspex) 0 default-budget:auspex)))
     ::  the BYTE bound binds independently of the count: one blob, well
     ::  under max-blobs, and still no room
     %+  expect-eq  !>([%.y ~[0v1]])
-    !>  %^    shed-for:auspex
-            ~[[0v1 ~2026.1.1 max-blob-bytes:auspex]]
-          ~
-        [1 100]
+    !>  (shed-for:auspex ~[[0v1 ~2026.1.1 default-budget:auspex]] ~ 1 100 default-budget:auspex)
+    ::  and the budget is the owner's: the same store fits a bigger one
+    %+  expect-eq  !>([%.y ~])
+    !>  (shed-for:auspex ~[[0v1 ~2026.1.1 default-budget:auspex]] ~ 1 100 (mul 2 default-budget:auspex))
   ==
 ::
 ::  swapping a file breaks the signature. This is the whole reason the
@@ -1501,11 +1501,11 @@
 ++  test-proto-paths-mirror-each-other
   =/  k=path  (proto-keen-path:auspex %grubbery 1)
   ;:  weld
-    (expect-eq !>(`path`/auspex/proto) !>(proto-spur:auspex))
+    (expect-eq !>(`path`/auspex/protocol) !>(proto-spur:auspex))
     (expect-eq !>(8) !>((lent k)))
     ::  the empty knot is really there, and it is the one segment a path
     ::  literal cannot spell - which is why this list is written by cons.
-    (expect-eq !>(`path`~[%g %x '1' %grubbery '' '1' %auspex %proto]) !>(k))
+    (expect-eq !>(`path`~[%g %x '1' %grubbery '' '1' %auspex %protocol]) !>(k))
     (expect-eq !>(`@ta`'') !>((snag 4 k)))
     ::  and the tail of the keen path IS the spur, so a change to one
     ::  that is not made to the other fails here rather than in the field.
@@ -1527,5 +1527,72 @@
     %+  expect-eq  !>(`meta:sur`[%3 a & (sy ~[%work]) | ~])
     !>((need (meta-from-noun:auspex [%0 a & (sy ~[%work])])))
     (expect-eq !>(~) !>((meta-from-noun:auspex [%9 ~])))
+  ==
+::
+::  a delivery re-checks only what is not settled: held %verified and
+::  %forged copies are skipped, a held %unverified one is checked again
+::  (its key may have arrived since), and a new copy is checked.
+++  test-unsettled-skips-settled-copies
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'a' 'a' ~2026.1.1 ~)
+  =/  b  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'b' 'b' ~2026.1.2 ~)
+  =/  c  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'c' 'c' ~2026.1.3 ~)
+  =/  d  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'd' 'd' ~2026.1.4 ~)
+  =/  k  |=(m=msg:sur [(id:auspex unsigned.m) sig.m])
+  =/  held=(map [msg-id:sur @ux] verdict:sur)
+    (malt `(list [[msg-id:sur @ux] verdict:sur])`~[[(k a) %verified] [(k b) %forged] [(k c) %unverified]])
+  %+  expect-eq  !>(`chain:sur`~[c d])
+  !>((unsettled:auspex held ~[a b c d]))
+::
+::  +auto-fetch: the allow list is what lets bytes in; a stranger only
+::  under auto-size, which is 0 until the owner sets it; never a
+::  blocked ship, never an unverified message, never past 3/4 budget.
+++  test-auto-fetch-rules
+  =/  s=settings:sur
+    [%0 0 (sy ~[~zod]) (sy ~[~bus]) default-budget:auspex]
+  =/  big  max-blob:auspex
+  ;:  weld
+    (expect-eq !>(&) !>((auto-fetch:auspex s ~zod %verified big 0)))
+    (expect-eq !>(|) !>((auto-fetch:auspex s ~zod %unverified 1 0)))
+    (expect-eq !>(|) !>((auto-fetch:auspex s ~zod %forged 1 0)))
+    (expect-eq !>(|) !>((auto-fetch:auspex s ~nec %verified 1 0)))
+    (expect-eq !>(&) !>((auto-fetch:auspex s(auto-size 10) ~nec %verified 10 0)))
+    (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size 10) ~nec %verified 11 0)))
+    (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size big) ~bus %verified 1 0)))
+    %+  expect-eq  !>(|)
+    !>((auto-fetch:auspex s ~zod %verified 1 (div (mul default-budget:auspex 3) 4)))
+  ==
+::
+::  +settings-ok: a budget that holds one file and fits a loom; a ship
+::  on one list at most
+++  test-settings-ok-bounds
+  =/  s=settings:sur  [%0 0 ~ ~ default-budget:auspex]
+  ;:  weld
+    (expect-eq !>(&) !>((settings-ok:auspex s)))
+    (expect-eq !>(|) !>((settings-ok:auspex s(budget (dec max-blob:auspex)))))
+    (expect-eq !>(|) !>((settings-ok:auspex s(budget +(max-budget:auspex)))))
+    (expect-eq !>(|) !>((settings-ok:auspex s(auto-size +(max-blob:auspex)))))
+    (expect-eq !>(|) !>((settings-ok:auspex s(allow (sy ~[~zod]), block (sy ~[~zod])))))
+    (expect-eq !>(default-budget:auspex) !>(budget:*settings:sur))
+  ==
+::
+::  +auto-picks: per attachment, the signed author, and the running
+::  weight - two files that each fit do not both fit past the share
+++  test-auto-picks
+  =/  one=attachment:sur  ['a.bin' 10 'application/octet-stream' 0v1]
+  =/  two=attachment:sur  ['b.bin' 10 'application/octet-stream' 0v2]
+  =/  a  (forge-with ~zod (sy ~[~nec]) 's' 'b' ~2026.1.1 ~ ~[one two])
+  =/  b  (forge-with ~bus (sy ~[~nec]) 's' 'b' ~2026.1.2 ~ ~[one])
+  =/  vs=(map [msg-id:sur @ux] verdict:sur)
+    %-  malt
+    ^-  (list [[msg-id:sur @ux] verdict:sur])
+    :~  [[(id:auspex unsigned.a) sig.a] %verified]
+        [[(id:auspex unsigned.b) sig.b] %unverified]
+    ==
+  =/  s=settings:sur  [%0 0 (sy ~[~zod ~bus]) ~ 40]
+  ;:  weld
+    ::  ~bus is allowed but its message did not verify
+    (expect-eq !>(~[[0v1 ~zod] [0v2 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 0)))
+    ::  3/4 of 40 is 30: 15 held leaves room for one of the two
+    (expect-eq !>(~[[0v1 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 15)))
   ==
 --

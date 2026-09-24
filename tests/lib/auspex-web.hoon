@@ -381,4 +381,17 @@
     (expect-eq !>(`(unit @p)`~) !>((de-forget:web (jo '{"ship":"zod"}'))))
     (expect-eq !>(`(unit @p)`~) !>((de-forget:web (jo '{"who":"~zod"}'))))
   ==
+::
+::  every field is required, because a save is an overwrite
+++  test-de-settings
+  =/  ok  '{"auto-size":0,"allow":["~zod"],"block":[],"budget":67108864}'
+  ;:  weld
+    %+  expect-eq
+      !>(`(unit settings-req:web)`[~ 0 (sy ~[~zod]) ~ 67.108.864])
+    !>((de-settings:web (jo ok)))
+    %+  expect-eq  !>(`(unit settings-req:web)`~)
+    !>((de-settings:web (jo '{"auto-size":0,"allow":[],"block":[]}')))
+    %+  expect-eq  !>(`(unit settings-req:web)`~)
+    !>((de-settings:web (jo '{"auto-size":0,"allow":["zod"],"block":[],"budget":1}')))
+  ==
 --

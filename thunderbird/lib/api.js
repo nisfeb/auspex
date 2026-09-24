@@ -39,7 +39,7 @@ const tapped = (what) => { if (tap) { try { tap(what) } catch { /* never */ } } 
 //  RAIL, never the boundary: POST /api/blob answers 413 over max-blob and
 //  the send refuses the count again. What these buy is a refusal the user
 //  can act on at the moment they attach a file.
-const MAX_BLOB = 262144
+const MAX_BLOB = 16 * 1024 * 1024
 const MAX_ATTACH = 16
 
 //  The 409 on GET /api/blob. NOT FETCHED IS NOT NOT FOUND: bytes are never
@@ -215,11 +215,6 @@ class Api {
     if (!res.ok) throw new ApiError(res.status, `blob ${res.status}`)
     return new Uint8Array(await res.arrayBuffer())
   }
-
-  //  Ask the ship to keen for the bytes. Answers as soon as the writer has
-  //  queued the request, never when the bytes land — nothing pushes their
-  //  arrival, so the caller retries `blob` instead.
-  fetchBlob(hash, from) { return this.post('/api/fetch-blob', { hash, from }) }
 
   //  ── writes ────────────────────────────────────────────────────────
 

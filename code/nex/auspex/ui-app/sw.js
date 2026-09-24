@@ -5,12 +5,12 @@
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `0f518b28d7ef` is stamped by vite.config.ts at copy time. It is
+// `b76213052f42` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = '0f518b28d7ef'
+const VERSION = 'b76213052f42'
 const SHELL = `auspex-shell-${VERSION}`
 // NOT versioned, unlike the shell. Mail is not part of the build: a
 // deploy that changes one line of CSS has nothing to say about the
@@ -92,7 +92,7 @@ const isMail = (p) => p === `${BASE}/api/inbox` || p.startsWith(`${BASE}/api/thr
 //     for the life of the tab. A worker in front of it either buffers
 //     it forever or breaks it.
 //   - /~/login. Eyre's own auth page and cookie exchange.
-//   - /api/blob/*. Attachment bytes: up to a quarter-megabyte each and
+//   - /api/blob/*. Attachment bytes: up to 16 MiB each and
 //     saved to disk the moment they arrive, so caching them would
 //     double the storage for no offline gain.
 const skip = (p) => p.startsWith('/grubbery/') || p.startsWith('/~/')

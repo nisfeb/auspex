@@ -263,6 +263,28 @@
   ?.  (list-name-ok u.res)  ~
   res
 ::
+::  +de-settings: the POST /api/settings body -> the settings fields.
+::
+::    Every field is required. A save is an overwrite, so a field left
+::    out would reset that setting without anyone having asked. Bounds
+::    are the nexus's +settings-ok, next to the caps they come from.
+::
++$  settings-req  [auto-size=@ud allow=(set ship) block=(set ship) budget=@ud]
+::
+++  de-settings
+  |=  jon=json
+  ^-  (unit settings-req)
+  %-  mole
+  |.
+  ^-  settings-req
+  %.  jon
+  %-  ot:dejs:format
+  :~  ['auto-size' ni:dejs:format]
+      allow+(as:dejs:format (se:dejs:format %p))
+      block+(as:dejs:format (se:dejs:format %p))
+      budget+ni:dejs:format
+  ==
+::
 ::  +de-forget: {"ship": "~sampel-palnet"} -> the ship whose discovery
 ::  record to drop.
 ::

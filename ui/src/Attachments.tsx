@@ -19,11 +19,11 @@ export function fileSize(bytes: number): string {
 
 // The file control, shared by Compose and the reply composer.
 //
-// REFUSES BEFORE IT SENDS. max-blob is 256K and max-attach is 16, and
+// REFUSES BEFORE IT SENDS. max-blob is 16 MiB and max-attach is 16, and
 // the nexus checks both again — the upload route answers 413 on an
 // oversized body and the send refuses the count — but a file refused
 // here is refused at the moment the user picked it, while a file
-// refused there is refused after a quarter-megabyte round trip. Both
+// refused there is refused after a full upload round trip. Both
 // checks exist; only this one can say which file was the problem while
 // the user still has the dialog in mind.
 //

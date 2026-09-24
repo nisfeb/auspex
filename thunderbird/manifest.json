@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Auspex",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Auspex mail in Thunderbird: mirrors your ship's mail into local folders and sends through the ship, over its own authenticated API. No IMAP, no SMTP.",
   "author": "nisfeb",
 

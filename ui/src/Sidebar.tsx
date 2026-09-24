@@ -41,7 +41,7 @@ export default function Sidebar({
   view, label, labels, drafts, rules, lists, unread, onView, onCompose,
   theme, onTheme, installable, onInstall,
 }: {
-  view: View | 'drafts' | 'rules' | 'lists'
+  view: View | 'drafts' | 'rules' | 'lists' | 'attachments'
   label: string
   labels: string[]
   drafts: number
@@ -49,7 +49,7 @@ export default function Sidebar({
   lists: number
   // Unread threads in the inbox, the only view that shows a count.
   unread: number
-  onView: (v: View | 'drafts' | 'rules' | 'lists', label?: string) => void
+  onView: (v: View | 'drafts' | 'rules' | 'lists' | 'attachments', label?: string) => void
   onCompose: () => void
   theme: 'light' | 'dark'
   onTheme: () => void
@@ -145,6 +145,15 @@ export default function Sidebar({
           className="btn touch w-full justify-start"
         >
           Lists{lists > 0 ? ` (${lists})` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={() => onView('attachments')}
+          title="Which ships' attachments download on their own, and how much this ship
+            keeps. Nothing downloads on its own until you say so."
+          className="btn touch w-full justify-start"
+        >
+          Attachments
         </button>
         <button
           type="button"

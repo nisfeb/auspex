@@ -323,9 +323,8 @@ export const thread = async (id: string): Promise<Thread | null> => {
 // GUARD RAIL, never the boundary: POST /api/blob refuses a body over
 // max-blob with a 413 and the send refuses the count again. What these
 // buy is a refusal the user can act on — "this file is too big" at the
-// moment they pick it, rather than after a quarter-megabyte upload
-// comes back 413.
-export const MAX_BLOB = 262144
+// moment they pick it, rather than after a 16 MiB upload comes back 413.
+export const MAX_BLOB = 16 * 1024 * 1024
 export const MAX_ATTACH = 16
 
 // One attachment on its way into a send: metadata plus the content
@@ -375,7 +374,7 @@ export const uploadBlob = async (f: File): Promise<AttachRef> => {
 
 // Upload every file, IN SEQUENCE, reporting which one is in flight.
 //
-// Sequence and not Promise.all: sixteen concurrent quarter-megabyte
+// Sequence and not Promise.all: sixteen concurrent multi-megabyte
 // POSTs at a serialized pier is sixteen request fibers competing for
 // one ship, and "uploading 2 of 5" is a true statement only if there
 // is one at a time. The throw NAMES THE FILE — "upload failed" alone
@@ -887,6 +886,19 @@ export const saveDraft = (d: Omit<Draft, 'at'>) =>
 export const deleteDraft = (id: string) => post('/api/draft-delete', { id })
 
 export const rules = () => get<Rule[]>('/api/rules')
+
+// WHICH ATTACHMENTS DOWNLOAD ON THEIR OWN, and how much the ship keeps.
+// Local to this ship. Sizes are bytes.
+export interface AttachmentSettings {
+  'auto-size': number
+  allow: string[]
+  block: string[]
+  budget: number
+}
+
+export const attachmentSettings = () => get<AttachmentSettings>('/api/settings')
+
+export const saveAttachmentSettings = (s: AttachmentSettings) => post('/api/settings', s)
 
 export const saveRule = (r: Rule) => post('/api/rule', r)
 

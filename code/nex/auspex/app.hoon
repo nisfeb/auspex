@@ -486,6 +486,7 @@
 ::  name that was not admitted by both.
 ++  list-rail   |=([root=@ud n=@t] ^-(road:tarball (rf root list-dir `@ta`n)))
 ++  meta-rail   |=([root=@ud t=thread-id:uc] ^-(road:tarball (rf root (tdir t) %meta)))
+++  settings-rail  |=(root=@ud ^-(road:tarball (rf root mail-dir %settings)))
 ::  +caps-rail: the one grub every jael reach is gated on, at the nexus
 ::  root. See the /caps row in +on-load and $caps:uc.
 ++  caps-rail   |=(root=@ud ^-(road:tarball (rf root / %caps)))
@@ -645,6 +646,16 @@
   ;<  n=(unit *)  bind:m  (peek-noun (meta-rail root t))
   (pure:m (fall (biff n meta-from-noun:uc) *meta:uc))
 ::
+::  +read-settings: the owner's attachment settings, or the defaults -
+::  which download nothing on their own - when none were ever saved.
+::
+++  read-settings
+  |=  root=@ud
+  =/  m  (fiber:fiber:nexus ,settings:uc)
+  ^-  form:m
+  ;<  n=(unit *)  bind:m  (peek-noun (settings-rail root))
+  (pure:m (fall (biff n |=(x=* (mole |.(;;(settings:uc x))))) *settings:uc))
+::
 ++  read-drafts
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(list draft:uc))
@@ -751,12 +762,12 @@
 ::  +list-blobs: every blob this ship holds, with its age and weight.
 ::
 ::    The store's whole bookkeeping. Both bounds - max-blobs by count and
-::    max-blob-bytes by weight - are computed off this, and so is the
-::    eviction order.
+::    the $settings budget by weight - are computed off this, and so is
+::    the eviction order.
 ::
 ::    Neither bound can be weaponised: bytes only ever enter through a
-::    LOCAL action (an upload, or %fetch-blob), never through a
-::    delivered chain, which carries metadata and no bytes at all.
+::    LOCAL decision (an upload, a %fetch-blob, or a download rule the
+::    owner set), never because a delivered chain named them.
 ::
 ++  list-blobs
   |=  root=@ud
@@ -809,12 +820,13 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
+  ;<  s=settings:uc  bind:m  (read-settings root)
   ::  THE FAST PATH FIRST. +shed-for answers [& ~] without looking at
   ::  the references whenever the store fits, and the references are a
   ::  walk of every message on the ship - which only a full store needs.
-  ?:  =([& ~] (shed-for:uc held ~ 1 bytes))  (pure:m &)
+  ?:  =([& ~] (shed-for:uc held ~ 1 bytes budget.s))  (pure:m &)
   ;<  refs=(set @uv)  bind:m  (all-referenced root)
-  =/  plan  (shed-for:uc held refs 1 bytes)
+  =/  plan  (shed-for:uc held refs 1 bytes budget.s)
   ?.  ok.plan  (pure:m |)
   ;<  ~  bind:m  (evict root drop.plan)
   (pure:m &)
@@ -1185,6 +1197,7 @@
   ::  listing plus a thread refetch for a change nobody else can see.
     %save-list      (do-save-list root name.a members.a)
     %delete-list    (do-delete-list root name.a)
+    %save-settings  (do-save-settings root settings.a)
   ::  the key road. Raised by the probe, and forceable from the dojo -
   ::  see +do-set-caps for why that seam is the honest way to reach the
   ::  degraded paths at all. %.n like every other local-state action.
@@ -1567,6 +1580,15 @@
   ;<  ~  bind:m  (note root 'save-rule' & (scot %uv id.r))
   (pure:m |)
 ::
+++  do-save-settings
+  |=  [root=@ud s=settings:uc]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ?.  (settings-ok:uc s)  (reject root 'bad settings')
+  ;<  ~  bind:m  (put-file (settings-rail root) [/auspex %settings] s)
+  ;<  ~  bind:m  (note root 'save-settings' & '')
+  (pure:m |)
+::
 ::  ── mailing lists ───────────────────────────────────────────────────
 ::
 ::  +do-save-list: create or OVERWRITE one list. That is the whole verb.
@@ -1698,9 +1720,12 @@
 ::    Anyone may hand us a chain; the signatures are the authority. That is
 ::    what makes chains portable and what separates this from a chat app.
 ::
-::    Order is load-bearing: cap, then VERIFY, then resolve identity, then
+::    Order is load-bearing: cap, then resolve identity, then VERIFY, then
 ::    merge, then store. Nothing is written before every signature in the
-::    incoming chain has a verdict.
+::    incoming chain has a verdict. Identity comes first so the verify can
+::    skip what is already settled: a copy this thread holds %verified or
+::    %forged keeps that verdict whatever a re-check says (+freeze), so
+::    only new and %unverified copies are checked (+unsettled).
 ::
 ++  deliver
   |=  [root=@ud c=chain:uc]
@@ -1743,8 +1768,6 @@
   ::  why the number is 128 and for the per-source rate budget this
   ::  deliberately does not attempt.
   ?.  (fits-signers:uc c max-signers:uc)   (reject root 'too many signers')
-  ;<  keys=(map [ship @ud] (unit pass))  bind:m  (delivery-keys root c)
-  =/  vs=(list [[msg-id:uc @ux] verdict:uc])  (verify-chain:uc keys c)
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  thread identity is never (root:uc c). `c` is attacker-controlled and
   ::  unsorted, so the head-as-supplied is not a stable identity.
@@ -1754,6 +1777,10 @@
   ?:  ?=(%| -.rk)  (reject root 'no unique root')
   =/  rid=thread-id:uc  p.rk
   =/  ss=(map path stored-msg:uc)  (~(gut by loaded) rid ~)
+  =/  held=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
+  =/  todo=chain:uc  (unsettled:uc held c)
+  ;<  keys=(map [ship @ud] (unit pass))  bind:m  (delivery-keys root todo)
+  =/  vs=(list [[msg-id:uc @ux] verdict:uc])  (verify-chain:uc keys todo)
   =/  new=chain:uc  (merge:uc (chain-of ss) c)
   ::  a genuine state-capacity limit, and it stays a reject: shedding a
   ::  distinct non-root id would orphan the prev pointers of later
@@ -1774,7 +1801,7 @@
   ::  fold this poke's verdicts into the stored ones BEFORE pruning:
   ::  +prune needs a verdict for every message in `new`, including ones
   ::  stored by an earlier poke that this one did not carry.
-  =/  vs2  (freeze:uc (verdicts-of ss) vs)
+  =/  vs2  (freeze:uc held vs)
   =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
@@ -1796,6 +1823,15 @@
   ::  +file-arrival.
   ;<  ~  bind:m  (file-arrival root rid c wrote)
   ;<  ~  bind:m  (note root 'deliver' & (scot %uv rid))
+  ::  THE OWNER'S DOWNLOAD RULES, over the copies this delivery checked
+  ::  (`todo`): a copy settled earlier was offered its downloads when it
+  ::  arrived. Queued like a manual fetch, so no peer is waited on here,
+  ::  and skipped outright for mail with no attachments - most of it.
+  ?:  (levy todo |=(x=msg:uc =(~ attachments.unsigned.x)))  (pure:m &)
+  ;<  s=settings:uc  bind:m  (read-settings root)
+  ;<  held=(list blob-row:uc)  bind:m  (list-blobs root)
+  ;<  ~  bind:m
+    (queue-fetches root (auto-picks:uc s todo vs2 (held-bytes:uc held)))
   (pure:m &)
 ::
 ::  ── blobs ───────────────────────────────────────────────────────────
@@ -1964,11 +2000,13 @@
   ;<  last=proto:uc  bind:m  (read-proto-pub root)
   ?:  &(bound =(last our-proto:uc))
     (trace:io ~[leaf+"auspex: /proto unchanged; not republishing"])
-  ::  IT CHANGED, or the binding is gone. Cull first and grow second
-  ::  when it is bound, and the order is the whole correctness argument:
-  ::  +keen-proto probes upward from case 1 and takes the FIRST hit, so
-  ::  growing without culling would leave the old noun answering at case
-  ::  1 forever and the new one unreachable behind it.
+  ::  IT CHANGED, or the binding is gone. GROW, NEVER CULL: the grow
+  ::  lands one case above every earlier one, and +keen-proto takes the
+  ::  HIGHEST case that answers and stops at the first that does not. A
+  ::  cull cannot retire an old answer anyway - vere serves a namespace
+  ::  read from its own jumbo cache without asking arvo (io/mesa.c) and
+  ::  never evicts one entry - and once the cache does drop a culled
+  ::  case, that case goes silent, which the walk would read as the top.
   ::
   ::  ONE GROW PER PROTOCOL CHANGE, never per deploy - which is what
   ::  keeps this inside +proto-probe-cases. /proto-pub is the record that
@@ -1981,9 +2019,6 @@
   ::  +farm-has is still consulted, so a binding lost to a nuked agent
   ::  or a rebuilt yoke is re-grown even when our record says we already
   ::  published it - the same insurance +republish-all is for blobs.
-  ;<  ~  bind:m
-    ?.  bound  (pure:m ~)
-    (cull-farm:io proto-spur:uc)
   ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
   ;<  ~  bind:m
     (put-file (rf root / %'proto-pub') [/auspex %proto] our-proto:uc)
@@ -2017,45 +2052,52 @@
 ::
 ++  mesa-agent  ^-(@ta %grubbery)
 ::
-::  +blob-timeout: how long ONE keen waits. keen:io carries no deadline
-::  of its own - ames holds an unanswerable request forever - so this is
-::  the only bound. A namespace read is answered from a cache or from the
-::  publisher's kernel with no agent in the loop, so a keen that is slow
-::  is a keen that is not coming.
+::  +blob-timeout: how long ONE blob keen waits. keen:io carries no
+::  deadline of its own - ames holds an unanswerable request forever - so
+::  this is the only bound. Sized for a max-blob file on the OLD protocol,
+::  which peers that have not migrated to directed messaging still use:
+::  measured 2026-09-24 between two fake ships, 16 MiB took 281s. The
+::  wait is a fetch fiber's, never the writer's.
 ::
-++  blob-timeout  ^-(@dr ~s10)
+++  blob-timeout  ^-(@dr ~m10)
 ::
 ::  +proto-probe-cases / +proto-timeout: /proto's case ladder.
 ::
 ::    A blob is content-addressed and immutable and is only ever grown at
 ::    case 1. /proto is MUTABLE: it moves one case every time a ship
 ::    changes its version ladder or its caps, which is a normal thing for
-::    a deployed protocol to do. Measured on ~feb, two content changes
-::    put it at case 3. So a ladder, and a shorter deadline to pay for
-::    it: eight cases at four seconds is 32s for a total miss, and those
-::    seconds hold QUEUED MAIL on first contact - which is why the total,
-::    and not the per-case number, is what was held fixed.
+::    a deployed protocol to do, and every release that changes a cap
+::    spends one. The walk ends at the first case that times out (see
+::    +keen-proto) and a culled case answers at once, so a probe costs
+::    one RTT per case plus ONE deadline, and those seconds hold QUEUED
+::    MAIL on first contact. The ceiling only bounds a peer that answers
+::    at every case it is asked. The deadline is 10s, not less, because
+::    the walk reads a timeout as the top: an uncached first answer from
+::    a busy publisher took more than 4s on ~feb, and stopping there read
+::    the case below it.
 ::
-++  proto-probe-cases  ^-(@ud 8)
-++  proto-timeout      ^-(@dr ~s4)
+++  proto-probe-cases  ^-(@ud 64)
+++  proto-timeout      ^-(@dr ~s10)
 ::
-::  +keen-page: one %keen, ~ on every failure - our own deadline, an
-::  unbound spur, a page under a mark we did not ask for. On our deadline
-::  firing, %yawn the request: ames otherwise holds an unanswerable keen
-::  forever, one parked request per miss. The caller clams the noun.
+::  +keen-page: one %keen. ~ when OUR DEADLINE fired - nothing answered,
+::  which for a case ladder means nothing is bound there yet; [~ ~] when
+::  the peer answered with nothing we can use - an empty or culled case,
+::  or a page under a mark we did not ask for. On the deadline, %yawn
+::  the request: ames otherwise holds an unanswerable keen forever, one
+::  parked request per miss. The caller clams the noun.
 ::
 ++  keen-page
   |=  [who=ship pax=path to=@dr mark=@tas]
-  =/  m  (fiber:fiber:nexus ,(unit *))
+  =/  m  (fiber:fiber:nexus ,(unit (unit *)))
   ^-  form:m
   ;<  res=(unit (unit page))  bind:m
     ((deadline ,(unit page)) to (keen:io who pax))
   ?~  res
     ;<  ~  bind:m  (yawn:io who pax)
     (pure:m ~)
-  ?~  u.res  (pure:m ~)
-  ?.  =(mark p.u.u.res)  (pure:m ~)
-  (pure:m `q.u.u.res)
+  ?~  u.res  (pure:m [~ ~])
+  ?.  =(mark p.u.u.res)  (pure:m [~ ~])
+  (pure:m ``q.u.u.res)
 ::
 ::  +fetch-keen / +probe-keen: the two keens, BEHIND THE KEY ROAD.
 ::
@@ -2076,9 +2118,9 @@
   ^-  form:m
   ;<  may=?  bind:m  (may-scry root)
   ?.  may  (pure:m ~)
-  ;<  n=(unit *)  bind:m
+  ;<  n=(unit (unit *))  bind:m
     (keen-page who (blob-keen-path:uc mesa-agent h 1) blob-timeout blob-page-mark:uc)
-  (pure:m (biff n |=(x=* (mole |.(;;(octs x))))))
+  (pure:m (biff (biff n same) |=(x=* (mole |.(;;(octs x))))))
 ::
 ++  probe-keen
   |=  [root=@ud who=ship]
@@ -2086,25 +2128,32 @@
   ^-  form:m
   ;<  may=?  bind:m  (may-scry root)
   ?.  may  (pure:m ~)
-  (keen-proto who 1)
+  (keen-proto who 1 ~)
 ::
-::  +keen-proto: up /proto's ladder, first hit wins. A noun that is not a
-::  $proto, or a $proto saying what one cannot truthfully say - lists
-::  that disagree in length, or a ship claiming to speak nothing - is a
-::  miss, and the peer is treated as silent: silence means version 1,
+::  +keen-proto: up /proto's ladder, and the HIGHEST case that answers
+::  wins. Not the first: a republish culls the old case and grows the
+::  new one above it, but vere keeps answering the culled case from its
+::  cache (see +publish-proto), so the first hit can be a stale one.
+::  The walk ends at our deadline, which is the first case nothing is
+::  bound at yet - so every probe pays one +proto-timeout, once a day
+::  per peer (+proto-ttl). A noun that is not a $proto, or a $proto
+::  saying what one cannot truthfully say - lists that disagree in
+::  length, or a ship claiming to speak nothing - is a miss, and a peer
+::  with no hit at all is treated as silent: silence means version 1,
 ::  and version 1 is what we would have poked anyway.
 ::
 ++  keen-proto
-  |=  [who=ship case=@ud]
+  |=  [who=ship case=@ud best=(unit proto:uc)]
   =/  m  (fiber:fiber:nexus ,(unit proto:uc))
   ^-  form:m
-  ?:  (gth case proto-probe-cases)  (pure:m ~)
-  ;<  n=(unit *)  bind:m
+  ?:  (gth case proto-probe-cases)  (pure:m best)
+  ;<  n=(unit (unit *))  bind:m
     (keen-page who (proto-keen-path:uc mesa-agent case) proto-timeout proto-page-mark:uc)
+  ?~  n  (pure:m best)
   =/  got=(unit proto:uc)
-    (biff n |=(x=* (mole |.(;;(proto:uc x)))))
-  ?:  &(?=(^ got) (proto-ok:uc u.got))  (pure:m got)
-  (keen-proto who +(case))
+    (biff u.n |=(x=* (mole |.(;;(proto:uc x)))))
+  =?  best  &(?=(^ got) (proto-ok:uc u.got))  got
+  (keen-proto who +(case) best)
 ::
 ::  +enqueue-chain: hand this send to the peer's probe fiber.
 ::
@@ -2404,6 +2453,16 @@
   ::  +take-blob for the same argument at the other end.
   ;<  ~  bind:m  (note root 'fetch-blob' & 'queued')
   (pure:m |)
+::
+::  recursion by arm name, for the ;< reason stated at +mark-read-loop.
+::
+++  queue-fetches
+  |=  [root=@ud xs=(list [h=@uv who=ship])]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?~  xs  (pure:m ~)
+  ;<  *  bind:m  (do-fetch-blob root h.i.xs who.i.xs)
+  (queue-fetches root t.xs)
 ::
 ::  +run-fetch: the ephemeral fetch fiber. Runs OFF the writer.
 ::
@@ -2975,6 +3034,8 @@
   |=  [root=@ud c=chain:uc]
   =/  m  (fiber:fiber:nexus ,(map [ship @ud] (unit pass)))
   ^-  form:m
+  ::  a redelivery with nothing left to check asks jael nothing
+  ?:  =(~ c)  (pure:m ~)
   ;<  may=?  bind:m  (may-scry root)
   ?.  may  (pure:m ~)
   ;<  fake=?  bind:m  fake-ship
@@ -3194,6 +3255,7 @@
         [%api %blob @ ~]    (serve-blob eyre-id i.t.t.suffix args.parsed)
         [%api %drafts ~]    (serve-drafts eyre-id)
         [%api %rules ~]     (serve-rules eyre-id)
+        [%api %settings ~]  (serve-settings eyre-id)
         [%api %lists ~]     (serve-lists eyre-id)
     ==
   ?.  =(%'POST' meth)  (send-err eyre-id 404 'not found')
@@ -3222,6 +3284,7 @@
       [%api %draft ~]            (do-web-draft eyre-id u.jon)
       [%api %'draft-delete' ~]   (do-web-id eyre-id u.jon %delete-draft)
       [%api %rule ~]             (do-web-rule eyre-id u.jon)
+      [%api %settings ~]         (do-web-settings eyre-id u.jon)
       [%api %'rule-delete' ~]    (do-web-id eyre-id u.jon %delete-rule)
     ::  ONE VERB FOR A LIST. Create, overwrite, add a member, drop one,
     ::  rename by re-saving and copy the membership off a message are
@@ -3440,6 +3503,13 @@
   =/  sorted=(list draft:uc)
     (sort ds |=([a=draft:uc b=draft:uc] (gth at.a at.b)))
   (send-json eyre-id [%a (turn sorted draft-json:uc)])
+::
+++  serve-settings
+  |=  eyre-id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ;<  s=settings:uc  bind:m  (read-settings nexus-root)
+  (send-json eyre-id (settings-json:uc s))
 ::
 ++  serve-rules
   |=  [eyre-id=@ta]
@@ -4088,7 +4158,7 @@
 ::    message on the ship to decide what is unreferenced - the exact
 ::    O(mailbox) work this slice exists to keep off a request fiber -
 ::    and a cull racing the writer's own is not idempotent the way the
-::    put is. So max-blobs and max-blob-bytes bound the tree store at
+::    put is. So max-blobs and the budget in $settings bound the store at
 ::    the one place that still evicts, a blob fetch, and an upload can
 ::    carry the store past them. The fix is
 ::    the same sweep of unreferenced blobs that collects abandoned
@@ -4118,7 +4188,7 @@
     %^  send-err  eyre-id  413
     %+  rap  3
     :~  'attachment over the '
-        (crip (scow %ud max-blob:uc))
+        (crip (a-co:co max-blob:uc))
         ' byte limit for one file'
     ==
   ::  a declared length below the measured one is a malformed octs and
@@ -4288,6 +4358,26 @@
   ?.  (rule-ok:uc rl)
     (send-err eyre-id 400 'a rule needs a sender or a subject to match')
   ;<  ~  bind:m  (poke-writer [%save-rule rl])
+  (send-ok eyre-id)
+::
+++  do-web-settings
+  |=  [eyre-id=@ta jon=json]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  r=(unit settings-req:uw)  (de-settings:uw jon)
+  ?~  r  (send-err eyre-id 400 'bad settings')
+  =/  s=settings:uc  [%0 u.r]
+  ?.  (settings-ok:uc s)
+    %^  send-err  eyre-id  400
+    %+  rap  3
+    :~  'the budget must be between one largest file ('
+        (crip (a-co:co max-blob:uc))
+        ' bytes) and '
+        (crip (a-co:co max-budget:uc))
+        ' bytes, automatic downloads at most one largest file, and a'
+        ' ship may be on one list at most'
+    ==
+  ;<  ~  bind:m  (poke-writer [%save-settings s])
   (send-ok eyre-id)
 ::
 ::  +do-web-list: create or overwrite one mailing list.

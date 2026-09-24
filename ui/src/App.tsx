@@ -10,6 +10,7 @@ import ThreadView from './ThreadView'
 import Compose, { type ForwardIntent } from './Compose'
 import Sidebar from './Sidebar'
 import Drafts from './Drafts'
+import AttachmentSettings from './AttachmentSettings'
 import Filters from './Filters'
 import Lists from './Lists'
 
@@ -18,7 +19,7 @@ import Lists from './Lists'
 // bound on anything: `total` is honest about the rest.
 const PER_PAGE = 25
 
-type Pane = View | 'drafts' | 'rules' | 'lists'
+type Pane = View | 'drafts' | 'rules' | 'lists' | 'attachments'
 
 // The install prompt, which is the one browser API here with no types in
 // lib.dom: `beforeinstallprompt` is Chromium-only and unspecified. Only
@@ -200,6 +201,7 @@ export default function App() {
   >(null)
 
   const isThreadPane = pane !== 'drafts' && pane !== 'rules' && pane !== 'lists'
+    && pane !== 'attachments'
   // A SEARCH LEAVES THE PANE. The nexus ANDs the query with the view
   // predicate, which is right as a primitive and wrong as the only
   // behaviour a user can get: searching from the Inbox would then be
@@ -353,6 +355,7 @@ export default function App() {
 
   const paneName = pane === 'rules' ? 'Filters'
     : pane === 'lists' ? 'Lists'
+      : pane === 'attachments' ? 'Attachments'
       : pane === 'drafts' ? 'Drafts'
         : pane === 'label' ? label
           : pane.charAt(0).toUpperCase() + pane.slice(1)
@@ -502,6 +505,8 @@ export default function App() {
             onDelete={(id) => { deleteRule(id).then(refreshSidebar).catch(console.error) }}
             onClose={() => goto('inbox')}
           />
+        ) : pane === 'attachments' ? (
+          <AttachmentSettings onClose={() => goto('inbox')} />
         ) : pane === 'lists' ? (
           // A list write does not move the change beacon — no other
           // reader can observe it — so this tab refetches its own

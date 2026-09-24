@@ -402,7 +402,7 @@
           'max_name'^(numb:enjs:format max-name:ac)
           'max_mime'^(numb:enjs:format max-mime:ac)
           'max_blobs'^(numb:enjs:format max-blobs:ac)
-          'max_blob_bytes'^(numb:enjs:format max-blob-bytes:ac)
+          'default_budget'^(numb:enjs:format default-budget:ac)
       ==
     ::
     ::  THE SET NOUN, pinned. `to` is a (set ship) and +sham hashes the

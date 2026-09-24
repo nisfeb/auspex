@@ -755,7 +755,7 @@ trustworthy, and trimming a signed field would forge.
 | `max-to` | 100 | `+fits-recipients` | recipients per message |
 | `max-mime` | 128 | `+fits-body-mimes` (→ `+text-ok`) | bytes of `body-mime`, and of an attachment `mime` |
 | `max-attach` | 16 | `+fits-attachments` (→ `+attach-ok`) | attachments per message |
-| `max-blob` | 262.144 | `+attach-ok` | claimed bytes of one attachment |
+| `max-blob` | 16.777.216 | `+attach-ok` | claimed bytes of one attachment |
 | `max-name` | 256 | `+attach-ok` (→ `+text-ok`) | bytes of an attachment filename |
 | `max-depth` | 64 | `+fits-depth` (→ `+max-ancestry`) | ancestors from root to leaf |
 | `max-signers` | 128 | `+fits-signers` (→ `+signers`) | distinct `[ship life]` pairs per chain |
@@ -789,9 +789,11 @@ poke, not a sender**: a peer willing to send a thousand pokes still buys a
 thousand times this, and a per-source rate budget is the real answer and is not
 built.
 
-The blob-store caps (`max-blobs` 1.000, `max-blob-bytes` 33.554.432) bound a
-receiver's own storage and are not protocol: bytes only ever enter through a
-**local** action, never through a delivered chain, which carries metadata alone.
+The blob-store bounds (`max-blobs` 1.000, and a byte budget the owner sets,
+67.108.864 by default) bound a receiver's own storage and are not protocol:
+bytes only ever enter through a **local** decision — an upload, a fetch the
+owner asked for, or a download rule the owner set — never because a delivered
+chain named them, since a chain carries metadata alone.
 
 ### 4.7 Orphans and cycles
 
@@ -932,15 +934,19 @@ Acceptance is one line:
 
 | cap | value | applies to |
 |---|---|---|
-| `max-blob` | 262.144 | bytes in one attachment |
+| `max-blob` | 16.777.216 | bytes in one attachment |
 | `max-attach` | 16 | attachments per message |
 | `max-name` | 256 | bytes of `name` |
 | `max-mime` | 128 | bytes of `mime` |
 
-`max-blob` is 256K rather than something round and large because a blob is
-answered over remote scry, which fragments the response into Ames packets, and a
-multi-megabyte fetch is a lot of packets for an operation with no
-partial-progress story.
+`max-blob` is what **one** remote-scry answer carries safely, because a blob is
+fetched whole: no chunking, no progress, no resume. The receiving runtime
+reassembles the answer and hands it to Arvo as one event, so the whole file lands
+in the event log and in the loom, with transient copies on the way. Measured
+between two ships on vere v4.6 with the default 2 GiB loom, the receiver already
+holding 1.67 GB: 16 MiB arrived intact and 64 MiB crashed the receiver's runtime.
+Larger files wait for chunking, which waits for 64-bit vere and on-disk atom
+storage.
 
 The incoming predicate is `+fits-attachments`, which applies `+attach-ok` per
 attachment:
@@ -1025,6 +1031,15 @@ NOT cull a blob spur, so every blob is bound at case 1 and a fetcher requests
 case 1 only. A publisher that grew on every idempotent-looking republish would
 push the binding off the case every fetcher asks for, and the attachment would
 become unfetchable by every peer, forever, with no error.
+
+**When to fetch is the receiver's decision** and not protocol. A receiver that
+fetches without being asked SHOULD do so only for a message whose verdict is
+`%verified`, keyed on the **signed author** and never on the ship that delivered
+the chain: an unverified `from` is anyone's claim, and the bytes a fetch
+receives are logged before they can be measured, so a sender's claimed `size`
+bounds only an honest sender. The reference receiver fetches on request, and on
+its own only under the owner's rules: ships the owner allowed, up to `max-blob`;
+other ships up to a size the owner sets, 0 by default; blocked ships never.
 
 **On arrival, the bytes MUST be re-hashed.** The reference receiver, in order:
 
@@ -1176,7 +1191,7 @@ As a noun: `[%auspex [versions [marks caps]]]`, where `caps` is a right-nested
 ten-tuple of atoms **in the order written above**. A version-1 nexus publishes
 
 ```
-[%auspex ~[1] ~[%auspex-chain] [262.144 16 1.000 100.000 1.000 100 64 128 128 256]]
+[%auspex ~[1] ~[%auspex-chain] [16.777.216 16 1.000 100.000 1.000 100 64 128 128 256]]
 ```
 
 - **The head is `%auspex`** and not a version number. Versioning lives in
@@ -1212,7 +1227,7 @@ compatibility mechanism must not do.
 The grub is bound in gall's remote-scry farm at
 
 ```hoon
-++  proto-spur  ^-(path /auspex/proto)
+++  proto-spur  ^-(path /auspex/protocol)
 ```
 
 and read by `%keen` at the spar path
@@ -1225,7 +1240,7 @@ and read by `%keen` at the spar path
   proto-spur
 ```
 
-Rendered: `/g/x/<case>/<agent>/''/1/auspex/proto`. Every segment means what the
+Rendered: `/g/x/<case>/<agent>/''/1/auspex/protocol`. Every segment means what the
 same segment means in [§5.4](#54-fetching-bytes), including the **empty
 segment**, which a path literal cannot spell and which MUST be built by cons.
 The page's mark MUST be **`%auspex-proto`**; a reader MUST discard anything else.
@@ -1234,30 +1249,37 @@ This is the **same permissionless read** an attachment's bytes get, for the same
 reason: the keen is the only channel that answers an un-granted peer, and there
 is nothing here worth checking a reader for.
 
-**Case, and republishing.** A spur never grown and never culled binds at
-**case 1**. A publisher MUST NOT `%grow` unconditionally: `+grow` assigns
-`las+1` on a non-empty fan, so a grow per deploy pushes `/proto` past the probe
-ceiling and it becomes unreadable by every peer, forever, with no error.
+**Case, and republishing.** A spur never grown binds at **case 1**, and every
+later `%grow` at the same spur binds one case higher (`las+1`). A publisher MUST
+NOT `%grow` unconditionally, since each grow spends a case, and MUST NOT cull
+`/protocol`.
 
-A reader SHOULD probe **cases 1 through 8**, with a deadline of **4 seconds**
-each. A blob fetch asks for case 1 alone, and the difference is deliberate: a
-blob is immutable and bound once, while `/proto` moves one case every time a
-ship changes its version ladder or its caps — a normal thing for a deployed
-protocol to do. A namespace read is answered from a cache or from the
-publisher's kernel with no agent in the loop, so a keen that is slow is a keen
-that is not coming; 8 × 4s is 32 seconds for a total miss, and those seconds
-hold queued mail on first contact — which is why the total, and not the
-per-case number, is what was held fixed.
+**A culled case keeps answering, then goes silent.** vere answers a namespace
+read from its own cache without asking Arvo, and never evicts a single entry
+(`io/mesa.c`), so a culled case goes on answering with the old noun until that
+cache overflows or the pier restarts. After that it does not answer at all,
+which a reader cannot tell apart from a case nothing was ever grown at. Earlier
+publishers culled at `/auspex/proto`, which is why this spur is new.
 
-So a publisher **reads back what is bound** — through the same keen a peer uses
-— and acts on the difference:
+A reader MUST therefore take the **highest** case that answers. The reference
+reader walks up from case 1, keeps the last `$proto` it could act on, and stops
+at the **first case that does not answer within 10 seconds** — the first case
+nothing is bound at yet — or at case 64. Every probe pays that one deadline,
+once a day per peer (`+proto-ttl`). The deadline is not shorter because a busy
+publisher's first, uncached answer took more than 4 seconds, and a walk that
+reads a slow case as the top reads the case below it. A blob fetch asks for
+case 1 alone, and the difference is deliberate: a blob is immutable and bound
+once, while `/protocol` moves one case every time a ship changes its version
+ladder or its caps.
+
+So a publisher **reads back what is bound** and acts on the difference:
 
 | bound value | action |
 |---|---|
 | nothing bound | grow. Binds at case 1. |
-| bound, and equal to what we now publish | **nothing.** A redeploy of unchanged content is free, which is what keeps this inside the probe ceiling. |
-| bound, and different | **cull, then grow.** Cull first: a reader takes the FIRST hit walking up from case 1, so an unculled case 1 would answer with the old noun forever and the new one would be unreachable behind it. |
-| bound, and unreadable | **nothing**, and say so. Growing on a read that failed burns a case for no information, which is how the ceiling is reached by accident. |
+| bound, and equal to what we now publish | **nothing.** A redeploy of unchanged content is free. |
+| bound, and different | **grow.** The new noun binds above every earlier one, and readers take the highest. |
+| bound, and unreadable | **nothing**, and say so. Growing on a read that failed burns a case for no information. |
 
 That is one grow per protocol change rather than per deploy, and it is why the
 publish/enforce window in [§6.3.1](#631-the-published-noun) is one deploy.

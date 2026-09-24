@@ -224,7 +224,7 @@ Refused, with the reason in a notification:
   the wire has no field for either: a Cc would silently become a second To
   and a Bcc would silently become a visible one. Put everyone in To, or send
   twice;
-- more than 16 attachments, or one over 262144 bytes (the file is named);
+- more than 16 attachments, or one over 16 MiB (16777216 bytes; the file is named);
 - a reply to (or forward of) a message whose verdict is **forged**: every
   copy the ship holds is forged, and the ship will not chain a message onto
   one;
@@ -265,10 +265,12 @@ button on the open message reading `✓`, `○` or `FORGED`.
 
 - Read state, the star and the flame are the only things that flow
   Thunderbird → ship besides a send.
-- A message is imported once. If an attachment's bytes had not been fetched
-  by the ship at that moment, its place holds a note saying so, and that note
-  is permanent for that import — open the thread in the web client to pull
-  the file.
+- A message is imported once, with the attachment bytes the ship holds at
+  that moment. The extension never asks the ship to fetch a file: which files
+  download on their own is set on the ship (Attachments in the web client).
+  A file the ship does not hold gets a note in its place, and that note is
+  permanent for that import — open the thread in the web client to pull the
+  file.
 - Copies of one id (one genuine, the rest forged) collapse to the
   highest-ranked verdict, with the count in `X-Auspex-Copies`. Mail clients
   have one message per `Message-ID` and no way to show two.

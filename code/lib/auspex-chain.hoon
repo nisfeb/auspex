@@ -212,6 +212,9 @@
     ::  is a set of ships and nothing else.
       [%save-list name=@t members=(set ship)]
       [%delete-list name=@t]
+    ::  %save-settings: the attachment settings, whole. Local state like
+    ::  a rule or a list, and an overwrite like them.
+      [%save-settings =settings]
     ::  %set-caps: SET WHAT THIS SHIP MAY REACH, DIRECTLY.
     ::
     ::    Two callers, and they are not the same kind of thing.
@@ -534,6 +537,33 @@
       members=(set ship)
   ==
 ::
+::  $settings: which attachments download ON THEIR OWN, and how much the
+::  blob store may hold. Local state at /mail/settings; never travels.
+::
+::    NOTHING DOWNLOADS ON ITS OWN BY DEFAULT: auto-size 0 and an empty
+::    allow list. Bytes reach this ship when the owner fetches them, or
+::    under a rule the owner set here - see +auto-fetch.
+::
+::    `auto-size` is the largest file fetched from a ship on NEITHER
+::    list. It only holds an honest sender to its claim: a remote-scry
+::    answer is logged whole before this ship can measure it, and the
+::    publisher decides what the answer is (up to 256 MiB under mesa).
+::    The ALLOW LIST is the protection that holds; `auto-size` is a
+::    courtesy for strangers, and 0 turns them off.
+::
+::    `budget` is the blob store's size in bytes, and it is a setting
+::    because it is this ship's memory: every stored blob lives in the
+::    loom. The default suits vere's default 2 GiB loom; an owner who
+::    gave the pier more can give the store more.
+::
++$  settings
+  $:  %0
+      auto-size=@ud
+      allow=(set ship)
+      block=(set ship)
+      budget=$~(default-budget @ud)
+  ==
+::
 ::  the capacity limits. Arms rather than constants in the nexus so the
 ::  predicates below and their callers cannot drift apart.
 ::
@@ -606,26 +636,35 @@
 ::
 ::  the attachment limits.
 ::
-::    max-blob is 256K rather than something round and large because a
-::    blob is answered over remote scry, which fragments the response
-::    into ames packets; a multi-megabyte keen is a lot of packets for a
-::    fetch that has no partial-progress story. Raise it when the fetch
-::    has one.
+::    max-blob is what ONE remote-scry answer carries safely, because a
+::    blob is fetched whole: no chunking, no progress, no resume. The
+::    receiving runtime reassembles the answer in C and injects it as one
+::    event, so the file lands in the event log and, cued, in the loom,
+::    with transient copies on the way. Measured 2026-09-24 between two
+::    fake ships on vere v4.6 with the default 2 GiB loom, the receiver
+::    already holding 1.67 GB: 16 MiB arrived intact; 64 MiB crashed the
+::    receiver's runtime on its next snapshot. Chunking is deferred until
+::    vere64 and on-disk atom storage ship (vere PR #985).
 ::
-::    max-blobs bounds this ship's blob store. It cannot be weaponised:
-::    bytes only ever enter through a LOCAL action (an upload or
-::    %fetch-blob), never through a delivered chain, which carries
-::    metadata alone.
+::    max-blobs bounds this ship's blob store. Bytes only ever enter
+::    through a LOCAL decision - an upload, a %fetch-blob, or a rule the
+::    owner set in $settings - never because a chain arrived, since a
+::    delivered chain carries metadata alone.
 ::
-++  max-blob     262.144      ::  bytes in one attachment
+++  max-blob     16.777.216   ::  bytes in one attachment (16 MiB)
 ++  max-attach   16           ::  attachments per message
 ++  max-name     256          ::  bytes of filename
 ++  max-mime     128          ::  bytes of content type
 ++  max-blobs    1.000        ::  blobs this ship will store
-::  and the bound the spec actually asked for, which a count is not:
-::  1.000 quarter-megabyte blobs is 256MB, and a store bounded only by
-::  count is not bounded by storage.
-++  max-blob-bytes  33.554.432
+::  +default-budget: the blob store's size until the owner sets one. A
+::  count alone bounds nothing, so the store is bounded in bytes; four
+::  largest files, because every stored byte is loom.
+++  default-budget  67.108.864
+::  +max-budget: the most $settings may give the store. vere v4.6's
+::  largest loom is 16 GiB (--loom 34), so nothing larger can be held.
+++  max-budget  17.179.869.184
+::  +max-listed: ships on one of the allow and block lists.
+++  max-listed  256
 ::
 ::  +blob-hash: the content address of a file's bytes.
 ::
@@ -793,16 +832,17 @@
           refs=(set @uv)
           need=@ud
           bytes=@ud
+          budget=@ud
       ==
   ^-  [ok=? drop=(list @uv)]
   =/  cnt=@ud    (add (lent held) need)
   =/  weight=@ud  (add (held-bytes held) bytes)
-  ?:  &((lte cnt max-blobs) (lte weight max-blob-bytes))
+  ?:  &((lte cnt max-blobs) (lte weight budget))
     [& ~]
   =/  dead=(list blob-row)  (unreferenced held refs)
   =|  drop=(list @uv)
   |-  ^-  [ok=? drop=(list @uv)]
-  ?:  &((lte cnt max-blobs) (lte weight max-blob-bytes))
+  ?:  &((lte cnt max-blobs) (lte weight budget))
     [& (flop drop)]
   ?~  dead  [| ~]
   %=  $
@@ -810,6 +850,75 @@
     cnt     (dec cnt)
     weight  (sub weight (min weight size.i.dead))
     drop    [h.i.dead drop]
+  ==
+::
+::  +auto-fetch: does an arriving attachment download on its own?
+::
+::    Only a %verified message's, because the allow list names ships and
+::    an unverified `from` is anyone's claim. Keyed on the SIGNED author,
+::    never on whoever delivered the chain. A blocked ship never; an
+::    allowed one up to max-blob; anyone else up to `auto-size`, which is
+::    0 unless the owner set it.
+::
+::    `held` is what the store already weighs. Automatic downloads stop
+::    at three quarters of the budget, so they cannot fill the store and
+::    leave the owner's own fetch refused.
+::
+::    ponytail: a fixed quarter kept for manual fetches, not a tracked
+::    share; track which blobs came in automatically if the quarter
+::    ever proves the wrong split.
+::
+++  auto-fetch
+  |=  [s=settings author=ship v=verdict size=@ud held=@ud]
+  ^-  ?
+  ?&  ?=(%verified v)
+      !(~(has in block.s) author)
+      (lte size ?:((~(has in allow.s) author) max-blob auto-size.s))
+      (lte (add held size) (div (mul budget.s 3) 4))
+  ==
+::
+::  +auto-picks: which attachments in `c` download on their own, and
+::  from whom - each one's signed author. `held` is the store's weight
+::  now, and every pick adds its size before the next is weighed, so
+::  one delivery cannot pass the automatic share between them.
+::
+++  auto-picks
+  |=  [s=settings c=chain vs=(map [msg-id @ux] verdict) held=@ud]
+  ^-  (list [h=@uv who=ship])
+  =/  cands=(list [h=@uv who=ship v=verdict size=@ud])
+    %-  zing
+    %+  turn  c
+    |=  m=msg
+    =/  v=verdict  (~(gut by vs) [(id unsigned.m) sig.m] %unverified)
+    %+  turn  attachments.unsigned.m
+    |=(a=attachment [hash.a from.unsigned.m v size.a])
+  =|  out=(list [h=@uv who=ship])
+  |-  ^-  (list [h=@uv who=ship])
+  ?~  cands  (flop out)
+  ?.  (auto-fetch s who.i.cands v.i.cands size.i.cands held)
+    $(cands t.cands)
+  %=  $
+    cands  t.cands
+    held   (add held size.i.cands)
+    out    [[h.i.cands who.i.cands] out]
+  ==
+::
+::  +settings-ok: may these settings be stored?
+::
+::    A budget below one largest file could never hold what it is meant
+::    to; one above the largest loom could never be honoured. A ship on
+::    both lists is a contradiction the owner should hear about rather
+::    than one list silently winning.
+::
+++  settings-ok
+  |=  s=settings
+  ^-  ?
+  ?&  (lte auto-size.s max-blob)
+      (gte budget.s max-blob)
+      (lte budget.s max-budget)
+      (lte ~(wyt in allow.s) max-listed)
+      (lte ~(wyt in block.s) max-listed)
+      =(~ (~(int in allow.s) block.s))
   ==
 ::
 ::  +blob-spur: where a blob is bound in this ship's remote-scry farm.
@@ -1304,9 +1413,29 @@
   =/  acc  old
   |-  ^-  (map [msg-id @ux] verdict)
   ?~  new  acc
-  ?:  ?=(?(%verified %forged) (~(gut by acc) -.i.new %unverified))
+  ?:  (settled (~(gut by acc) -.i.new %unverified))
     $(new t.new)
   $(new t.new, acc (~(put by acc) -.i.new +.i.new))
+::
+::  +settled: a verdict no later check can change - the rule +freeze
+::  keeps by. %unverified is only a key we did not have.
+::
+++  settled
+  |=  v=verdict
+  ?=(?(%verified %forged) v)
+::
+::  +unsettled: the copies in a chain still worth verifying, given the
+::  verdicts already held. A copy held %verified or %forged would be
+::  checked only for +freeze to discard the answer, so it is skipped:
+::  every delivery carries the whole chain, and checking it all cost an
+::  ed25519 verify per held message and a key scry per signer on every
+::  reply to a long thread.
+::
+++  unsettled
+  |=  [held=(map [msg-id @ux] verdict) c=chain]
+  ^-  chain
+  %+  skip  c
+  |=(m=msg (settled (~(gut by held) [(id unsigned.m) sig.m] %unverified)))
 ::
 ::  the input caps, as predicates. The agent wraps each in its own tall ~|
 ::  and ?>, since the label is what tells a nacked poke apart from any
@@ -1698,6 +1827,17 @@
       ['body' [%s body.d]]
       ['prev' ?~(prev.d ~ [%s (scot %uv u.prev.d)])]
       ['at' (time:enjs:format at.d)]
+  ==
+::
+++  settings-json
+  |=  s=settings
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['auto-size' (numb:enjs:format auto-size.s)]
+      ['allow' (ships-json allow.s)]
+      ['block' (ships-json block.s)]
+      ['budget' (numb:enjs:format budget.s)]
+      ['max-blob' (numb:enjs:format max-blob)]
   ==
 ::
 ++  rule-json
@@ -2098,7 +2238,7 @@
   ?.  %+  levy  c
       |=  x=msg
       (levy attachments.unsigned.x |=(a=attachment (lte size.a max-blob.k)))
-    `(rap 3 ~[w ' accepts an attachment of at most ' (scot %ud max-blob.k) ' bytes'])
+    `(rap 3 ~[w ' accepts an attachment of at most ' (crip (a-co:co max-blob.k)) ' bytes'])
   ?.  (fits-length c max-chain.k)
     `(rap 3 ~[w ' accepts at most ' (scot %ud max-chain.k) ' messages in a chain'])
   ?.  (fits-recipients c max-to.k)
@@ -2122,7 +2262,13 @@
 ::  there is exactly one /proto per ship and its address must be
 ::  constructible by a peer that knows nothing but the ship.
 ::
-++  proto-spur  ^-(path /auspex/proto)
+::    /auspex/protocol and not /auspex/proto: every ship that ran an
+::    earlier Auspex CULLED cases at /auspex/proto on each republish, and
+::    a culled case goes silent once vere's cache drops it - which a
+::    reader cannot tell from "not published yet", so the walk in
+::    +keen-proto would stop short on it. This spur is never culled.
+::
+++  proto-spur  ^-(path /auspex/protocol)
 ::
 ::  +proto-keen-path: the ames spar path of a PEER's /proto. MUST mirror
 ::  +proto-spur, and carries the same empty segment +blob-keen-path

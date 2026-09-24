@@ -261,7 +261,7 @@
     (expect-eq !>(max-name:auspex) !>((jnum (jget k 'max_name'))))
     (expect-eq !>(max-mime:auspex) !>((jnum (jget k 'max_mime'))))
     (expect-eq !>(max-blobs:auspex) !>((jnum (jget k 'max_blobs'))))
-    (expect-eq !>(max-blob-bytes:auspex) !>((jnum (jget k 'max_blob_bytes'))))
+    (expect-eq !>(default-budget:auspex) !>((jnum (jget k 'default_budget'))))
   ==
 ::
 ::  THE SET NOUN. `to` is a (set ship) and +sham hashes the TREAP, so a
