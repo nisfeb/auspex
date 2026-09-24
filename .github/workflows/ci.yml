@@ -1,7 +1,8 @@
 name: CI
 
 # PR-gating checks that need no ship: the desktop shell's unit tests and
-# static checks, plus the one cross-language check nothing else can make.
+# static checks, the Thunderbird add-on's unit tests, plus the one
+# cross-language check nothing else can make.
 # release.yml calls this same file as its gate, so the two cannot drift.
 
 on:
@@ -73,3 +74,17 @@ jobs:
         run: npm ci && npm run build
       - name: no drift in the served artifact
         run: git diff --exit-code code/nex/auspex/ui-app
+
+  thunderbird:
+    name: thunderbird add-on — node --test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # No dependencies: the add-on is plain ES modules and node:test. One of
+      # these reads ui/ and desktop/ to hold all three clients to one change
+      # stream, which is why it runs from the whole checkout.
+      - name: unit tests
+        run: node --test thunderbird/test/*.test.js
