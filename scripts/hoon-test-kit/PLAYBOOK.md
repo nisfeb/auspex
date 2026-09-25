@@ -54,6 +54,14 @@ Each mutant ends in one of four ways:
   first `equal` regex matched the `=(` inside `|=(` gates: 66 of its 87
   mutants never compiled, so most of that op silently never ran. Above a
   handful of no-builds, fix the pattern and rerun that op alone.
+- **A verdict that changes between `--only <arm>` and the full run means
+  the run is contaminated.** Until 2026-09-25 the runner left each lib's
+  last mutant on the desk when it moved on to the next lib, so every later
+  mutant ran against two breaks: on the calendar, `rules`' last mutant
+  "killed" every `rrule` mutant, and `rrule`'s last one (which did not
+  build) made every later mutant a no-build. Fixed: the previous lib is
+  restored before each mutant. **Rerun any multi-lib pass made before the
+  fix** (auspex's included): its killed counts are too high.
 - **Some no-builds are expected.** Swapping `?.`/`?:` after a `?=` test
   breaks the type narrowing the other branch relies on, so those mutants
   can't compile. That is correct. The same goes for a tall `?&` condition
@@ -98,6 +106,24 @@ What is left is a real gap, usually one of these:
 A check that is only defensive, reachable only if some earlier validation
 was skipped, can stay untested. Say so in the triage notes.
 
+## Writing tests: traps
+
+- **`weld`/`zing` over literal tapes can `fuse-loop`** the type checker
+  (`;:  weld  "a"  x  "b"  ==` did, and so did `(zing (reap n "é"))`
+  inside a `weld`). Cast: `` `tape`(zing `(list tape)`(reap n "é")) ``.
+- **`%+  expect  !>` is wrong**: `expect` takes one vase. Write
+  `(expect !>(…))`.
+- **`?=(%a -.(expr))` and `*mold(field x)` do not parse**: `?=` needs a
+  wing, and a bunt takes no changes. Bind the value with `=/` first.
+  (From auspex.)
+- **Before trusting a count, check what a structure really holds.** A
+  day span puts both its edges in the calendar's index, so a year of
+  dates is two keys, not one. The first run of a new suite is as likely to
+  find a test's wrong assumption as a bug; read the expected/actual.
+- **A new suite can find real bugs before any mutant runs.** The
+  calendar's first run found `FREQ=weekly` refused (RFC 5545 values are
+  case-insensitive).
+
 ## Writing the missing test
 
 - **Put it in the test that already owns the rule.** Add a new test only
@@ -123,11 +149,57 @@ app is a couple of hundred commits.
   `--loom 33` with `loom: external fault`, about 150 test-desk commits
   into a day, while another session rebuilt a nexus on the same ship.
 - **A crash is stop-and-report.** Only the ship's owner restarts a pier.
+- **Never type into a dojo someone may be using.** `|new-desk` and `|mount`
+  are the owner's to run: if the pane shows input you did not send (a
+  `|pack`, a half-typed line), stop and ask.
+- **In a shell tool, `rm` may be `rm -i`** and wait forever on a prompt,
+  and `pkill -f <pattern>` kills the tool's own shell when the pattern is
+  in its command line. Use `rm -f`, and put a `pkill` in a script file.
 - **A clean mount is not a clean desk.** After a crash the mount can hold
   clean files while clay still holds the last mutant. rsync then sees no
   change and never commits. `NOSYNC=1 hoon-test.sh <pier>` commits the
   mount as it stands and settles it. `hoon-mutate.py` restores this way
   itself when a run ends.
+
+## Testing nexus code
+
+A grubbery nexus mixes code that touches the tree with code that doesn't,
+and `-test` can build neither while it sits in the nexus. Three steps, in
+order of value per hour. Auspex took the first two on 2026-09-25
+(`auspex/docs/hoon-testing.md`, "Reaching the nexus").
+
+1. **Move the pure arms into a lib.** Split the nexus core into arms. An arm
+   is a fiber if it uses `;<`, `bind:m`, `pure:m` or `form:m`, and it
+   touches grubbery if it names `tarball`, `nexus`, `rail`, `dart` or
+   `bowl`. Keep the arms that are neither and whose every callee also
+   qualifies, so you have a closed set. Move the ones that carry logic,
+   usually the HTTP JSON, view and filter rules, query parsing and storage
+   layout, into a lib the kit already builds.
+   - **Leave a one-line alias** in the nexus for each (`++  x  x:uc`), so
+     no call site changes. Renaming call sites collides with faces that
+     share an arm's name.
+   - **Prove the nexus unchanged on a ship.** Capture every read route's
+     JSON, put the old code back, capture again, and diff. Auspex: 50
+     routes, byte-identical.
+   - Then test the moved arms and mutate them like any lib.
+2. **A route script on a live dev ship.** Drive every route the clients
+   use, the way they use them, including every refusal the API promises.
+   This is the only layer that sees wiring: a route pointed at the wrong
+   handler, a missing grant, a mark the nexus doesn't hold. Tag everything
+   it creates and delete it all in a `finally`, restore any settings, and
+   poll after writes, since the writer applies them after the route
+   answers. **Prove it bites**: rename one route on the ship, and exactly
+   that check must fail.
+   - Log in with `ship-cookie.sh <pier> <base-url> <cookie-jar>`. It
+     fetches `+code` over `conn.sock`, posts it on stdin (never in argv,
+     never printed), keeps only the cookie, and refuses when the port
+     answers as a different ship. Fake ships move ports on restart.
+3. **Drive the fibers.** A fiber is `$-(input output)` (`lib/nexus.hoon`),
+   the same shape as a spider strand, so a test can run one: feed it an
+   input, check the darts it emits, answer them, and repeat until `%done`
+   or `%fail`. That reaches the writer's ordering and the checks that live
+   only in fibers. It needs the nexus built on the test desk, which needs
+   `DIALECT=grubbery`.
 
 ## Traps in building the runner
 
@@ -139,7 +211,13 @@ changing them.
   `syntax error {1 N}`. The cord cannot contain `'`.
 - **In a bash heredoc, escape Hoon's `$(` as `\$(`** (and backticks), or
   bash runs it.
-- **`~[ x]` with a leading space is a syntax error.** Watch generated lists.
+- **`~[ x]` with a leading space is a syntax error, and so is `~[]`.**
+  An empty generated list must be written `~`.
+- **A backslash escape in the thread's hoon is read by the outer cord.**
+  `"\0a"` arrives as a raw newline inside a tape, and the parse fails.
+  Write `(trip 10)`.
+- **A product that is itself `[%leaf tape]` arrives bare** (`%leaf 79 75 …
+  0`, no brackets), unlike a failed thread's leaf. The report decodes both.
 - **The commit lands after the poke acks.** The runner polls `/cz/<desk>`
   until the hash moves, and skips the commit when nothing changed, or it
   would wait forever.

@@ -275,7 +275,7 @@ Checks (all must pass):
 - `curl -s -o /dev/null -w '%{http_code}' localhost:8081/apps/grubbery` → 403 anon; logged in: the launcher HTML.
 - Logged in, `/grubbery/tiles` lists **Lattice** and **Auspex**, icons served (`/grubbery/tiles/icon/auspex` and lattice's).
 - `/apps/lattice` and `/apps/auspex` → 403 anon, 200 logged in.
-- Tests at the explicit rev: `-test /~wex/grubbery/<rev>/tests/lib/auspex-chain ~` (104), `…/auspex-web ~` (51), `…/auspex-vectors ~` (15), lattice's suites as their README lists.
+- Tests at the explicit rev: `-test /~wex/grubbery/<rev>/tests/lib/auspex-chain ~` (104), `…/auspex-web ~` (52), `…/auspex-vectors ~` (15), lattice's suites as their README lists.
 - Cross-ship: send `~wex → ~feb` with an attachment; on `~feb` it is `verified`, the blob fetches; reply back `verified`. Discovery trace: `discovery: ~feb speaks 1`.
 - Lattice smoke: a page renders, the MCP tool count is 12 (`check_bin` or the MCP list).
 - Note the ghost-tile count (wex showed 12 tiles, 4 live). This is the number

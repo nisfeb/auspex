@@ -4,9 +4,13 @@ Run a Hoon app's unit suites on a running fake ship **in seconds, with no
 dojo**, and check that they actually catch breaks.
 
 - `hoon-test.sh`: syncs the libs under test, their tests and fixtures into
-  a desk that holds nothing else, commits it, and runs `%test` over the
-  pier's `conn.sock`. On auspex, 156 tests take about 7 s, against roughly
-  two minutes for a commit to the app's own desk.
+  a desk that holds nothing else, commits it, runs every `test-` arm over
+  the pier's `conn.sock`, and prints each test's verdict (with expected and
+  actual for a failure) on stdout. On auspex, 156 tests take about 7 s,
+  against roughly two minutes for a commit to the app's own desk.
+- `grubbery_clay.py`: for a grubbery app, rewrites each lib's grubbery
+  imports (`/<`, `/&`) into clay's on the way to the test desk, so libs
+  written for grubbery's builder test unchanged.
 - `hoon-mutate.py`: breaks one thing at a time in those libs (a boundary,
   a guard's condition, a branch, an equality, a flag), reruns the suites,
   and reports every break that no test noticed.
@@ -61,7 +65,10 @@ holds plain `KEY="value"` lines only. Paths are relative to the file.
 | key | meaning |
 |---|---|
 | `DESK` | the test desk, e.g. `auspex-test`. Never the app's own desk. |
-| `LIBS` | the libs under test, space-separated. Each lands at `lib/<name>.hoon` and is what `hoon-mutate.py` mutates. List any lib they import too. |
+| `LIBS` | the libs under test, space-separated, each `src` or `src=dest`. With no dest a lib lands at `lib/<name>.hoon` (for a grubbery app, at its path under `CODE`). These are what `hoon-mutate.py` mutates. List any lib they import too. |
+| `DIALECT` | `clay` (default), or `grubbery` for a desk built by grubbery: its libs are translated on the way (below). |
+| `CODE` | grubbery only: the code tree's root in the repo (e.g. `code`), which `/lib/...` imports are relative to. |
+| `PRELUDE` | grubbery only: faces grubbery puts in every lib's subject that the libs use (e.g. `tarball`). Each becomes a `/+` at the top of every translated lib; ship a lib of that name with `FILES` (a shim of just the molds used is enough). |
 | `TESTS` | a directory; every `*.hoon` in it lands in `tests/lib/`. |
 | `FILES` | optional fixtures, landing at the same path on the desk, or `src=dest` to move one (`code/sur/x.hoon=sur/x.hoon`). |
 | `MARKS` | marks copied from `%base` at setup. Default `json mime`: a `/*` of a json file needs both. |
@@ -87,14 +94,43 @@ scripts/hoon-test-kit/hoon-mutate.py <pier> --only arm-a,arm-b       # recheck a
 | code | meaning |
 |---|---|
 | 0 | every test passed |
-| 1 | a test failed. The names are in the **ship's terminal**, not here: `%test` slogs them and returns only a flag. |
-| 3 | a lib did not build |
+| 1 | a test failed or crashed: the `FAILED`/`CRASHED` lines above say which, with expected and actual |
+| 2 | nothing ran, or the run did not finish: the output says why |
+| 3 | a lib did not build (named). The compiler's message is only on the ship's terminal: clay slogs it and answers `~`. |
 | 4 | the ship did not answer. This is never a test verdict. |
 
 `hoon-mutate.py` needs about 10 s **and one commit** per mutant, and every
 commit costs the ship loom. Size a run with `--list` first, and run long
 ones on a ship nothing else is building on (PLAYBOOK.md, "Look after the
 ship").
+
+## A grubbery app
+
+Grubbery builds a desk's code itself, and its imports are not clay's:
+
+| grubbery | on the test desk |
+|---|---|
+| `/<  face  /lib/a/b.hoon` | `/+  face=a-b` (ford finds `lib/a/b.hoon`) |
+| `/<  *  /lib/a.hoon` | `/+  *a` |
+| `/&  face  /lib/dir/` | one `/*  face-N  %mime  /lib/dir/<file>/<ext>` per file, and `face` bound to the `(axal (map @ta mime))` grubbery hands over; the files are copied along |
+| `/&  face  /lib/x/f.txt` | `/*  face  %mime  /lib/x/f/txt` |
+
+Other runes (`/$`, `/%`) and relative paths are refused by name, not
+guessed at. Set `DIALECT=grubbery`, `CODE`, and `PRELUDE` for the faces
+grubbery supplies (see the calendar's `hoon-test.conf` for a whole
+example). A `/&` of text files needs their marks: `MARKS="json mime txt txt-diff"`.
+The first build of a lib with hundreds of `/*` imports takes a minute or
+more; later runs reuse it.
+
+## Logging in without a dojo
+
+```sh
+ship-cookie.sh <pier> <base-url> <cookie-jar>
+```
+
+It gets the ship's `+code` over `conn.sock`, logs in, and writes a curl
+cookie jar (mode 600) for route scripts. The code is never printed or
+passed in argv. It refuses when `<base-url>` answers as a different ship.
 
 ## Claude Code
 

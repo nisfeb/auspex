@@ -37,9 +37,15 @@ scripts/hoon-test-kit/hoon-mutate.py <pier> --ops branch,equal,flag
 scripts/hoon-test-kit/hoon-mutate.py <pier> --only <arm>,<arm>   # recheck fixed arms
 ```
 
-Exit codes: **1** means a test failed (the names are in the ship's terminal,
-not stdout), **3** means a lib did not build, **4** means the ship did not
-answer. **4 is never a test result.** Stop and report it.
+Each test prints `OK`, `FAILED` (with expected/actual) or `CRASHED` (with
+its trace) on stdout. Exit codes: **1** means a test failed, **2** that
+nothing ran, **3** that a lib did not build (its compiler message is only on
+the ship's terminal), **4** that the ship did not answer. **4 is never a
+test result.** Stop and report it.
+
+A **grubbery** app (libs importing with `/<` or `/&`) needs
+`DIALECT=grubbery`, `CODE` and `PRELUDE` in `hoon-test.conf`: the kit
+translates its libs for clay. README.md, "A grubbery app".
 
 ## Rules
 

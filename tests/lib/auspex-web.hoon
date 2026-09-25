@@ -334,6 +334,15 @@
 ++  test-safe-name-strips-quotes-and-separators
   (expect-eq !>('abc') !>((safe-name:web '"a;/b\\c\'' '0v1')))
 ::
+::  printable ASCII is the whole range: `~` (0x7e) is the last byte kept,
+::  and DEL and every byte of a UTF-8 character go, so a name written in
+::  a non-Latin script comes out as the hash (the stated cost).
+++  test-safe-name-keeps-printable-ascii-only
+  ;:  weld
+    (expect-eq !>('caf~.txt') !>((safe-name:web 'caf\c3\a9\7f~.txt' '0v1')))
+    (expect-eq !>('0vhash') !>((safe-name:web '\d0\b4\d0\b0' '0vhash')))
+  ==
+::
 ::  nothing survivable is the hash, never an empty filename.
 ++  test-safe-name-falls-back-when-nothing-survives
   (expect-eq !>('0vhash') !>((safe-name:web '"""' '0vhash')))

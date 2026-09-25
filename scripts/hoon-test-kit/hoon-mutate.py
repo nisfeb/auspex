@@ -12,6 +12,8 @@ exactly what ^C in its dojo does.
 import argparse, os, re, shlex, signal, subprocess, sys, time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, KIT)
+import grubbery_clay  # noqa: E402
 
 
 def find_conf():
@@ -42,7 +44,34 @@ CONF = find_conf()
 ROOT = os.path.dirname(CONF)
 _c = read_conf(CONF)
 DESK = _c['DESK']
-LIBS = [(f'{ROOT}/{p}', os.path.basename(p)[:-len('.hoon')]) for p in _c['LIBS'].split()]
+DIALECT = _c.get('DIALECT', 'clay')
+CODE = f"{ROOT}/{_c.get('CODE', '')}"
+PRELUDE = _c.get('PRELUDE', '').split()
+
+
+def lib_dest(entry):
+    """Where a LIBS entry lands on the desk, as hoon-test.sh puts it."""
+    if '=' in entry:
+        return entry.split('=', 1)[1]
+    if DIALECT == 'grubbery':
+        return os.path.relpath(f'{ROOT}/{entry}', CODE)
+    return 'lib/' + os.path.basename(entry)
+
+
+# (source path, desk-relative dest, name shown in results)
+LIBS = [(f"{ROOT}/{e.split('=', 1)[0]}", lib_dest(e), lib_dest(e)[len('lib/'):-len('.hoon')])
+        for e in _c['LIBS'].split()]
+
+
+def put_lib(pier, src, dest, text=None):
+    """A lib onto the desk's mount: the source, or a mutant's text of it.
+    A grubbery lib is translated on the way, exactly as a sync does."""
+    path = f'{pier}/{DESK}/{dest}'
+    if DIALECT == 'grubbery':
+        grubbery_clay.install(CODE, src, path, f'{pier}/{DESK}', PRELUDE, text)
+        return
+    with open(path, 'w') as f:
+        f.write(open(src).read() if text is None else text)
 SWAP = {'lte': 'lth', 'lth': 'lte', 'gte': 'gth', 'gth': 'gte'}
 
 
@@ -118,7 +147,7 @@ MENU = {op.__name__: op for op in [boundary, conjunct, branch, equal, flag]}
 
 
 def mutants(menu):
-    for path, lib in LIBS:
+    for path, _, lib in LIBS:
         lines = open(path).readlines()
         for op in menu:
             for n, what, edit in op(lines):
@@ -162,10 +191,16 @@ def main():
     if run(a.pier).returncode != 0:
         sys.exit('the suites fail on the clean libs; fix that first')
     tally, survivors = {}, []
+    last = None
     try:
         for i, (lib, line, arm, what, text) in enumerate(todo, 1):
-            with open(f'{a.pier}/{DESK}/lib/{lib}.hoon', 'w') as f:
-                f.write(text)
+            src, dest = next((p, d) for p, d, n in LIBS if n == lib)
+            # one mutant at a time: the lib the last mutant broke goes back
+            # to clean first, or every later mutant runs against two breaks
+            if last and last != (src, dest):
+                put_lib(a.pier, *last)
+            put_lib(a.pier, src, dest, text)
+            last = (src, dest)
             t0 = time.time()
             r = run(a.pier, {'NOSYNC': '1', 'TEST_T': '120'})
             if r.returncode == 4:  # no answer: the ship is down, stop here
@@ -185,9 +220,8 @@ def main():
         # Write the clean libs AND force the commit. A sync alone is not
         # enough: if the mount already matches the repo, rsync reports no
         # change and the desk keeps the last mutant it committed.
-        for path, lib in LIBS:
-            with open(path) as src, open(f'{a.pier}/{DESK}/lib/{lib}.hoon', 'w') as dst:
-                dst.write(src.read())
+        for src, dest, _ in LIBS:
+            put_lib(a.pier, src, dest)
         if run(a.pier, {'NOSYNC': '1'}).returncode != 0:
             print('could not restore the clean libs on the ship; once it is up, run '
                   'NOSYNC=1 hoon-test.sh <pier>')

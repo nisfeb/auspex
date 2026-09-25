@@ -311,11 +311,17 @@ The first run corrected two of my own assumptions: `whoami`'s `caps` is
 `0v1.2345` is not a valid `@uv` (groups after the first are 5 digits), so
 it's a 400, and only a well-formed id that doesn't exist gets a 404.
 
-**Web-lib mutation verdicts are void.** `calendar-df` found that
+**The web lib, rerun on the fixed runner.** `calendar-df` found that
 `hoon-mutate.py` left the previous lib's last mutant on the desk when a run
-moved to the next lib, so every `auspex-web` mutant ran against two breaks.
-The chain lib is mutated first, so its verdicts stand; the web lib's "no
-survivors" must be rerun once the kit's fix lands.
+moved to the next lib, so every `auspex-web` mutant had run against two
+breaks and the earlier "no survivors" meant nothing. On the fixed runner:
+30 mutants, 27 killed, 1 no-build, and **2 survived**, both at
+`name-bytes`'s upper bound, `(lte c 0x7e)`. The comment promises that
+every byte above ASCII is dropped from a download's filename, and no test
+sent one. `test-safe-name-keeps-printable-ascii-only` pairs `~` (0x7e,
+kept) with DEL and UTF-8 bytes (dropped), and all 9 `name-bytes` mutants
+now die. **A run over more than one lib is only as good as its isolation:
+check that the runner restores each lib before mutating the next.**
 
 ## Porting to another app
 
