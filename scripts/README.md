@@ -65,3 +65,24 @@ user for nothing. Trust that direction less: a road built from an app-local
 path constant (`[%& %| public-grp]`) is resolved, but a road assembled some
 other way will read as unreached when it is not. Never delete a declared
 road on this tool's word alone.
+
+## hoon-test.sh — the Hoon suites in seconds, without a dojo
+
+```
+scripts/hoon-test.sh <pier> [setup | suite ...]
+```
+
+Runs `tests/lib/*` on a `%auspex-test` desk that holds only the libs and
+their tests, over the pier's `conn.sock`. About 7 seconds where a commit to
+`%grubbery` took two minutes. Setup and the reasons behind it are in
+`docs/hoon-testing.md`.
+
+## hoon-mutate.py — which checks does no test notice?
+
+```
+scripts/hoon-mutate.py <pier> [--only ARM,...] [--list]
+```
+
+Breaks one thing in the libs at a time (a boundary, a guard's condition),
+runs the suites on the test desk, and lists every break that survived. See
+`docs/hoon-testing.md` for the first run's findings.

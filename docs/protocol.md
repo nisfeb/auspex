@@ -1638,7 +1638,9 @@ written by the generator straight into clay and copied out of the mount byte for
 byte, and a character lost anywhere in it fails a test on the ship that produced
 it.
 
-**15 tests.** Run it with `-test`, alongside the main suite:
+**15 tests.** `scripts/hoon-test.sh <pier>` runs all three suites on a test
+desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
+alongside the main suite:
 
 ```
 -test /=grubbery=/tests/lib/auspex-chain ~     ::  90 tests
