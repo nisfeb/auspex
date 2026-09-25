@@ -2849,4 +2849,27 @@
       ' other recipient'  ?:(=(1 (lent t.bad)) '' 's')  ' refused)'
   ==
 ::
+::
+::  +rise-json / +de-rise: the crash record a long-lived fiber keeps beside
+::  itself (nex/auspex/app, +rise-later): crashes running, the last one,
+::  and when the wait ends. Times are unix MILLISECONDS both ways (+time
+::  writes ms; +di reads ms, +du would read seconds and put the wake in
+::  the year 58704). Anything that doesn't read back is ~, and the caller
+::  treats that as no record.
+::
+++  rise-json
+  |=  [n=@ud last=@da until=@da]
+  ^-  json
+  %-  pairs:enjs:format
+  :~  ['n' (numb:enjs:format n)]
+      ['last' (time:enjs:format last)]
+      ['until' (time:enjs:format until)]
+  ==
+::
+++  de-rise
+  |=  j=json
+  ^-  (unit [n=@ud last=@da until=@da])
+  %-  mole  |.
+  %.  j
+  (ot:dejs:format ~[n+ni:dejs:format last+di:dejs:format until+di:dejs:format])
 --

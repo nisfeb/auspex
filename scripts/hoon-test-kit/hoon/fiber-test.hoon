@@ -6,9 +6,11 @@
 ::    right answer in a test, so a test sees what the fiber DID (every dart
 ::    it sent, how it stopped) without a ship:
 ::
+::    - a dart to a road the $world refuses is vetoed;
 ::    - a poke of /sys/bowl.sig (now, our, entropy) is answered from the
 ::      $world, the way grubbery answers it: a %poke back, and an ack;
-::    - every other poke is acked, as if it landed.
+::    - a poke with a mark the $world nacks is refused (%pack with err);
+::    - every other poke is acked, as if it landed, and a %make is made.
 ::
 ::    Anything else (a peek, a keen, a timer) is left unanswered, and the
 ::    run stops %wait with the fiber blocked on it. +feed answers it and
@@ -20,8 +22,13 @@
 ::
 /+  nexus, tarball
 |%
-+$  world  [now=@da eny=@uvJ our=ship]
-++  a-world  `world`[~2026.1.1 0v1 ~zod]
+::  refuse: roads a weir refuses (a path prefix of the target, e.g.
+::  /sys/behn or /sys/bowl.sig). A dart to one is answered %veto, which is
+::  how grubbery answers a road outside the weir.
+::  nack: poke marks whose pokes are refused on consumption, the way a
+::  crashed, waiting fiber refuses them (a %pack carrying an error).
++$  world  [now=@da eny=@uvJ our=ship refuse=(list path) nack=(list blot:tarball)]
+++  a-world  `world`[~2026.1.1 0v1 ~zod ~ ~]
 ::
 +$  intake  intake:fiber:nexus
 +$  trail
@@ -30,6 +37,7 @@
       err=tang                  ::  %fail: the fiber's error
       state=vase                ::  the fiber's state when it stopped
       queue=(list intake)       ::  answers not yet taken
+      here=process:fiber:nexus  ::  the process as it stopped, for +feed
   ==
 ::
 ::  +run: start a process (a spool given its prod) with this state, and
@@ -43,9 +51,9 @@
 ::  +feed: hand a stopped run the answer it is waiting for, and go on.
 ::
 ++  feed
-  |=  [w=world p=process:fiber:nexus t=trail in=intake]
+  |=  [w=world t=trail in=intake]
   ^-  trail
-  (drive w p state.t darts.t [in queue.t] ~)
+  (drive w here.t state.t darts.t [in queue.t] ~)
 ::
 ++  drive
   |=  $:  w=world
@@ -64,17 +72,17 @@
   =.  st  [p.st state.out]
   =.  queue  (weld queue (answers w n darts.out))
   ?-    -.next.out
-      %done  [darts %done ~ st (weld skipped queue)]
-      %fail  [darts %fail err.next.out st (weld skipped queue)]
+      %done  [darts %done ~ st (weld skipped queue) p]
+      %fail  [darts %fail err.next.out st (weld skipped queue) p]
       %cont
     $(p self.next.out, in ~, queue (weld skipped queue), skipped ~)
       %wait
     =.  queue  (weld skipped queue)
-    ?~  queue  [darts %wait ~ st ~]
+    ?~  queue  [darts %wait ~ st ~ p]
     $(in `i.queue, queue t.queue, skipped ~)
       %skip
     =?  skipped  ?=(^ in)  (snoc skipped u.in)
-    ?~  queue  [darts %wait ~ st skipped]
+    ?~  queue  [darts %wait ~ st skipped p]
     $(in `i.queue, queue t.queue)
   ==
 ::
@@ -87,8 +95,12 @@
   ?~  ds  ~
   =/  d=dart:nexus  i.ds
   =/  rest  $(ds t.ds, n +(n))
+  ?:  (refused w d)  [[%veto d] rest]
+  ?:  ?=([%node * * %make *] d)  [[%made wire.d ~] rest]
   ?.  ?=([%node * * %poke *] d)  rest
   =/  b=bask:tarball  bask.load.d
+  ?:  (lien nack.w |=(k=blot:tarball =(k p.b)))
+    [[%pack wire.d `~[leaf+"fiber-test: refused"]] rest]
   ?.  =([/ %bowl-req] p.b)
     [[%pack wire.d ~] rest]
   =/  s=sage:tarball
@@ -100,6 +112,33 @@
   ::  trailing ack), and a +poke waiting on the ack skips the answer,
   ::  which +drive replays to it once the ack has landed.
   [[%poke *from:fiber:nexus s] [%pack wire.d ~] rest]
+::
+::  +refused: is this dart's target under a road the world refuses? Only
+::  absolute roads can be matched: a relative one stays in the nexus.
+++  refused
+  |=  [w=world d=dart:nexus]
+  ^-  ?
+  ?.  ?=([%node * [%& *] *] d)  |
+  =/  full=path
+    ?-  -.p.road.d
+      %&  (snoc path.p.p.road.d name.p.p.road.d)
+      %|  p.p.road.d
+    ==
+  %+  lien  refuse.w
+  |=(p=path =(p (scag (lent p) full)))
+::
+::  +answer-peek: answer the last peek a stopped run sent with this view
+::
+++  answer-peek
+  |=  [w=world t=trail v=view:nexus]
+  ^-  trail
+  =/  ws=(list wire)
+    %+  murn  darts.t
+    |=  d=dart:nexus
+    ?.  ?=([%node * * %peek *] d)  ~
+    `wire.d
+  ?>  ?=(^ ws)
+  (feed w t [%peek (rear ws) v])
 ::
 ::  ── reading a trail ─────────────────────────────────────────────────
 ::

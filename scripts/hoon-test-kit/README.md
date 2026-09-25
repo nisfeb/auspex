@@ -151,9 +151,15 @@ through the nexus's `+on-file`, and reads back what it did:
 ```
 
 `+run` steps the fiber the way the runtime does and answers `bowl.sig`
-reads (now, our, entropy) and pokes, recording every dart. It stops
+reads (now, our, entropy), pokes and makes, recording every dart. It stops
 `%done`, `%fail`, or `%wait` on something only the test can answer (a peek,
-a keen, a timer), which `+feed` supplies. `+pokes` pulls out every poke with a
+a keen, a timer). `+feed` supplies an answer and goes on, and
+`+answer-peek` answers the last peek with a view (`[%none ~]` for "no such
+grub"). The `world` sets the clock, the ship, `refuse` (road prefixes a weir
+refuses; a dart there gets `%veto`), and `nack` (poke marks refused on
+consumption, the way a crashed, waiting fiber refuses them). Those two are
+how a test checks crash handling without a ship: a refusing clock or timer
+must park the fiber, never spin it. `+pokes` pulls out every poke with a
 given mark, `+responses` the HTTP responses, `+status` a request's one
 response. Test through `+on-file`, not internal arms: the nexus file's
 product is cast to `nexus:nexus`, which hides them, and the grub's own

@@ -1862,4 +1862,18 @@
   =/  mk  |=(ls=(set @tas) `row:sur`[~ ~ ~ 0 m0(labels ls)])
   =/  ls  (all-labels:auspex (malt ~[[0v1 (mk (sy ~[%work %b]))] [0v2 (mk (sy ~[%a %work]))]]))
   (expect-eq !>(`json`[%a ~[[%s 'a'] [%s 'b'] [%s 'work']]]) !>((sorted-labels:auspex ls)))
+::
+::  the crash record reads back as written, to the millisecond: a wait
+::  read back in seconds would set the wake 56,000 years out, which is
+::  how the first live test of +rise-later found this
+++  test-the-crash-record-reads-back-as-written
+  =/  last  ~2026.9.25..18.20.18
+  =/  until  (add last ~m1)
+  ;:  weld
+    %+  expect-eq
+      !>  `(unit [n=@ud last=@da until=@da])``[1 last until]
+    !>  (de-rise:auspex (rise-json:auspex 1 last until))
+    ::  a record of the wrong shape is no record, never a crash
+    (expect-eq !>(`(unit [n=@ud last=@da until=@da])`~) !>((de-rise:auspex (need (de:json:html '{"n":"many","last":"yesterday","until":[1,2]}')))))
+  ==
 --

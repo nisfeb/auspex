@@ -1643,17 +1643,17 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  104 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  105 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
--test /=grubbery=/tests/lib/auspex-fibers ~    ::  6 tests: the nexus's own fibers
+-test /=grubbery=/tests/lib/auspex-fibers ~    ::  14 tests: the nexus's own fibers
 ```
 
 ### 8.4 Rule → test
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **104 tests**, the discovery ones among them
+be diffed; **105 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1745,6 +1745,7 @@ be diffed; **104 tests**, the discovery ones among them
 | Each copy is stored at its ancestry, in a slot of its own, and the tree reads back as the chain and verdicts it came from. | `test-want-slots-lays-out-the-tree` |
 | A read mark's ids are grouped by the thread that holds them. | `test-group-ids-by-thread` |
 | The label list is every thread's labels, once, sorted. | `test-labels-are-the-sorted-union` |
+| A fiber's crash record reads back as written, in milliseconds; a record of the wrong shape is no record. | `test-the-crash-record-reads-back-as-written` |
 | Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |

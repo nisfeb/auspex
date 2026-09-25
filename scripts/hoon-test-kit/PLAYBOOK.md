@@ -390,6 +390,38 @@ grubbery re-offers every held poke on each step.
    `/proc/<worker pid>/stat`, not `ps %cpu`. A slow `?info=1` is not a
    hang, and a dead route with CPU at 0 is a parked fiber, not a spin.
 
+**Testing crash handling: what auspex's fix taught (2026-09-25).**
+
+- **Unit-test the park, then prove it live.** `fiber-test`'s `refuse`
+  and `nack` cover the rules without a ship: a crash waits and sets a
+  timer, a poke while waiting is refused, a refused clock or timer parks,
+  and each of those failed against the old `rise-wait` code. They didn't
+  catch the one bug that mattered, though. Only a live cycle did.
+- **Live, inject the crash.** When the app's start-up survives every weir
+  refusal (auspex's did), a refused road never reaches the crash path.
+  Deploy a test-only build to the test ship with a `fiber-fail:io` right
+  after `+rise-later`, then watch the crash record grow 1, 2, 4 minutes
+  apart with CPU at 0. Then deploy the real code, whose clean start clears
+  the leftover timer.
+- **That found a real bug: time units.** `time:enjs` writes MILLISECONDS
+  and `du:dejs` reads SECONDS (`di` reads ms). A record written then read
+  back put the wake in the year 58704. The first crash was fine; the first
+  refused poke re-read the record and replaced the one-minute timer. A
+  round-trip test of the record now pins it. Read behn's timer table
+  (`/grubbery/ball/sys/behn/main.behn-state`) whenever a wake doesn't come.
+- **A refused poke must still answer the browser.** With `poke:io`, a
+  crashed writer's refusal failed the request fiber, which parked with the
+  request unanswered until the browser gave up. Use `poke-soft:io` and
+  answer 503 ("recovering from a crash").
+- **A reload removes a grub the loader doesn't know**, such as
+  `rise.json`, so `reload-nexus` resets the crash count.
+- **100% CPU and no answer can be a long build, not a spin.** A shared
+  test ship rebuilding another app's nexus (25 s a time, one per write)
+  looks exactly like a spin. Read the dojo: repeated `build: cache MISS`
+  lines that finish mean building. Wait at least one build's length
+  before sending ^C, because ^C rolls back whatever event it interrupts,
+  and on a shared ship that may be someone else's write.
+
 **If a ship is spinning,** press ^C in its dojo (with tmux:
 `tmux send-keys -t <pane> C-c`); `kill -INT` on the worker does nothing.
 Then remove the trigger straight away: approve the app's permits, or

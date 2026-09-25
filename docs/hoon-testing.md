@@ -352,20 +352,60 @@ Lessons:
 - **A peek is a fine place to stop.** Which grub a route reads is its
   decision; asserting that needs no fake answer.
 
-### The crash-loop rules, checked by reading, 2026-09-25
+### The crash-loop rules: fixed, and tested live, 2026-09-25
 
-`scripts/hoon-test-kit/PLAYBOOK.md`, "Never ship a crash loop", holds the
-rules calendar 18 and 19 taught. Auspex's code was read against them.
-Rules 7 and 8, the upgrade test and the refusing-weir test, have **not**
-been run.
+The kit's PLAYBOOK, "Never ship a crash loop", holds the rules calendar 18
+and 19 taught. Read against them, auspex held rules 1 and 4 (every fiber
+opens with a wait that sends nothing; every read of stored state is
+`mole`d) but not 3. Its writer dropped the first poke after a crash, acked,
+and `/ui/main`, which dispatches the whole HTTP API, stayed down after a
+crash until a reload, since nothing pokes it.
 
-- **Rules 1 and 4 hold.** Every fiber opens with `rise-wait:io`, which
-  sends nothing, and every read of stored state is `mole`d or `mule`d.
-- **Rule 3 does not.** The writer drops the first poke after a crash (a
-  peer's delivery or a user's action, acked and lost), and `/ui/main`,
-  which dispatches the whole HTTP API, stays down after a crash until a
-  reload, because nothing pokes it. Both need calendar's `+rise-park` /
-  `+rise-later` pattern, and rules 7 and 8, before they ship.
+**The fix.** The writer and `/ui/main` now open with `+rise-later`, taken
+from calendar. After a crash it waits 1, 2, 4 and up to 60 minutes, then
+goes on by itself on a timer. While it waits it refuses pokes. Its clock
+and timer are soft, so a refusing weir parks it rather than spinning it.
+Routes hand the writer their actions through `+ask-writer`: a refusal
+answers the browser 503 ("recovering from a crash") at once, where
+`poke:io` had failed the request fiber and left the request unanswered.
+One-shot fibers (fetch, probe, requests) keep `rise-wait`, as calendar's do.
+
+**Unit tests** (`auspex-fibers`, 8 new):
+- a crash waits a minute;
+- a poke while waiting is refused;
+- the wake brings the writer back;
+- a refused clock parks it with one dart;
+- a refused timer parks it;
+- `/ui/main` comes back by itself;
+- a clean start clears an old wait;
+- a refusing writer gets the browser a 503.
+
+All but the last failed against the old `rise-wait` code. The last failed
+against `poke:io`.
+
+**Rule 7, the upgrade.** Release 17 went on `~wex` with its 36 threads,
+with malformed `rise.json` records planted where the new code looks. Then
+the new code went on. Over the five minutes after, the bang stayed null
+and the API answered every probe, and `api-matrix` passed 16 of 16. CPU
+bursts came from another session's calendar builds on the same ship.
+
+**Rule 8, a refusing weir.** With `/sys/behn/` refused, the reload came up
+and served. With `/sys/bowl.sig` refused too, the fibers parked: worker CPU
+0% (from `/proc` deltas), the ship answering, the API down, and the veto
+count flat across a minute. The weir was then restored and reloaded, and
+`api-matrix` passed.
+
+**The live crash cycle found a bug the unit tests could not.** Auspex's
+start-up survives every weir refusal, so rule 8 never reached the crash
+path. A test-only build that fails right after `+rise-later` did. The first
+crash waited a minute as designed, but the wake never came: behn held the
+timer for **the year 58704**. The record is written in milliseconds
+(`time:enjs`) and was read back with `du:dejs`, which reads seconds. A
+refused poke re-read it and replaced the timer. Now the record's encode and
+decode live in the chain lib (`+rise-json`, `+de-rise`, using `di`), and
+`test-the-crash-record-reads-back-as-written` fails with `du`. Redeployed,
+the test build's record went 1, 2, 3 at 1, 2 and 4 minutes, CPU 0% between,
+and a POST while it waited got its 503 in 0.9 s.
 
 ### Wide conjunctions, 2026-09-25
 

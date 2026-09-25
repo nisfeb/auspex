@@ -340,7 +340,7 @@
           ::  crashes the fiber, and a crashed sig fiber respawns, so one
           ::  bad road is an infinite crash loop at 100% CPU.
           [~ %'main.sig']
-        ;<  ~  bind:m  (rise-wait:io prod "%auspex writer failed")
+        ;<  ~  bind:m  (rise-later prod "%auspex writer failed")
         =/  root=@ud  (lent path.rail)
         ;<  ~  bind:m  (grant-public root)
         ::  BOTH OF THESE REACH /sys/scry, and +on-load has just laid
@@ -421,7 +421,7 @@
       ::  into its own fiber under /ui/requests. This fiber never touches
       ::  the mail tree; it only routes.
           [[%ui ~] %'main.sig']
-        ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/main: failed")
+        ;<  ~  bind:m  (rise-later prod "%auspex /ui/main: failed")
         ::  bind-http-self, not bind-http: the latter calls +get-here-abs
         ::  to learn where it is, which a sandboxed app may not do. Its
         ::  own docs name this case - 'so a nexus serving its own UI needs
@@ -2901,6 +2901,160 @@
   ;<  p=(unit pass)  bind:m  (peer-pass fake who.i.sg lyf.i.sg)
   (key-map fake t.sg (~(put by acc) [who.i.sg lyf.i.sg] p))
 ::
+::  ── coming back from a crash ────────────────────────────────────────
+::
+::  +rise-later: a long-lived fiber that crashed comes back by itself,
+::  after a wait. Taken from calendar (its +rise-later, commit da42ed6)
+::  after its versions 18 and 19 locked ships; the rules it keeps are in
+::  the hoon-test-kit's PLAYBOOK, "Never ship a crash loop".
+::
+::    +rise-wait:io was not enough here, twice over. The writer takes
+::    peers' deliveries and the routes' actions, and rise-wait takes the
+::    first poke after a crash as its restart signal and DROPS it, acked:
+::    a delivery or an action lost without a word. And /ui/main, which
+::    serves the whole HTTP API, is poked by nobody, so under rise-wait
+::    a crash left the API dead until a reload.
+::
+::    So: a crash waits 1, 2, 4 and up to 60 minutes (the count starts
+::    over after two quiet hours), prints its whole trace only the first
+::    two times, and then goes on by itself on a timer. A poke that comes
+::    while it waits is REFUSED (a nack its sender sees), never held and
+::    never swallowed. It never fails itself: grubbery restarts a failed
+::    fiber at once, in the same event, so a failure in here would spin.
+::    Its clock and timer are soft, on fixed wires (a nonce is itself a
+::    bowl.sig poke); with either refused it parks until a poke instead.
+::    The count lives in `rise.json` beside the fiber, one per directory:
+::    each of the two directories holds one long-lived fiber.
+::
+++  rise-later
+  |=  [=prod:fiber:nexus msg=tape]
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ::  a clean start takes down any wait an earlier run left set: its wake
+  ::  would come to a fiber no longer waiting for it
+  ?~  prod
+    ;<  *  bind:m  (soft-behn /rise/rest [[/ %timer-rest] `wire`/rise])
+    (pure:m ~)
+  ::  what a refused poke fails with; the restart that follows is not a crash
+  =/  note=tang  ~[leaf+"{msg}: waiting after a crash; the poke was refused"]
+  =/  crash=?  !=(note u.prod)
+  ;<  clock=(unit @da)  bind:m  soft-now
+  ?~  clock
+    %-  ?.(crash same (slog [leaf+"{msg}: no clock (weir?); waiting for a poke" u.prod]))
+    (rise-park note)
+  =/  now=@da  u.clock
+  ;<  row=[n=@ud last=@da until=@da]  bind:m  read-rise
+  =/  n=@ud
+    ?.  crash  n.row
+    ?:((gth now (add last.row ~h2)) 1 +(n.row))
+  =/  until=@da
+    ?.  crash  until.row
+    (add now (min ~h1 (mul ~m1 (bex (dec (min n 7))))))
+  ?.  (gth until now)  (pure:m ~)
+  ;<  ~  bind:m
+    =/  m  (fiber:fiber:nexus ,~)
+    ?.  crash  (pure:m ~)
+    %-  %-  slog
+        ?:  (lte n 2)  [leaf+msg u.prod]
+        ~[leaf+"{msg} again ({(a-co:co n)} times running); next try in {(a-co:co (div (sub until now) ~m1))} min"]
+    ;<  *  bind:m
+      (over-as-soft:io rise-road [[/ %json] (rise-json n now until)] [/ %json])
+    (pure:m ~)
+  ;<  set=?  bind:m
+    (soft-behn /rise/set [[/ %timer-set] `[wire @da]`[/rise until]])
+  %-  ?:(|(set !crash) same (slog leaf+"{msg}: no timer (weir?); waiting for a poke" ~))
+  (rise-park note)
+::
+::  +rise-park: wait for the /rise wake; a poke meanwhile is refused with
+::  note (the restart it brings is not a crash, see +rise-later)
+++  rise-park
+  |=  note=tang
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  |=  input:fiber:nexus
+  :+  ~  q.state
+  ?+  in  [%wait ~]
+      [~ %poke * *]
+    ?.  =([/ %timer-wake] p.sage.u.in)  [%fail note]
+    ?.  ?=([%rise *] !<(path q.sage.u.in))  [%wait ~]
+    [%done ~]
+  ==
+::
+::  +soft-behn: a poke to the timer service, & when it landed. A refusal
+::  (a weir without /sys/behn) is | rather than a failure. The wire is
+::  fixed: a nonce would ask /sys/bowl.sig for entropy, refusable too.
+++  soft-behn
+  |=  [=wire =bask:tarball]
+  =/  m  (fiber:fiber:nexus ,?)
+  ^-  form:m
+  ;<  ~  bind:m
+    (send-dart:io %node wire &+&+[/sys/behn %'main.behn-state'] %poke bask)
+  |=  input:fiber:nexus
+  :+  ~  q.state
+  ?+  in  [%skip ~]
+      ~  [%wait ~]
+      [~ %veto *]  [%done |]
+      [~ %pack * *]
+    ?.  =(wire wire.u.in)  [%skip ~]
+    [%done =(~ err.u.in)]
+  ==
+::
+::  +soft-now: the time, or ~ when /sys/bowl.sig refuses (+get-time:io
+::  fails instead). The answer and its ack come in either order.
+++  soft-now
+  =/  m  (fiber:fiber:nexus ,(unit @da))
+  ^-  form:m
+  ;<  ~  bind:m
+    (send-dart:io %node /rise/now &+&+[/sys %'bowl.sig'] %poke [[/ %bowl-req] %now])
+  ;<  first=(unit (each @da ~))  bind:m
+    =/  mi  (fiber:fiber:nexus ,(unit (each @da ~)))
+    ^-  form:mi
+    |=  input:fiber:nexus
+    :+  ~  q.state
+    ?+  in  [%skip ~]
+        ~  [%wait ~]
+        [~ %veto *]  [%done ~]
+        [~ %pack * *]  ?^(err.u.in [%done ~] [%done `[%| ~]])
+        [~ %poke * *]
+      ?.  =([/ %time] p.sage.u.in)  [%skip ~]
+      [%done `[%& !<(@da q.sage.u.in)]]
+    ==
+  ?~  first  (pure:m ~)
+  ?:  ?=(%| -.u.first)
+    ::  acked: now the answer
+    |=  input:fiber:nexus
+    :+  ~  q.state
+    ?+  in  [%skip ~]
+        ~  [%wait ~]
+        [~ %poke * *]
+      ?.  =([/ %time] p.sage.u.in)  [%skip ~]
+      [%done `!<(@da q.sage.u.in)]
+    ==
+  ::  the answer first: take its ack
+  ;<  ~  bind:m
+    =/  md  (fiber:fiber:nexus ,~)
+    ^-  form:md
+    |=  input:fiber:nexus
+    :+  ~  q.state
+    ?+  in  [%skip ~]
+        ~  [%wait ~]
+        [~ %pack *]  [%done ~]
+    ==
+  (pure:m `p.u.first)
+::
+::  the crash record beside the fiber: how many crashes running, the last
+::  one, and when the wait ends. Anything unreadable is no record.
+++  rise-road  (cord-to-road:tarball './rise.json')
+++  read-rise
+  =/  m  (fiber:fiber:nexus ,[n=@ud last=@da until=@da])
+  ^-  form:m
+  ;<  vw=view:nexus  bind:m  (peek:io rise-road ~)
+  =/  none=[n=@ud last=@da until=@da]  [0 *@da *@da]
+  ?.  ?=([%file *] vw)  (pure:m none)
+  =/  j=(unit json)  (mole |.(!<(json (need-vase:tarball sang.vw))))
+  (pure:m ?~(j none (fall (de-rise:uc u.j) none)))
+++  rise-json  rise-json:uc
+::
 ::  ── bowl reads ──────────────────────────────────────────────────────
 ::
 ::  +bowl-our / +bowl-now: our/now, with the reply MARK-FILTERED. The
@@ -3460,7 +3614,7 @@
 ::
 ::  ── writes ──────────────────────────────────────────────────────────
 ::
-::  +poke-writer: hand one action to the serialised writer.
+::  +ask-writer: hand one action to the serialised writer.
 ::
 ::    The route answers ok once the writer has taken the poke, not once it
 ::    has applied it. The beacon is what closes that gap: the writer bumps
@@ -3469,11 +3623,21 @@
 ::    across a fan-out - a send to an unreachable ship carries a
 ::    twenty-second deadline per recipient.
 ::
-++  poke-writer
-  |=  a=action:uc
-  =/  m  (fiber:fiber:nexus ,~)
+::    A writer that refuses the poke is one that crashed and is waiting
+::    (+rise-later refuses pokes rather than hold or drop them). The
+::    route then answers 503 at once and ends cleanly: with +poke:io the
+::    refusal failed this request fiber, which parked with the browser's
+::    request unanswered until it timed out.
+::
+++  ask-writer
+  |=  [eyre-id=@ta a=action:uc]
+  =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  (poke:io [%| 2 %& ~ %'main.sig'] [[/ %auspex-action] a])
+  ;<  err=(unit tang)  bind:m
+    (poke-soft:io [%| 2 %& ~ %'main.sig'] [[/ %auspex-action] a])
+  ?~  err  (pure:m &)
+  ;<  ~  bind:m  (send-err eyre-id 503 'mail is recovering from a crash; try again in a minute')
+  (pure:m |)
 ::
 ::  +do-web-send: compose, reply and forward. `prev` is the only thing
 ::  that tells them apart, here as everywhere else.
@@ -3555,7 +3719,8 @@
   ::  Every recipient refused is a 400: a composed message must not
   ::  vanish behind a 200 with nobody to carry it to.
   ?:  =((lent bad) ~(wyt in to.u.req))  (send-err eyre-id 400 (refusal-line bad))
-  ;<  ~  bind:m  (poke-writer [%send to.u.req subject.u.req body.u.req prev.u.req refs])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%send to.u.req subject.u.req body.u.req prev.u.req refs])
+  ?.  ok  (pure:m ~)
   (send-refused eyre-id bad)
 ++  refusal-line  refusal-line:uc
 ::
@@ -3732,14 +3897,15 @@
   ?~  i  (send-err eyre-id 400 'bad msg-ids')
   =/  t=(unit @uv)  (de-uv-field:uw jon %'thread-id')
   ?~  t  (send-err eyre-id 400 'bad thread-id')
-  ;<  ~  bind:m
-    %-  poke-writer
+  ;<  ok=?  bind:m
+    %+  ask-writer  eyre-id
     ?-  a
       %read    [%read u.i u.t]
       %unread  [%unread u.i u.t]
       %fold    [%fold u.i u.t]
       %unfold  [%unfold u.i u.t]
     ==
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ++  do-web-forget
@@ -3748,7 +3914,8 @@
   ^-  form:m
   =/  w=(unit @p)  (de-forget:uw jon)
   ?~  w  (send-err eyre-id 400 'bad ship')
-  ;<  ~  bind:m  (poke-writer [%forget-peer u.w])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%forget-peer u.w])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ::  +do-web-fetch: pull an attachment's bytes from a peer.
@@ -3773,7 +3940,8 @@
   ^-  form:m
   =/  r=(unit [hash=@uv from=@p])  (de-fetch:uw jon)
   ?~  r  (send-err eyre-id 400 'bad fetch request')
-  ;<  ~  bind:m  (poke-writer [%fetch-blob hash.u.r from.u.r])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%fetch-blob hash.u.r from.u.r])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ::  ── the mail-client writes ──────────────────────────────────────────
@@ -3797,8 +3965,9 @@
   ::  never appears, with the reason only in /tr/last.
   ?.  (label-ok:uc `@tas`label.u.r)
     (send-err eyre-id 400 'a label is a lowercase term: a-z, 0-9 and -')
-  ;<  ~  bind:m
-    (poke-writer [%label thread-id.u.r `@tas`label.u.r add.u.r])
+  ;<  ok=?  bind:m
+    (ask-writer eyre-id [%label thread-id.u.r `@tas`label.u.r add.u.r])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ++  do-web-archive
@@ -3807,7 +3976,8 @@
   ^-  form:m
   =/  r=(unit [t=@uv a=?])  (de-archive:uw jon)
   ?~  r  (send-err eyre-id 400 'bad archive request')
-  ;<  ~  bind:m  (poke-writer [%archive t.u.r a.u.r])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%archive t.u.r a.u.r])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ::  +do-web-draft: save one draft. NOTHING IS SIGNED ON THIS PATH.
@@ -3828,7 +3998,8 @@
     [%0 id.u.r to.u.r subject.u.r body.u.r prev.u.r now]
   ?.  (draft-ok:uc d)
     (send-err eyre-id 400 'draft too long')
-  ;<  ~  bind:m  (poke-writer [%save-draft d])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%save-draft d])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ++  do-web-rule
@@ -3853,7 +4024,8 @@
   ::  chain, and with `archive` set would empty the inbox silently.
   ?.  (rule-ok:uc rl)
     (send-err eyre-id 400 'a rule needs a sender or a subject to match')
-  ;<  ~  bind:m  (poke-writer [%save-rule rl])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%save-rule rl])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ++  do-web-settings
@@ -3873,7 +4045,8 @@
         ' bytes, automatic downloads at most one largest file, and a'
         ' ship may be on one list at most'
     ==
-  ;<  ~  bind:m  (poke-writer [%save-settings s])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%save-settings s])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ::  +do-web-list: create or overwrite one mailing list.
@@ -3906,7 +4079,8 @@
     'and members that are ships other than your own'
   ?.  (lte ~(wyt in members.u.r) max-to:uc)
     (send-err eyre-id 400 'a list may not hold more members than a message may name')
-  ;<  ~  bind:m  (poke-writer [%save-list name.u.r members.u.r])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%save-list name.u.r members.u.r])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ++  do-web-list-delete
@@ -3915,7 +4089,8 @@
   ^-  form:m
   =/  n=(unit @t)  (de-list-name:uw jon)
   ?~  n  (send-err eyre-id 400 'bad list name')
-  ;<  ~  bind:m  (poke-writer [%delete-list u.n])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%delete-list u.n])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ::  +do-web-id: the two routes that carry only an id and nothing to check.
@@ -3927,12 +4102,13 @@
   ^-  form:m
   =/  i=(unit @uv)  (de-id:uw jon)
   ?~  i  (send-err eyre-id 400 'bad id')
-  ;<  ~  bind:m
-    %-  poke-writer
+  ;<  ok=?  bind:m
+    %+  ask-writer  eyre-id
     ?-  tag
       %delete-draft  [%delete-draft u.i]
       %delete-rule   [%delete-rule u.i]
     ==
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ++  do-web-delete
@@ -3941,7 +4117,8 @@
   ^-  form:m
   =/  i=(unit @uv)  (de-delete:uw jon)
   ?~  i  (send-err eyre-id 400 'bad thread-id')
-  ;<  ~  bind:m  (poke-writer [%delete-thread u.i])
+  ;<  ok=?  bind:m  (ask-writer eyre-id [%delete-thread u.i])
+  ?.  ok  (pure:m ~)
   (send-ok eyre-id)
 ::
 ::  ── responses ───────────────────────────────────────────────────────
