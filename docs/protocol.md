@@ -1643,7 +1643,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  90 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  92 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  51 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 ```
@@ -1652,7 +1652,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **90 tests**, the discovery ones among them
+be diffed; **92 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1671,7 +1671,7 @@ be diffed; **90 tests**, the discovery ones among them
 | `+merge` orders by `sent` regardless of arrival order. | `test-merge-orders-by-sent` |
 | The thread root is the id of the root message, and every ship computes the same one. | `test-root-is-first-message-id` |
 | Participants are the union of `from` and `to` across the chain, so a forward's recipient is a participant. | `test-participants-includes-forward-recipient` |
-| Two copies sharing an id and differing in signature both survive `+merge`. | `test-merge-keeps-both-copies-on-sig-collision` |
+| Two copies sharing an id and differing in signature both survive `+merge`, in one order whatever order they arrived in. | `test-merge-keeps-both-copies-on-sig-collision` |
 | A peer-supplied chain that repeats a message is deduped against itself. | `test-merge-dedupes-within-new` |
 | One chain yields different verdicts per message. | `test-mixed-verdicts-per-message` |
 | A message signed under life 2 verifies against that ship's life-2 key. | `test-verifies-under-rotated-life` |
@@ -1724,6 +1724,8 @@ be diffed; **90 tests**, the discovery ones among them
 | Search finds a forged message and names it, drawing the row from the message that matched. | `test-search-finds-and-names-the-forged-message` |
 | An empty query has no newest match. | `test-newest-match-is-empty-without-a-query` |
 | Inbox is participant **or** direct, and not archived. | `test-inbox-is-participant-or-direct` |
+| A new thread's meta is neither archived nor direct. | `test-a-new-thread-is-neither-archived-nor-direct` |
+| A thread's time is its newest message's `sent`, whatever the order. | `test-last-sent-is-the-newest` |
 | Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |

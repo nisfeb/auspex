@@ -256,9 +256,11 @@
 ++  test-merge-keeps-both-copies-on-sig-collision
   =/  a    (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  bad  a(sig 0x0)
-  %+  expect-eq
-    !>  2
-    !>  (lent (merge:auspex ~[bad] ~[a]))
+  ;:  weld
+    (expect-eq !>(2) !>((lent (merge:auspex ~[bad] ~[a]))))
+    ::  and in one order whichever arrived first, as every ship must agree
+    (expect-eq !>((merge:auspex ~[bad] ~[a])) !>((merge:auspex ~[a] ~[bad])))
+  ==
 ::
 ::  a peer-supplied chain that repeats a message must not produce a chain
 ::  with duplicates. `old` is empty here: this is the first-contact case.
@@ -1057,6 +1059,7 @@
     ::  both copies are in the chain, and the query hits the forged one
     (expect-eq !>(2) !>((lent c)))
     (expect !>((chain-matches:auspex 'pay here' c)))
+    (expect !>(!(chain-matches:auspex 'nowhere in it' c)))
     (expect !>(?=(^ hit)))
     (expect-eq !>('PAY HERE INSTEAD') !>(?~(hit '' body.unsigned.u.hit)))
     (expect !>((lien vs |=([* v=verdict:sur] =(%forged v)))))
@@ -1514,6 +1517,21 @@
     %+  expect-eq  !>(`meta:sur`[%3 a & (sy ~[%work]) | ~])
     !>((need (meta-from-noun:auspex [%0 a & (sy ~[%work])])))
     (expect-eq !>(~) !>((meta-from-noun:auspex [%9 ~])))
+  ==
+::
+::  the nexus bunts a meta for every new thread, and a bare ? bunts to
+::  %.y: without the $~ defaults every thread would be born archived.
+++  test-a-new-thread-is-neither-archived-nor-direct
+  (expect-eq !>(`meta:sur`[%3 ~ | ~ | ~]) !>(*meta:sur))
+::
+::  the time an inbox row shows: the newest message, in any order.
+++  test-last-sent-is-the-newest
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'a' 'a' ~2026.1.1 ~)
+  =/  b  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'b' 'b' ~2026.1.3 ~)
+  =/  c  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'c' 'c' ~2026.1.2 ~)
+  ;:  weld
+    (expect-eq !>(~2026.1.3) !>((last-sent:auspex ~[a b c])))
+    (expect-eq !>(~2026.1.3) !>((last-sent:auspex ~[b c a])))
   ==
 ::
 ::  a delivery re-checks only what is not settled: held %verified and

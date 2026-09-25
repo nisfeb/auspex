@@ -2,7 +2,7 @@
 """Mutation check for the Hoon libs: break one thing, run the suites, and
 report every break that no test noticed. See docs/hoon-testing.md.
 
-    scripts/hoon-mutate.py <pier> [--only ARM[,ARM]] [--list]
+    scripts/hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]
 
 Each mutant is written into the test desk's mount, never into the repo, and
 the clean lib is synced back when the run ends, however it ends. A mutant
@@ -24,7 +24,7 @@ def code_part(line):
 
 def arm_at(lines, n):
     for i in range(n, -1, -1):
-        m = re.match(r'\s*\+\+  (\S+)', lines[i])
+        m = re.match(r'\s*\+[+$*]  (\S+)', lines[i])  # an arm, a mold or an alias
         if m:
             return m.group(1)
     return '?'
@@ -63,14 +63,36 @@ def conjunct(lines):
             yield s, f'{rune} drop {child[:40]}', edit
 
 
-MENU = [boundary, conjunct]
+def swapper(pattern, table, label):
+    """Every match of `pattern` in code (not comments) replaced by its
+    table entry, one site per mutant."""
+    def op(lines):
+        for n, line in enumerate(lines):
+            code = code_part(line)
+            for m in re.finditer(pattern, code):
+                old = m.group(0)
+                new = line[:m.start()] + table[old] + line[m.end():]
+                yield n, f'{label} {old.strip()}->{table[old].strip()}', {n: new}
+    op.__name__ = label
+    return op
 
 
-def mutants():
+# ?: and ?. swapped: the branch taken when the condition does not hold.
+branch = swapper(r'\?[:.](?=  |\()', {'?:': '?.', '?.': '?:'}, 'branch')
+# =( and !=( swapped, and only as a comparison: after a space or a bracket,
+# never ?=( (a type test) and never the =( inside a rune like |=( or ^=(.
+equal = swapper(r'(?:(?<=[\s(\[])|^)!?=\(', {'=(': '!=(', '!=(': '=('}, 'equal')
+# a literal flag flipped: a default or an early answer nobody relies on.
+flag = swapper(r'%\.[yn]\b', {'%.y': '%.n', '%.n': '%.y'}, 'flag')
+
+MENU = {op.__name__: op for op in [boundary, conjunct, branch, equal, flag]}
+
+
+def mutants(menu):
     for lib in LIBS:
         path = f'{ROOT}/code/lib/{lib}.hoon'
         lines = open(path).readlines()
-        for op in MENU:
+        for op in menu:
             for n, what, edit in op(lines):
                 out = [edit.get(i, l) for i, l in enumerate(lines)]
                 yield lib, n + 1, arm_at(lines, n), what, ''.join(l for l in out if l is not None)
@@ -98,9 +120,11 @@ def main():
     ap.add_argument('pier')
     ap.add_argument('--only', help='comma-separated arm names')
     ap.add_argument('--list', action='store_true', help='print the mutants and stop')
+    ap.add_argument('--ops', default='boundary,conjunct',
+                    help=f'comma-separated, from: {",".join(MENU)} (default: %(default)s)')
     a = ap.parse_args()
     only = set(a.only.split(',')) if a.only else None
-    todo = [m for m in mutants() if not only or m[2] in only]
+    todo = [m for m in mutants([MENU[o] for o in a.ops.split(',')]) if not only or m[2] in only]
     if a.list:
         for lib, line, arm, what, _ in todo:
             print(f'{lib}:{line}  +{arm}  {what}')

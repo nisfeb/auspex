@@ -91,13 +91,27 @@ test) overstate coverage; mutations measure it.
 
 ### The mutation script, and what its first run found
 
-`scripts/hoon-mutate.py <pier> [--only ARM,...] [--list]` automates the
+`scripts/hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]` automates the
 table above. It writes each mutant into the test desk's mount (never the
 repo), runs the suites with `NOSYNC=1`, and syncs the clean libs back
 however the run ends. It sorts every mutant as `killed`, `SURVIVED`,
 `no-build` (the runner builds the libs first, so a mutant that does not
 compile is never counted as killed), or `timeout` (it sends SIGINT to the
 ship's king, the same as ^C in its dojo). About 10 s per mutant.
+
+The menu, by `--ops` name:
+
+| op | mutation | sites (2026-09-25) |
+|---|---|---|
+| `boundary` | `lte`↔`lth`, `gte`↔`gth` | 51 |
+| `conjunct` | one condition of a tall `?&`/`?\|` replaced by `&`/`\|` | 47 |
+| `branch` | `?:`↔`?.` (tall and wide) | 43 |
+| `equal` | `=(`↔`!=(` as a comparison, never `?=(` or a rune's `=(` | 29 |
+| `flag` | `%.y`↔`%.n` | 7 |
+
+The default is `boundary,conjunct`: they cost least per real finding, because
+they aim at caps and guards. `--list` sizes a run before it costs any commits;
+plan on about 10 s and one commit per mutant.
 
 The pilot menu was the two cheapest, highest-value operators: `lte`↔`lth` /
 `gte`↔`gth`, and one condition of a tall `?&`/`?|` replaced by its identity.
@@ -128,6 +142,47 @@ Lessons from the run:
 - **The site finder is text, not a parser.** It split a tall `%+` child of
   `?&` across two lines into two "conditions"; both halves failed to build
   and were discarded, which is safe but means that condition went untested.
+
+### The rest of the menu: `flag`, `branch`, `equal`
+
+Run on 2026-09-25 as `--ops flag,branch,equal`, on a `~wex` that had not
+been melded since its restart. It ran for 30 minutes and did not crash.
+
+| op | killed | survived | no-build |
+|---|---|---|---|
+| `flag` | 0 | 7 | 0 |
+| `branch` | 31 | 3 | 9 |
+| `equal` | 27 | 2 | 0 |
+
+Of the 12 survivors, 7 were real gaps, all closed the same day:
+- `*meta`'s `archived` and `direct` defaults: the nexus bunts a meta for
+  every new thread;
+- `last-sent`, the time on every inbox row, which had no test at all;
+- `chain-matches` never tested with a query that misses;
+- `merge`'s tie-break for two copies of one message.
+
+The other 5 were the older `meta-N` shapes' defaults, which are only ever
+clammed with `;;` and never bunted. Rerunning the four fixed arms killed
+all 10 of their mutants.
+
+What it taught:
+
+- **A high no-build rate is the site finder, not the code.** The first
+  `equal` regex also matched the `=(` inside `|=(` gates: 66 of 87 mutants
+  did not build, so most of the op never ran. Check no-build per op after
+  every run; above a handful, fix the regex and rerun that op alone.
+- **Some no-builds are real and expected.** Swapping `?.`↔`?:` after a
+  `?=` test breaks the type narrowing the other branch relies on, so 9
+  `branch` mutants cannot compile. Those are correctly discarded.
+- **A mold's `$~` default matters only where the mold is bunted.** To
+  classify a surviving default, grep the app for `*<mold>`: bunted means
+  a real contract (test the bunt), only clammed means equivalent.
+- **Sort tie-breaks: test the promise, not the key.** Which field breaks
+  a tie is arbitrary; that every ship gets the same order is not. Test
+  "same output for both arrival orders" and any total order passes it,
+  while an order that leaves two elements unordered fails it.
+- **Label sites by `+$` and `+*` too.** The finder named the nearest `++`
+  arm, so defaults inside `+$  meta` were credited to the arm below it.
 
 ### Closing the gaps
 
@@ -181,5 +236,5 @@ ship. Two rules came out of it:
 - **CI.** The runner needs no dojo, so a fake ship booted in Actions can run
   it; tlon-apps' `backend/run-tests.sh` boots one from a pier archive the same
   way.
-- **The rest of the mutation menu**: `?:`↔`?.`, `=(`↔`!=(`, `%.y`↔`%.n`,
-  and an allowlist file for reviewed equivalent mutants.
+- **An allowlist file for reviewed equivalent mutants**, keyed by arm and
+  op, so a reviewed survivor stops being re-reported.
