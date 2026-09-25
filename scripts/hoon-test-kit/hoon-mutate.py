@@ -1,19 +1,48 @@
 #!/usr/bin/env python3
 """Mutation check for the Hoon libs: break one thing, run the suites, and
-report every break that no test noticed. See docs/hoon-testing.md.
+report every break that no test noticed. See README.md and PLAYBOOK.md.
 
-    scripts/hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]
+    hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]
 
 Each mutant is written into the test desk's mount, never into the repo, and
 the clean lib is synced back when the run ends, however it ends. A mutant
 that loops forever is interrupted with SIGINT to the ship's king process,
 exactly what ^C in its dojo does.
 """
-import argparse, os, re, signal, subprocess, sys, time
+import argparse, os, re, shlex, signal, subprocess, sys, time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LIBS = ['auspex-chain', 'auspex-web']
-DESK = 'auspex-test'
+KIT = os.path.dirname(os.path.abspath(__file__))
+
+
+def find_conf():
+    """hoon-test.conf, as hoon-test.sh finds it: $HOON_TEST_CONF, or the
+    nearest one at or above the current directory."""
+    if os.environ.get('HOON_TEST_CONF'):
+        return os.path.abspath(os.environ['HOON_TEST_CONF'])
+    d = os.getcwd()
+    while True:
+        if os.path.isfile(f'{d}/hoon-test.conf'):
+            return f'{d}/hoon-test.conf'
+        if d == '/':
+            sys.exit('no hoon-test.conf here or above')
+        d = os.path.dirname(d)
+
+
+def read_conf(path):
+    """The KEY=value lines of a conf file bash also sources."""
+    conf = {}
+    for tok in shlex.split(open(path).read(), comments=True):
+        if '=' in tok:
+            k, v = tok.split('=', 1)
+            conf[k] = v
+    return conf
+
+
+CONF = find_conf()
+ROOT = os.path.dirname(CONF)
+_c = read_conf(CONF)
+DESK = _c['DESK']
+LIBS = [(f'{ROOT}/{p}', os.path.basename(p)[:-len('.hoon')]) for p in _c['LIBS'].split()]
 SWAP = {'lte': 'lth', 'lth': 'lte', 'gte': 'gth', 'gth': 'gte'}
 
 
@@ -89,8 +118,7 @@ MENU = {op.__name__: op for op in [boundary, conjunct, branch, equal, flag]}
 
 
 def mutants(menu):
-    for lib in LIBS:
-        path = f'{ROOT}/code/lib/{lib}.hoon'
+    for path, lib in LIBS:
         lines = open(path).readlines()
         for op in menu:
             for n, what, edit in op(lines):
@@ -111,7 +139,8 @@ def king_pid(pier):
 
 
 def run(pier, env=None, timeout=None):
-    return subprocess.run([f'{ROOT}/scripts/hoon-test.sh', pier], env={**os.environ, **(env or {})},
+    return subprocess.run([f'{KIT}/hoon-test.sh', pier],
+                          env={**os.environ, 'HOON_TEST_CONF': CONF, **(env or {})},
                           capture_output=True, text=True, timeout=timeout)
 
 
@@ -156,12 +185,12 @@ def main():
         # Write the clean libs AND force the commit. A sync alone is not
         # enough: if the mount already matches the repo, rsync reports no
         # change and the desk keeps the last mutant it committed.
-        for lib in LIBS:
-            with open(f'{ROOT}/code/lib/{lib}.hoon') as src, open(f'{a.pier}/{DESK}/lib/{lib}.hoon', 'w') as dst:
+        for path, lib in LIBS:
+            with open(path) as src, open(f'{a.pier}/{DESK}/lib/{lib}.hoon', 'w') as dst:
                 dst.write(src.read())
         if run(a.pier, {'NOSYNC': '1'}).returncode != 0:
             print('could not restore the clean libs on the ship; once it is up, run '
-                  'NOSYNC=1 scripts/hoon-test.sh <pier>')
+                  'NOSYNC=1 hoon-test.sh <pier>')
     print('\n' + '  '.join(f'{k}: {v}' for k, v in sorted(tally.items())))
     for lib, line, arm, what in survivors:
         print(f'SURVIVED  {lib}:{line}  +{arm}  {what}')

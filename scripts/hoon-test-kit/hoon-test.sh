@@ -1,31 +1,53 @@
 #!/usr/bin/env bash
-# Run the Hoon suites on a running fake ship, on a desk that holds nothing
-# but the libs under test and their tests. See docs/hoon-testing.md.
+# hoon-test-kit: run an app's Hoon suites on a running fake ship, on a desk
+# that holds nothing but the libs under test and their tests. See README.md
+# and PLAYBOOK.md.
 #
-#   scripts/hoon-test.sh <pier> setup          once per ship
-#   scripts/hoon-test.sh <pier> [suite ...]    sync, commit, test
+#   hoon-test.sh <pier> setup          once per ship, after |new-desk + |mount
+#   hoon-test.sh <pier> [suite ...]    sync, commit, test
 #
-# A suite is a file under tests/lib without .hoon (auspex-chain); none runs
-# all of them. Exits 0 when every test passes, 1 when one fails, 3 when a lib
-# does not build, 4 when the ship does not answer. Per-test OK/FAILED lines are
+# The app is described by hoon-test.conf, found in the current directory or
+# the nearest one above it (or at $HOON_TEST_CONF); paths in it are relative
+# to it. A suite is a test file's name without .hoon; none runs them all.
+#
+# Exits 0 when every test passes, 1 when one fails, 3 when a lib does not
+# build, 4 when the ship does not answer. Per-test OK/FAILED lines are
 # slogged to the ship's terminal: the socket only carries the verdict.
 set -euo pipefail
 
-DESK=auspex-test
-LIBS=(auspex-chain auspex-web)
-VERE=${VERE:-$(ls -d "$(dirname "$0")"/../../../vere-*-linux-x86_64 2>/dev/null | sort -V | tail -1)}
-root=$(cd "$(dirname "$0")/.." && pwd)
+conf=${HOON_TEST_CONF:-}
+if [[ -z "$conf" ]]; then
+  d=$PWD
+  while [[ "$d" != / && ! -f "$d/hoon-test.conf" ]]; do d=$(dirname "$d"); done
+  conf="$d/hoon-test.conf"
+fi
+[[ -f "$conf" ]] || { echo "no hoon-test.conf here or above" >&2; exit 2; }
+root=$(cd "$(dirname "$conf")" && pwd)
+MARKS="json mime" FILES=""
+# shellcheck source=/dev/null
+source "$conf"
+: "${DESK:?hoon-test.conf sets DESK}" "${LIBS:?hoon-test.conf sets LIBS}" "${TESTS:?hoon-test.conf sets TESTS}"
+
 pier=$(cd "${1:?usage: hoon-test.sh <pier> [setup | suite ...]}" && pwd); shift
 sock="$pier/.urb/conn.sock"
+# the runtime is only used for its jam/cue framing: $VERE, or the newest
+# vere-* sitting beside the pier
+VERE=${VERE:-$(ls -d "$(dirname "$pier")"/vere-*-linux-x86_64 2>/dev/null | sort -V | tail -1)}
+[[ -x "$VERE" ]] || { echo "no vere binary: set VERE" >&2; exit 2; }
 
-# repo file -> desk path. The libs are import-free, so this is all a test
-# build reaches; anything else it needs comes from %base at setup.
+# repo -> desk: each LIBS file to lib/<name>.hoon, each TESTS/*.hoon to
+# tests/lib/, each FILES entry to the same path (or src=dest). Output is
+# rsync's itemised list, so empty means nothing changed.
 sync() {
-  local d="$pier/$DESK"
-  mkdir -p "$d/lib" "$d/tests/lib" "$d/protocol/vectors"
-  for l in "${LIBS[@]}"; do rsync -ci "$root/code/lib/$l.hoon" "$d/lib/"; done
-  rsync -ci "$root"/tests/lib/*.hoon "$d/tests/lib/"
-  rsync -ci "$root/protocol/vectors/v1.json" "$d/protocol/vectors/"
+  local d="$pier/$DESK" f src dst
+  mkdir -p "$d/lib" "$d/tests/lib"
+  for f in $LIBS; do rsync -ci "$root/$f" "$d/lib/"; done
+  rsync -ci "$root/$TESTS"/*.hoon "$d/tests/lib/"
+  for f in $FILES; do
+    src=${f%%=*}; dst=${f#*=}
+    mkdir -p "$d/$(dirname "$dst")"
+    rsync -ci "$root/$src" "$d/$dst"
+  done
 }
 
 # Run hoon (a strand producing a vase) in a khan thread over conn.sock and
@@ -56,14 +78,16 @@ EOF
 
 if [[ "${1:-}" == setup ]]; then
   # |new-desk %$DESK and |mount %$DESK in the dojo first: both are one
-  # line there. This copies the test harness and the marks the suites
+  # line there. This copies the test harness and the MARKS the suites
   # need in from the ship's own %base, so they always match its kelvin;
   # a file already on the desk is left alone, so setup can be rerun.
   # %json builds through its grad mark, %mime: without it a /* of a json
   # file fails the whole suite as a build error.
+  marks=""
+  for k in $MARKS; do marks+=" /mar/$k/hoon"; done
   ted <<EOF
 =/  m  (strand ,vase)
-=/  paz=(list path)  ~[/lib/test/hoon /mar/json/hoon /mar/mime/hoon]
+=/  paz=(list path)  ~[/lib/test/hoon$marks]
 =|  fil=soba:clay
 |-
 ?^  paz
@@ -92,7 +116,7 @@ EOF
 fi
 
 libs=""
-for l in "${LIBS[@]}"; do libs+=" /lib/$l/hoon"; done
+for l in $LIBS; do l=${l##*/}; libs+=" /lib/${l%.hoon}/hoon"; done
 paths=""
 for s in "${@:-}"; do paths+=" [(scot %p our.bowl) %$DESK (scot %da now.bowl) %tests %lib${s:+ %$s} ~]"; done
 # the libs are built first, so a lib that does not compile is its own

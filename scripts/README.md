@@ -66,23 +66,17 @@ path constant (`[%& %| public-grp]`) is resolved, but a road assembled some
 other way will read as unreached when it is not. Never delete a declared
 road on this tool's word alone.
 
-## hoon-test.sh — the Hoon suites in seconds, without a dojo
+## hoon-test-kit/ — the Hoon suites in seconds, and what they miss
 
 ```
-scripts/hoon-test.sh <pier> [setup | suite ...]
+scripts/hoon-test-kit/hoon-test.sh <pier> [setup | suite ...]
+scripts/hoon-test-kit/hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]
 ```
 
-Runs `tests/lib/*` on a `%auspex-test` desk that holds only the libs and
-their tests, over the pier's `conn.sock`. About 7 seconds where a commit to
-`%grubbery` took two minutes. Setup and the reasons behind it are in
-`docs/hoon-testing.md`.
-
-## hoon-mutate.py — which checks does no test notice?
-
-```
-scripts/hoon-mutate.py <pier> [--only ARM,...] [--list]
-```
-
-Breaks one thing in the libs at a time (a boundary, a guard's condition),
-runs the suites on the test desk, and lists every break that survived. See
-`docs/hoon-testing.md` for the first run's findings.
+A vendored copy of [nisfeb/hoon-test-kit](https://github.com/nisfeb/hoon-test-kit)
+(the commit is in `.kit-version`), configured by `hoon-test.conf` at the repo
+root. `hoon-test.sh` runs `tests/lib/*` on a `%auspex-test` desk over the
+pier's `conn.sock`, in about 7 s. `hoon-mutate.py` breaks one thing at a time
+in the libs and lists what no test noticed. Usage is in the kit's README;
+auspex's own results are in `docs/hoon-testing.md`. Update the kit there,
+never here, then re-vendor.

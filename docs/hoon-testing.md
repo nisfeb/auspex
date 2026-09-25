@@ -1,7 +1,10 @@
 # Hoon testing — a test desk and a headless runner
 
-Written 2026-09-25, while building it for auspex. It is meant to be copied:
-nothing here is auspex-specific except the file list in `sync()`.
+Written 2026-09-25, while building it for auspex. **The tooling has since
+moved into [nisfeb/hoon-test-kit](https://github.com/nisfeb/hoon-test-kit)**
+(vendored at `scripts/hoon-test-kit/`, configured by `hoon-test.conf`), and
+its general procedure into that repo's `PLAYBOOK.md`. This file is the auspex
+case study: what the runs found here, and how the method was learned.
 
 ## The problem it solves
 
@@ -19,21 +22,19 @@ at a terminal.
    ship's own `%base` — `lib/test.hoon` and the marks the suites need. No
    agents, no app, nothing else to rebuild. A commit plus all 156 tests takes
    **about 7 seconds**.
-2. **`scripts/hoon-test.sh`**, which drives it over the pier's `conn.sock`
-   rather than the dojo: rsync the repo files into the mount, commit if
-   anything changed, run `%test`, exit 0 or 1. It needs `socat`, `rsync`,
-   `perl` and a vere binary for its `eval --jam/--cue` framing: `VERE=<path>`,
-   or by default the newest `vere-*-linux-x86_64` three directories above
-   `scripts/` (where they sit on the dev machine).
+2. **`hoon-test.sh`**, which drives it over the pier's `conn.sock` rather
+   than the dojo: rsync the repo files into the mount, commit if anything
+   changed, run `%test`, and exit 0 or 1. Requirements and the config are in
+   the kit's README.
 
 ```
 # once per ship, in its dojo:
 |new-desk %auspex-test
 |mount %auspex-test
 # then, from the repo:
-scripts/hoon-test.sh <pier> setup           # copy test.hoon + marks from %base
-scripts/hoon-test.sh <pier>                 # every suite
-scripts/hoon-test.sh <pier> auspex-chain    # one suite
+scripts/hoon-test-kit/hoon-test.sh <pier> setup           # copy test.hoon + marks from %base
+scripts/hoon-test-kit/hoon-test.sh <pier>                 # every suite
+scripts/hoon-test-kit/hoon-test.sh <pier> auspex-chain    # one suite
 ```
 
 The per-test `OK` / `FAILED` lines go to the **ship's terminal**, not the
@@ -91,7 +92,7 @@ test) overstate coverage; mutations measure it.
 
 ### The mutation script, and what its first run found
 
-`scripts/hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]` automates the
+`scripts/hoon-test-kit/hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]` automates the
 table above. It writes each mutant into the test desk's mount (never the
 repo), runs the suites with `NOSYNC=1`, and syncs the clean libs back
 however the run ends. It sorts every mutant as `killed`, `SURVIVED`,
@@ -192,7 +193,7 @@ pair where it is a cap: `(ships max-listed)` accepted, `(ships
 `(sy (turn (gulf 1 n) |=(i=@ `@p`i)))`. Then rerun **only** those arms:
 
 ```
-scripts/hoon-mutate.py <pier> --only text-ok,shed-for,settings-ok,draft-ok
+scripts/hoon-test-kit/hoon-mutate.py <pier> --only text-ok,shed-for,settings-ok,draft-ok
 ```
 
 Every survivor there must now be killed, or be re-traced and moved to
@@ -217,7 +218,7 @@ ship. Two rules came out of it:
 - **A clean mount is not a clean desk.** After the crash the mount held
   the clean libs but clay still held the last committed mutant, and since
   rsync saw nothing to copy it never committed: the first run after the
-  restart failed on a mutant. `NOSYNC=1 scripts/hoon-test.sh <pier>`
+  restart failed on a mutant. `NOSYNC=1 scripts/hoon-test-kit/hoon-test.sh <pier>`
   commits the mount as it stands and settles it; `hoon-mutate.py` now
   restores that way itself.
 - **Only the owner restarts a pier.** A crash is stop-and-report. A long
@@ -226,10 +227,9 @@ ship. Two rules came out of it:
 
 ## Porting to another app
 
-1. Make the libs under test import-free, or list their imports in `sync()`.
-2. Copy `scripts/hoon-test.sh`; change `DESK` and the rsync lines in `sync()`.
-3. Add any extra marks the suites `/*` to the setup list (`paz`).
-4. `|new-desk %<app>-test`, `|mount %<app>-test`, `setup`, run.
+Use the kit: its README covers installing and configuring it, and its
+`PLAYBOOK.md` gives the rollout order. Auspex's `hoon-test.conf` is a worked
+example of a config.
 
 ## Not done yet
 
