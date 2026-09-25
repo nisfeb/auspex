@@ -559,6 +559,18 @@
     (expect !>(!(attaches-ok:auspex ~[one ['a' +(max-blob:auspex) 'text/plain' 0v1]])))
   ==
 ::
+::  +refs-ok is the send route's half of +attaches-ok, run before any
+::  blob is read: the count and both hostile strings, everything but size.
+++  test-refs-ok-checks-all-but-size
+  =/  one=attach-ref:sur  ['a' 'text/plain' 0v1]
+  =/  crlf  (cat 3 'text/plain' (cat 3 (cat 3 `@`13 `@`10) 'X-Evil: yes'))
+  ;:  weld
+    (expect !>((refs-ok:auspex (reap max-attach:auspex one))))
+    (expect !>(!(refs-ok:auspex (reap +(max-attach:auspex) one))))
+    (expect !>(!(refs-ok:auspex ~[one [(crip (reap 300 'n')) 'text/plain' 0v1]])))
+    (expect !>(!(refs-ok:auspex ~[one ['a' crlf 0v1]])))
+  ==
+::
 ::  name and mime are attacker-supplied and arrive PRE-SIGNED, so a
 ::  recipient cannot repair one without destroying the signature. mime is
 ::  headed for a Content-Type header, where CR or LF is a header-injection
@@ -584,6 +596,9 @@
     (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 lf 'b')) 128)))
     (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 cr 'b')) 128)))
     (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 del 'b')) 128)))
+    ::  the edges of the control range: 0x1f is refused, a space is text
+    (expect !>(!(text-ok:auspex (cat 3 'a' (cat 3 `@`0x1f 'b')) 128)))
+    (expect !>((text-ok:auspex 'a b' 128)))
     (expect !>(!(fits-attachments:auspex ~[bad] 16)))
     ::  body-mime is checked exactly the same way, and for the same
     ::  reason: it is signed, so a recipient cannot repair it, and it is
@@ -650,6 +665,13 @@
     ::  under max-blobs, and still no room
     %+  expect-eq  !>([%.y ~[0v1]])
     !>  (shed-for:auspex ~[[0v1 ~2026.1.1 default-budget:auspex]] ~ 1 100 default-budget:auspex)
+    ::  EXACTLY at either bound still fits, before shedding and after it
+    %+  expect-eq  !>([%.y ~])
+    !>  (shed-for:auspex held (sy ~[0v1 0v2]) (sub max-blobs:auspex 2) 0 default-budget:auspex)
+    %+  expect-eq  !>([%.y ~])
+    !>  (shed-for:auspex held (sy ~[0v1 0v2]) 1 (sub default-budget:auspex 30) default-budget:auspex)
+    %+  expect-eq  !>([%.y ~[0v1]])
+    !>  (shed-for:auspex ~[[0v1 ~2026.1.1 10]] ~ 1 default-budget:auspex default-budget:auspex)
     ::  and the budget is the owner's: the same store fits a bigger one
     %+  expect-eq  !>([%.y ~])
     !>  (shed-for:auspex ~[[0v1 ~2026.1.1 default-budget:auspex]] ~ 1 100 (mul 2 default-budget:auspex))
@@ -1061,7 +1083,11 @@
   =/  reply  (forge them (sy ~[us]) 'a' 'c' ~2026.1.2 ~)
   ::  we wrote to ourselves
   =/  self   (forge us (sy ~[us]) 'a' 'b' ~2026.1.1 ~)
+  ::  in a group thread, the peer answers someone else, not us
+  =/  aside  (forge them (sy ~[~nec]) 'a' 'd' ~2026.1.3 ~)
   ;:  weld
+    ::  another's message brings the thread in even when it is not to us
+    (expect !>((in-inbox:auspex us ~[ours aside] | |)))
     ::  our own outgoing message, alone, is Sent and NOT Inbox
     (expect !>(!(in-inbox:auspex us ~[ours] | |)))
     ::  a message from us TO us belongs in the Inbox
@@ -1121,10 +1147,16 @@
   =/  ok=draft:sur   [%0 0v1 (sy ~[~palnet-sampel]) 'subject' 'body' ~ ~2026.1.1]
   =/  fat=draft:sur  ok(body (crip (reap 100.001 'a')))
   =/  loud=draft:sur  ok(subject (crip (reap 1.001 'a')))
+  =/  ships  |=(n=@ud (sy (turn (gulf 1 n) |=(i=@ `@p`i))))
   ;:  weld
     (expect !>((draft-ok:auspex ok)))
     (expect !>(!(draft-ok:auspex fat)))
     (expect !>(!(draft-ok:auspex loud)))
+    (expect !>(!(draft-ok:auspex ok(to (ships +(max-to:auspex))))))
+    ::  and each cap admits its own value
+    (expect !>((draft-ok:auspex ok(body (crip (reap max-body:auspex 'a'))))))
+    (expect !>((draft-ok:auspex ok(subject (crip (reap max-subj:auspex 'a'))))))
+    (expect !>((draft-ok:auspex ok(to (ships max-to:auspex)))))
   ==
 ::
 ::  a rule with no condition matches everything, and with `archive` set
@@ -1139,6 +1171,9 @@
     (expect !>((rule-ok:auspex by-from)))
     (expect !>((rule-ok:auspex by-subj)))
     (expect !>(!(rule-ok:auspex bad-label)))
+    ::  a subject condition is capped like a subject, cap included
+    (expect !>((rule-ok:auspex by-subj(subject `(crip (reap max-subj:auspex 'a'))))))
+    (expect !>(!(rule-ok:auspex by-subj(subject `(crip (reap +(max-subj:auspex) 'a'))))))
   ==
 ::
 ::  AN EMPTY SUBJECT IS NOT A CONDITION. [~ ''] is a cell, so a presence
@@ -1289,6 +1324,11 @@
       !>  (peer-cap-error:auspex ~sampel-palnet c `our-proto:auspex)
     ::  and so does a silent peer, which is version 1 and therefore us.
     (expect-eq !>(`(unit @t)`~) !>((peer-cap-error:auspex ~sampel-palnet c ~)))
+    ::  a peer's cap admits its own value: exactly its count, its size
+    %+  expect-eq  !>(`(unit @t)`~)
+    !>  (peer-cap-error:auspex ~sampel-palnet c `[%auspex ~[1] ~[%auspex-chain] base(max-attach 3)])
+    %+  expect-eq  !>(`(unit @t)`~)
+    !>  (peer-cap-error:auspex ~sampel-palnet c `[%auspex ~[1] ~[%auspex-chain] base(max-blob 1)])
     ::  the SIZE bound is the peer's too, not only the count.
     %+  expect-eq
       !>  `(unit @t)`[~ '~sampel-palnet accepts an attachment of at most 0 bytes']
@@ -1507,14 +1547,26 @@
     (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size big) ~bus %verified 1 0)))
     %+  expect-eq  !>(|)
     !>((auto-fetch:auspex s ~zod %verified 1 (div (mul default-budget:auspex 3) 4)))
+    ::  a file that lands exactly on the 3/4 share still comes in
+    %+  expect-eq  !>(&)
+    !>((auto-fetch:auspex s ~zod %verified 1 (dec (div (mul default-budget:auspex 3) 4))))
   ==
 ::
 ::  +settings-ok: a budget that holds one file and fits a loom; a ship
 ::  on one list at most
 ++  test-settings-ok-bounds
   =/  s=settings:sur  [%0 0 ~ ~ default-budget:auspex]
+  =/  ships  |=(n=@ud (sy (turn (gulf 1 n) |=(i=@ `@p`i))))
   ;:  weld
     (expect-eq !>(&) !>((settings-ok:auspex s)))
+    ::  every bound admits its own value
+    (expect-eq !>(&) !>((settings-ok:auspex s(auto-size max-blob:auspex))))
+    (expect-eq !>(&) !>((settings-ok:auspex s(budget max-blob:auspex))))
+    (expect-eq !>(&) !>((settings-ok:auspex s(budget max-budget:auspex))))
+    (expect-eq !>(&) !>((settings-ok:auspex s(allow (ships max-listed:auspex)))))
+    (expect-eq !>(&) !>((settings-ok:auspex s(block (ships max-listed:auspex)))))
+    (expect-eq !>(|) !>((settings-ok:auspex s(allow (ships +(max-listed:auspex))))))
+    (expect-eq !>(|) !>((settings-ok:auspex s(block (ships +(max-listed:auspex))))))
     (expect-eq !>(|) !>((settings-ok:auspex s(budget (dec max-blob:auspex)))))
     (expect-eq !>(|) !>((settings-ok:auspex s(budget +(max-budget:auspex)))))
     (expect-eq !>(|) !>((settings-ok:auspex s(auto-size +(max-blob:auspex)))))

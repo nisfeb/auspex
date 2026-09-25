@@ -130,6 +130,28 @@
     (expect-eq !>(`(list @t)`~['work']) !>(?~(got ~ add.u.got)))
   ==
 ::
+::  label, archive and draft, each as the exact body ui/src/api.ts
+::  posts. A renamed key is a route that 400s every click.
+++  test-de-label
+  %+  expect-eq  !>(`(unit label-req:web)`[~ 0v1a 'work' &])
+  !>  (de-label:web (jo '{"thread-id":"0v1a","label":"work","add":true}'))
+::
+::  `archived`, where a rule's field is `archive`: not a typo to fix.
+++  test-de-archive
+  %+  expect-eq  !>(`(unit [@uv ?])`[~ 0v1a &])
+  !>  (de-archive:web (jo '{"thread-id":"0v1a","archived":true}'))
+::
+++  test-de-draft
+  %+  expect-eq
+    !>  `(unit draft-req:web)`[~ 0v1a (sy ~[~zod]) 's' 'b' ~]
+  !>  (de-draft:web (jo '{"id":"0v1a","to":["~zod"],"subject":"s","body":"b","prev":null}'))
+::
+::  the client mints the id; a draft without one could never be saved
+::  over again, so it is refused rather than given one here.
+++  test-de-draft-needs-an-id
+  %+  expect-eq  !>(`(unit draft-req:web)`~)
+  !>  (de-draft:web (jo '{"to":["~zod"],"subject":"s","body":"b","prev":null}'))
+::
 ::  ── mailing lists ───────────────────────────────────────────────────
 ::
 ::  A list is a NAME and a SET OF SHIPS. The name becomes a path segment

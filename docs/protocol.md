@@ -1641,8 +1641,8 @@ it.
 **15 tests.** Run it with `-test`, alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  89 tests
--test /=grubbery=/tests/lib/auspex-web ~       ::  47 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  90 tests
+-test /=grubbery=/tests/lib/auspex-web ~       ::  51 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 ```
 
@@ -1650,7 +1650,7 @@ it.
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **89 tests**, the discovery ones among them
+be diffed; **90 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1693,6 +1693,7 @@ be diffed; **89 tests**, the discovery ones among them
 | `+attach-ok` enforces the same caps as `+file-ok` without the bytes. | `test-attach-ok-enforces-the-same-caps` |
 | The attachment count cap is `max-attach` and not a number of its own. | `test-attaches-ok-caps-the-count` |
 | `name` and `mime` refuse control bytes at the boundary. | `test-text-ok-refuses-control-bytes` |
+| The send route checks a ref's count, `name` and `mime` before reading any blob. | `test-refs-ok-checks-all-but-size` |
 | Eviction takes unreferenced blobs, oldest first; a referenced blob is never evicted. | `test-unreferenced-is-oldest-first` |
 | `+shed-for` refuses rather than half-evicting when the store cannot be made to fit. | `test-shed-for-refuses-rather-than-half-evicting` |
 | Swapping an attachment breaks the signature. | `test-swapped-attachment-is-forged` |
