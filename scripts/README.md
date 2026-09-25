@@ -80,3 +80,13 @@ pier's `conn.sock`, in about 7 s. `hoon-mutate.py` breaks one thing at a time
 in the libs and lists what no test noticed. Usage is in the kit's README;
 auspex's own results are in `docs/hoon-testing.md`. Update the kit there,
 never here, then re-vendor.
+
+## api-matrix.mjs: the HTTP API, end to end, on a dev ship
+
+```
+node scripts/api-matrix.mjs http://localhost:8080 <cookie-file>
+```
+
+16 checks over every route the clients use, including the refusals. It
+writes mail, drafts, rules and lists on the ship, then deletes all of them.
+**Dev ships only.** See `docs/hoon-testing.md`, "Step 2".

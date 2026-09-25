@@ -280,6 +280,37 @@ Lessons:
 - **`~wex` moved ports on restart.** It answers on 8080 now and `~feb` on
   8081; `curl localhost:<port>/~/host` says which ship is which.
 
+### Step 2: the routes, end to end
+
+`scripts/api-matrix.mjs <base-url> <cookie-file>` drives every route the
+clients use on a live dev ship, the way the web client does. It sends mail to
+the ship itself, replies, reads and unreads, folds, labels, archives,
+searches, uploads and downloads an attachment, saves drafts, rules and lists,
+round-trips settings, and checks the refusals: bad JSON, bad recipients, a
+read body sent to the delete route (release 17's bug), a label that is not a
+term, and settings out of bounds. 16 checks. It needs Node 24 or newer and
+no packages.
+
+Everything it makes carries a per-run tag and is deleted in a `finally`,
+and settings are put back. A write is answered before the writer applies
+it, so every read after a write polls until the change lands.
+
+**It catches what the unit tests can't.** Renaming the `archive` route in
+the nexus on `~wex`, and nothing else, failed exactly one check
+(`archive: expected 200, got 404`), and restoring it passed all 16. No lib
+test can see a route pointed at the wrong handler, a missing grant or a mark
+the nexus doesn't hold.
+
+**Logging in without the dojo.** Jael answers the `+code` scry to a khan
+thread over `conn.sock`, the same channel the kit uses:
+`(scry @p [%j %code (scot %p our.bowl) ~])`. POST it to `/~/login` and keep
+**only the cookie** (never the code, and never print it).
+
+The first run corrected two of my own assumptions: `whoami`'s `caps` is
+`{keys: bool}` (whether the ship can sign), not the size caps; and
+`0v1.2345` is not a valid `@uv` (groups after the first are 5 digits), so
+it's a 400, and only a well-formed id that doesn't exist gets a 404.
+
 **Web-lib mutation verdicts are void.** `calendar-df` found that
 `hoon-mutate.py` left the previous lib's last mutant on the desk when a run
 moved to the next lib, so every `auspex-web` mutant ran against two breaks.
