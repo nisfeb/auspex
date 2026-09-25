@@ -1658,7 +1658,7 @@ be diffed; **89 tests**, the discovery ones among them
 | A signature made with a ship's key verifies against that ship's key. | `test-sign-verify-roundtrip` |
 | A signature does not verify against a different ship's key. | `test-sign-wrong-key-fails` |
 | A signature does not verify against a different message. | `test-sign-wrong-message-fails` |
-| The digest is `(shaf %auspex (sham unsigned))`, computed directly and not reimplemented by callers. | `test-vectors-the-document-says-what-it-is` |
+| The digest is `(shaf %auspex (sham unsigned))`: the file states the rule, and the lib reproduces every signed case's published digest. | `test-vectors-the-document-says-what-it-is`, `test-vectors-root` |
 | The digest is domain-separated: it differs from the unsalted `sham` and from the same noun salted for another protocol. | `test-digest-domain-separated` |
 | `msg-id` covers every one of the nine signed fields, `attachments` and `body-mime` included. | `test-msg-id-covers-every-field` |
 | A third party who has never spoken to the author verifies the author's signature out of a forwarded chain. | `test-third-party-verifies-forwarded-chain` |

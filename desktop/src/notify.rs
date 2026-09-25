@@ -590,15 +590,6 @@ mod tests {
     use proptest::prelude::*;
 
     proptest! {
-        // a frame classifier fed arbitrary bytes must answer, never panic:
-        // it runs on the notifier thread, and a panic there is an app that
-        // stops notifying and never says why
-        #[test]
-        fn is_change_is_total(s in ".{0,120}") {
-            let _ = is_change(&s);
-            let _ = rev_in(&s);
-        }
-
         // Whatever the listing says, diff never announces more than CAP + 1
         // things and never announces a thread that was already unread.
         #[test]

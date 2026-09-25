@@ -80,6 +80,6 @@ function describeRecipient(r) {
 }
 
 export {
-  DOMAIN, isShip, shipToAddress, addressToShip, bareAddress,
+  DOMAIN, isShip, shipToAddress, addressToShip,
   isAuspexAddress, describeRecipient,
 }

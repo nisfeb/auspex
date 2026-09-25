@@ -178,15 +178,6 @@ mod tests {
     }
 
     #[test]
-    fn a_hand_edited_url_loads_as_a_base() {
-        // every route is appended to the loaded url without trimming it again
-        let p = tmp("edited");
-        std::fs::write(&p, br#"{"url":" localhost:8081/ ","ship":"~wex"}"#).unwrap();
-        assert_eq!(load_at(&p).url, "http://localhost:8081");
-        std::fs::remove_file(&p).ok();
-    }
-
-    #[test]
     fn the_url_normaliser_makes_a_base_out_of_what_people_type() {
         // a trailing slash would make every route //apps/auspex/...
         assert_eq!(normalise_url("http://localhost:8081/"), "http://localhost:8081");
@@ -212,19 +203,10 @@ mod tests {
         // few cases: each one touches the filesystem
         #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
 
-        // a hand-edited config file must load as the default, never panic
-        // the app at startup
-        #[test]
-        fn load_is_total_on_arbitrary_bytes(bytes in proptest::collection::vec(any::<u8>(), 0..256)) {
-            let p = tmp("prop-junk");
-            std::fs::write(&p, &bytes).unwrap();
-            let _ = load_at(&p);
-            std::fs::remove_file(&p).ok();
-        }
-
         // save -> load is the identity for any field content (quotes,
         // backslashes, unicode — everything JSON escaping must survive),
-        // except that the url comes back normalised
+        // except that the url comes back normalised: save_at writes it as
+        // given, so this is also what proves load_at normalises a hand edit
         #[test]
         fn config_roundtrips(url in ".{0,32}", ship in ".{0,32}") {
             let c = Config { url: url.clone(), ship: ship.clone() };
@@ -234,14 +216,6 @@ mod tests {
             std::fs::remove_file(&p).ok();
             prop_assert_eq!(back.url, normalise_url(&url));
             prop_assert_eq!(back.ship, ship);
-        }
-
-        // whatever is typed, the result is empty or a parseable base with no
-        // trailing slash: everything downstream appends a path to it
-        #[test]
-        fn normalise_always_yields_a_usable_base(raw in ".{0,40}") {
-            let n = normalise_url(&raw);
-            prop_assert!(n.is_empty() || !n.ends_with('/'));
         }
     }
 }

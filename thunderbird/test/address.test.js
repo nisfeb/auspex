@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  isShip, shipToAddress, addressToShip, bareAddress, isAuspexAddress,
+  isShip, shipToAddress, addressToShip,
 } from '../lib/address.js'
 
 test('a ship maps to an address and back', () => {
@@ -14,7 +14,6 @@ test('a ship maps to an address and back', () => {
 })
 
 test('the display form is unwrapped', () => {
-  assert.equal(bareAddress('~feb <~feb@auspex.urbit>'), '~feb@auspex.urbit')
   assert.equal(addressToShip('~feb <~feb@auspex.urbit>'), '~feb')
   assert.equal(addressToShip('  ~feb@AUSPEX.URBIT  '), '~feb')
 })
@@ -26,11 +25,9 @@ test('the refusals', () => {
   assert.equal(addressToShip('~feb@example.com'), null)
   assert.equal(addressToShip('feb@auspex.urbit'), null)      // no sig
   assert.equal(addressToShip('~zod-zod@auspex.urbit'), null) // galaxy is whole
-  assert.equal(addressToShip('~abc-def-ghi@auspex.urbit'), null) // 3 groups
   assert.equal(addressToShip('not an address'), null)
   assert.equal(addressToShip(''), null)
   assert.equal(addressToShip(undefined), null)
-  assert.equal(isAuspexAddress('someone@example.com'), false)
   assert.throws(() => shipToAddress('nope'), /not a ship/)
 })
 

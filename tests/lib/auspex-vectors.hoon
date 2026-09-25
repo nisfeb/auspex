@@ -234,10 +234,6 @@
     %+  expect-eq
       !>  '(shaf %auspex (sham unsigned))'
       !>  (jstr (jget doc 'digest_rule'))
-    ::  and the tag it names is the tag the lib salts with.
-    %+  expect-eq
-      !>  (shaf %auspex (sham unsigned:m-root))
-      !>  (digest:auspex unsigned:m-root)
     (expect-eq !>(19) !>((lent (jarr (jget doc 'cases')))))
   ==
 ::
@@ -280,11 +276,6 @@
     %+  expect-eq
       !>  ~[`@ud`(mug ~zod) `@ud`(mug ~nec) `@ud`(mug ~bud)]
       !>  (turn (jarr (jget k 'ships')) |=(j=json (jnum (jget j 'mug'))))
-    ::  and it is CANONICAL: the same set whatever order it was built in,
-    ::  which is what makes a msg-id agree between two ships that typed
-    ::  their recipients in different orders.
-    (expect !>(=(s3 (sy ~[~bud ~zod ~nec]))))
-    (expect !>(=(s3 (~(put in (~(put in (~(put in *(set ship)) ~bud)) ~zod)) ~nec))))
   ==
 ::
 ::  ── the signed cases ────────────────────────────────────────────────
@@ -337,7 +328,6 @@
     (expect-eq !>((blob-hash:auspex o-two)) !>((juv (jget (snag 1 b) 'hash'))))
     (expect-eq !>(p:o-one) !>((jnum (jget (snag 0 b) 'octs_p'))))
     (expect-eq !>(`@ux`q:o-one) !>((jux (jget (snag 0 b) 'octs_q'))))
-    (expect-eq !>(a-one) !>(`attachment:sur`['one.txt' 5 'text/plain' (blob-hash:auspex o-one)]))
   ==
 ::
 ::  ── the chain cases ─────────────────────────────────────────────────

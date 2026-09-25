@@ -221,7 +221,7 @@ function planThread(thread, entry, ourShip, imported) {
 }
 
 export {
-  VERDICT_RANK, rank, dedupeCopies, referencesFor, folderFor,
+  dedupeCopies, referencesFor, folderFor,
   threadsToFetch, snapshotOf, readStateOps, planThread,
-  FLAGGED, JUNK, flagsFor, labelKey, flagUpdate, flagOps,
+  flagsFor, flagUpdate, flagOps,
 }
