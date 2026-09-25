@@ -78,8 +78,13 @@
     |=  [url=@t =road:tarball]
     =/  t  (call & %'GET' url '')
     (expect-eq !>(`(list road:tarball)`~[road]) !>((peeks:ft t)))
-  ::  a POST to an asset's path is not a request for the asset
-  (expect-eq !>(`(list road:tarball)`~) !>((peeks:ft (call & %'POST' '/apps/auspex/app.js' ''))))
+  ::  and a POST to any asset's path is not a request for the asset
+  ^-  tang
+  %-  zing
+  %+  turn  cases
+  |=  [url=@t =road:tarball]
+  =/  t  (call & %'POST' url '')
+  (expect !>(!(lien (peeks:ft t) |=(r=road:tarball =(r road)))))
 ::
 ::  whoami asks the ship who it is, then reads what it can sign with
 ++  test-whoami-reads-our-ship-and-caps
@@ -88,5 +93,12 @@
   ;:  weld
     (expect !>((lien asks |=(a=* =(%our a)))))
     (expect-eq !>(`(list road:tarball)`~[[%| 2 %& / %caps]]) !>((peeks:ft t)))
+    ::  and only for a GET. The mail gate below asks for `our` too, but
+    ::  only whoami reads the caps.
+    =/  p  (call & %'POST' '/apps/auspex/api/whoami' '')
+    (expect !>(!(lien (peeks:ft p) |=(r=road:tarball =(r [%| 2 %& / %caps])))))
+    ::  and only at its own path: another GET is not a whoami
+    =/  d  (call & %'GET' '/apps/auspex/api/drafts' '')
+    (expect !>(!(lien (peeks:ft d) |=(r=road:tarball =(r [%| 2 %& / %caps])))))
   ==
 --

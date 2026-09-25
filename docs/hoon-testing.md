@@ -352,6 +352,30 @@ Lessons:
 - **A peek is a fine place to stop.** Which grub a route reads is its
   decision; asserting that needs no fake answer.
 
+### Wide conjunctions, 2026-09-25
+
+The orrery session noted that `conjunct` only read a tall `?&`/`?|`, while
+most one-line guards are written wide: `&((gte now asked.r) (lth …))`.
+The kit's `conjunct` now drops one child of a wide `&(`, `|(`, `?&(` or
+`?|(` too, and `--ops wide` reruns just that half. On auspex's libs: 26
+new mutants, 22 killed, 2 no-build, 2 survived, and both were equivalent
+once traced.
+
+- `in-view`'s `(label-ok lab)` beside `(~(has in labels.mt) lab)`: the
+  writer validates every stored label, so a bad label is never in the set
+  and the membership test already refuses it. It's defense in depth.
+- `best-copy`'s `=(i (id unsigned.m))`: the verdict lookup is keyed on
+  `[i sig.m]` with `i` the newest message's id, so no other message can
+  look verified there. A new assertion pins the promise anyway (an older
+  message's verified copy never stands in for the newest), against a
+  refactor of that key.
+
+**Rebuilding the nexus costs every lib mutant, not just nexus mutants.**
+With `app.hoon` in `LIBS`, every chain-lib mutant rebuilds the nexus that
+imports it, so a lib mutant went from about 10 s to 20 s or more. Plan
+mutation time with that in mind, or leave the nexus out of `LIBS` for runs
+that only touch the libs.
+
 **The web lib, rerun on the fixed runner.** `calendar-df` found that
 `hoon-mutate.py` left the previous lib's last mutant on the desk when a run
 moved to the next lib, so every `auspex-web` mutant had run against two

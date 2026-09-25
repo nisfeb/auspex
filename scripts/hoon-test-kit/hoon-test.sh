@@ -112,7 +112,7 @@ if [[ "${1:-}" == setup ]]; then
   # file fails the whole suite as a build error.
   marks=""
   for k in $MARKS; do marks+=" /mar/$k/hoon"; done
-  ted <<EOF
+  ted >/dev/null <<EOF
 =/  m  (strand ,vase)
 =/  paz=(list path)  ~[/lib/test/hoon$marks]
 =|  fil=soba:clay
@@ -125,6 +125,7 @@ if [[ "${1:-}" == setup ]]; then
 ;<  ~  bind:m  (send-raw-card [%pass /setup %arvo %c %info %$DESK %& fil])
 (pure:m !>(%ok))
 EOF
+  echo "setup done: /lib/test.hoon and the marks are on %$DESK"
   # SHIP_FILES: libs the app's code expects from a desk on this ship
   # (a grubbery nexus's tarball, nexus and fiberio come from %grubbery),
   # copied from that desk so they match what is installed. Unlike the
@@ -136,7 +137,7 @@ EOF
       p=${f#*:}; p=${p%.hoon}
       sf+=" [%${f%%:*} /$p/hoon]"
     done
-    ted <<EOF
+    got=$(ted <<EOF
 =/  m  (strand ,vase)
 =/  paz=(list [@tas path])  ~[${sf# }]
 =|  fil=soba:clay
@@ -150,10 +151,13 @@ EOF
   ;<  o=@t  bind:m  (scry @t (weld /cx/$DESK p))
   ?:  =(o t)  \$(paz t.paz)
   \$(paz t.paz, fil [[p %mut %hoon !>(t)] fil])
-?~  fil  (pure:m !>(%same))
+?~  fil  (pure:m !>(1))
 ;<  ~  bind:m  (send-raw-card [%pass /setup %arvo %c %info %$DESK %& fil])
-(pure:m !>(%copied))
+(pure:m !>(0))
 EOF
+)
+    if [[ "$got" == 0 ]]; then echo "setup: SHIP_FILES copied or refreshed on %$DESK"
+    else echo "setup: SHIP_FILES already current on %$DESK"; fi
   fi
   exit
 fi

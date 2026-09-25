@@ -1818,6 +1818,10 @@
     (expect-eq !>(b) !>((best-copy:auspex (my ~[[[i sig.b] %verified]]) ~[a b b2])))
     ::  none verified: the newest as it stands
     (expect-eq !>(b2) !>((best-copy:auspex ~ ~[a b b2])))
+    ::  and an OLDER message's verified copy never stands in for the
+    ::  newest: the row is about the newest message, whatever its verdict
+    %+  expect-eq  !>(b)
+    !>  (best-copy:auspex (my ~[[[(id:auspex unsigned.a) sig.a] %verified]]) ~[a b])
   ==
 ::
 ::  the storage layout: each copy at its ancestry, in a slot of its own,

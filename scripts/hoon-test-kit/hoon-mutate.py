@@ -2,7 +2,7 @@
 """Mutation check for the Hoon libs: break one thing, run the suites, and
 report every break that no test noticed. See README.md and PLAYBOOK.md.
 
-    hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--list]
+    hoon-mutate.py <pier> [--ops OP,...] [--only ARM,...] [--since REV] [--list]
 
 Each mutant is written into the test desk's mount, never into the repo, and
 the clean lib is synced back when the run ends, however it ends. A mutant
@@ -97,7 +97,7 @@ def boundary(lines):
             yield n, f'{op}->{SWAP[op]}', {n: new}
 
 
-def conjunct(lines):
+def tall_conjunct(lines):
     """One child of a tall ?& (or ?|) replaced by its identity, & (or |):
     the guard as if that condition were never written."""
     for n, line in enumerate(lines):
@@ -119,6 +119,63 @@ def conjunct(lines):
             edit[s] = head + unit + '\n'
             child = (lines[s][col:] if s == n else lines[s].strip()).strip()
             yield s, f'{rune} drop {child[:40]}', edit
+
+
+def wide_children(code, start):
+    """The top-level children of the wide form whose ( is at code[start],
+    and the index of its ). Children are split at single spaces outside
+    any bracket or quote. None when the form doesn't close on this line."""
+    depth, quote, kids, cur = 0, None, [], start + 1
+    i = start + 1
+    while i < len(code):
+        c = code[i]
+        if quote:
+            if c == '\\':
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in '\'"':
+            quote = c
+        elif c in '([{':
+            depth += 1
+        elif c in ')]}':
+            if depth == 0:
+                if c != ')':
+                    return None
+                kids.append((cur, i))
+                return kids, i
+            depth -= 1
+        elif c == ' ' and depth == 0:
+            kids.append((cur, i))
+            cur = i + 1
+        i += 1
+    return None
+
+
+def wide_conjunct(lines):
+    """One child of a wide &(...), |(...), ?&(...) or ?|(...) replaced by
+    its identity, as conjunct does for the tall forms: orrery and auspex
+    write most one-line guards this way."""
+    for n, line in enumerate(lines):
+        code = code_part(line)
+        for m in re.finditer(r'(?<![a-z0-9$%^*~=?!-])(\?)?([&|])\(', code):
+            got = wide_children(code, m.end() - 1)
+            if not got:
+                continue
+            kids, close = got
+            if len(kids) < 2:
+                continue
+            rune = (m.group(1) or '') + m.group(2) + '('
+            for a, b in kids:
+                new = line[:a] + m.group(2) + line[b:]
+                yield n, f'{rune} drop {code[a:b][:40]}', {n: new}
+
+
+def conjunct(lines):
+    """Every condition of every conjunction, tall or wide."""
+    yield from tall_conjunct(lines)
+    yield from wide_conjunct(lines)
 
 
 def swapper(pattern, table, label):
@@ -144,6 +201,22 @@ equal = swapper(r'(?:(?<=[\s(\[])|^)!?=\(', {'=(': '!=(', '!=(': '=('}, 'equal')
 flag = swapper(r'%\.[yn]\b', {'%.y': '%.n', '%.n': '%.y'}, 'flag')
 
 MENU = {op.__name__: op for op in [boundary, conjunct, branch, equal, flag]}
+MENU["wide"] = wide_conjunct  # conjunct's wide half alone, for a rerun after it was added
+
+
+def touched_arms(rev):
+    """The arms a git diff against rev touches, per lib: where a big lib's
+    change is, so the expensive ops run there and not over every arm."""
+    arms = set()
+    for path, lib in LIBS:
+        diff = subprocess.run(['git', '-C', ROOT, 'diff', '-U0', rev, '--', path],
+                              capture_output=True, text=True, check=True).stdout
+        lines = open(path).readlines()
+        for m in re.finditer(r'^@@ -\S+ \+(\d+)(?:,(\d+))? @@', diff, re.M):
+            start, count = int(m.group(1)), int(m.group(2) or 1)
+            for n in range(max(start - 1, 0), min(start - 1 + max(count, 1), len(lines))):
+                arms.add((lib, arm_at(lines, n)))
+    return arms
 
 
 def mutants(menu):
@@ -177,12 +250,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('pier')
     ap.add_argument('--only', help='comma-separated arm names')
+    ap.add_argument('--since', metavar='REV',
+                    help='only the arms a git diff against REV touches (a branch, a tag, HEAD)')
     ap.add_argument('--list', action='store_true', help='print the mutants and stop')
     ap.add_argument('--ops', default='boundary,conjunct',
                     help=f'comma-separated, from: {",".join(MENU)} (default: %(default)s)')
     a = ap.parse_args()
     only = set(a.only.split(',')) if a.only else None
-    todo = [m for m in mutants([MENU[o] for o in a.ops.split(',')]) if not only or m[2] in only]
+    touched = touched_arms(a.since) if a.since else None
+    todo = [m for m in mutants([MENU[o] for o in a.ops.split(',')])
+            if (not only or m[2] in only) and (touched is None or (m[0], m[2]) in touched)]
     if a.list:
         for lib, line, arm, what, _ in todo:
             print(f'{lib}:{line}  +{arm}  {what}')
@@ -204,7 +281,8 @@ def main():
             t0 = time.time()
             r = run(a.pier, {'NOSYNC': '1', 'TEST_T': '120'})
             if r.returncode == 4:  # no answer: the ship is down, stop here
-                print(f'[{i}/{len(todo)}] the ship stopped answering; results from here are void', flush=True)
+                print(f'[{i}/{len(todo)}] the ship stopped answering during {lib}:{line} +{arm} {what}; '
+                      'results from here are void', flush=True)
                 break
             verdict = {0: 'SURVIVED', 1: 'killed', 3: 'no-build'}.get(r.returncode, 'timeout')
             if verdict == 'timeout':

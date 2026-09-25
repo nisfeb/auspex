@@ -35,6 +35,7 @@ scripts/hoon-test-kit/hoon-mutate.py <pier> --list     # always size a run first
 scripts/hoon-test-kit/hoon-mutate.py <pier>            # boundary,conjunct (the cheap pass)
 scripts/hoon-test-kit/hoon-mutate.py <pier> --ops branch,equal,flag
 scripts/hoon-test-kit/hoon-mutate.py <pier> --only <arm>,<arm>   # recheck fixed arms
+scripts/hoon-test-kit/hoon-mutate.py <pier> --since <rev>          # arms a diff touches
 ```
 
 Each test prints `OK`, `FAILED` (with expected/actual) or `CRASHED` (with
@@ -60,6 +61,11 @@ asserting the pokes and responses the fiber sent.
   and the time, and prefer a ship nothing else is building on.
 - **A crash is stop-and-report.** Never restart a pier yourself. If results
   suddenly come back in 0 s, the ship is down, whatever the verdicts say.
+  When the runner says the ship stopped answering, believe it: a vere
+  process still listed in `ps` is not a ship that answers.
+- **Mutate new code while it is new.** Run `--since <rev>` right after a
+  change: code written in one pass arrives without its boundary tests
+  (44 of 51 survived on orrery's first such run).
 - **After a crash, settle the desk** with `NOSYNC=1 hoon-test.sh <pier>`.
   A clean mount is not a clean desk.
 - **Check the no-build rate per op** before trusting survivors. A high rate

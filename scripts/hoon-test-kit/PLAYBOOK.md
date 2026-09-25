@@ -18,8 +18,10 @@ Do these in order. Each step has a condition for moving on.
 2. **Set up the kit and run a baseline.** Vendor the kit, write
    `hoon-test.conf`, then `|new-desk` and `|mount` the test desk, run
    `setup`, then run the suites. *Done when* `hoon-test.sh <pier>` exits 0
-   and the count of `OK` lines in the ship's terminal matches the number of
-   `++  test-` arms in the files.
+   and the count of distinct `OK` lines in the ship's terminal matches the
+   number of `++  test-` arms in the files. Count them with `sort -u`: the
+   scrollback keeps earlier runs, and `tmux clear-history` does not clear
+   what is still on the screen.
 3. **Run the cheap mutation pass.** `hoon-mutate.py <pier> --list`, then
    the default ops (`boundary,conjunct`). They aim at caps and guards, and
    give the most real findings per commit. *Done when* every survivor is
@@ -86,6 +88,9 @@ These kinds of mutant are equivalent, with no output that could differ:
   down to N when there are exactly N.
 - **A bound that limits cost, not the answer**, like a `scag` before a
   walk. It is real, but output can't show it.
+- **A spelling the rest of the code cannot reach.** On orrery,
+  `(gth (lent w) 3)` → `gte` before stripping a plural `s` only changes
+  three-letter words, and no two-letter weekday name exists to match.
 - **A `$~` default on a mold that is never bunted.** Grep the app for
   `*<mold>`. If the mold is bunted, the default is a real contract, so
   test the bunt. If it is only ever clammed with `;;`, the mutant is
@@ -106,6 +111,20 @@ What is left is a real gap, usually one of these:
 A check that is only defensive, reachable only if some earlier validation
 was skipped, can stay untested. Say so in the triage notes.
 
+Some survivors are real but not worth a test. Record them as **accepted**
+with the reason, never as equivalent, since output can differ:
+
+- **An exact-instant comparison against now in a pass that reruns every
+  few minutes**, such as `(lte r.occ now)`. At the one instant of equality
+  the pass decides one way, and the next pass decides the same as either
+  spelling would.
+- **A sort comparator on ties the output never promises to order.**
+
+On orrery's first `--since` run, 44 of 51 mutants survived: 20 real gaps,
+20 accepted and 4 equivalent. Code written in a
+fix pass arrives without its boundary tests, so run `--since <rev>` right
+after the change.
+
 ## Writing tests: traps
 
 - **`weld`/`zing` over literal tapes can `fuse-loop`** the type checker
@@ -113,9 +132,11 @@ was skipped, can stay untested. Say so in the triage notes.
   inside a `weld`). Cast: `` `tape`(zing `(list tape)`(reap n "é")) ``.
 - **`%+  expect  !>` is wrong**: `expect` takes one vase. Write
   `(expect !>(…))`.
-- **`?=(%a -.(expr))` and `*mold(field x)` do not parse**: `?=` needs a
-  wing, and a bunt takes no changes. Bind the value with `=/` first.
-  (From auspex.)
+- **`*mold(field x)` does not parse**: a bunt takes no changes. Bind it
+  with `=/` first, then change the face. (`?=` needing a wing is under
+  "Writing the missing test".)
+- **`roll` or `weld` over an untyped literal list mull-grows.** Cast it
+  (`` `(list entry)`~[…] ``) or weld through a dry gate.
 - **Before trusting a count, check what a structure really holds.** A
   day span puts both its edges in the calendar's index, so a year of
   dates is two keys, not one. The first run of a new suite is as likely to
@@ -128,6 +149,19 @@ was skipped, can stay untested. Say so in the triage notes.
 
 - **Put it in the test that already owns the rule.** Add a new test only
   when nothing owns it.
+- **One case per clause of a `?|` or `?&`.** A fixture that meets every
+  clause at once kills none of the `conjunct` mutants. Orrery's one
+  "ship's own" calendar event carried all three marks (an `orrery` meta
+  key, an `orrery-` id and an `orrery` tag), so dropping any one survived.
+  Test an event with each mark alone.
+- **A window has two edges and each has two sides.** Something ending
+  exactly as the window opens is outside, and so is something starting
+  exactly as it closes. An all-day event ends at exactly the next
+  midnight, so this edge is the common case, not a corner.
+- **Build cap-sized values in place.** Use `(crip (reap 64 'a'))` for a
+  string of exactly the cap, and `(turn (gulf 1 n) f)` for n items.
+- **`?=` takes a wing, not an expression.** For a unit an arm answers,
+  test `!=(~ (f x))` or bind it first with `=/`.
 - **Test caps as a pair**: exactly the cap is accepted, and one past it is
   refused.
 - **For ordering, test the promise, not the key.** Which field breaks a
@@ -149,6 +183,19 @@ app is a couple of hundred commits.
   `--loom 33` with `loom: external fault`, about 150 test-desk commits
   into a day, while another session rebuilt a nexus on the same ship.
 - **A crash is stop-and-report.** Only the ship's owner restarts a pier.
+  Believe the runner when it says the ship stopped answering. On
+  2026-09-25, `~nec`'s vere process was still listed while the ship was
+  dying, and an agent read it as slow. The runner now names the mutant
+  that was running.
+- **A crash is not always a full loom.** `~wex` (`--loom 33`) and `~nec`
+  (the default 2 GB) both died during kit runs with `loom: external
+  fault: 0`, a fault at address 0, outside the loom. After `~nec`'s
+  restart, `|mass` showed 617 MB marked of 2 GB, and three commits of a
+  6,200-line lib added only about 16 MB. The mutant running at the time
+  only flipped a comparison. The cause is open. To size the risk on your
+  ship, read `total marked:` from `|mass` before and after a few
+  mutants.
+
 - **Never type into a dojo someone may be using.** `|new-desk` and `|mount`
   are the owner's to run: if the pane shows input you did not send (a
   `|pack`, a half-typed line), stop and ask.
@@ -270,11 +317,6 @@ changing them.
 - **Name sites by `+$` and `+*` as well as `++`**, or a default inside a
   mold is credited to the next arm.
 
-## Writing Hoon tests: traps
-
-- **`roll` or `weld` over an untyped literal list mull-grows.** Cast it
-  (`` `(list entry)`~[…] ``) or weld through a dry gate.
-
 ## Not built yet
 
 - **CI.** The runner needs no dojo, so a fake ship booted in Actions can
@@ -282,3 +324,6 @@ changing them.
 - **An allowlist of reviewed equivalent mutants**, keyed by arm and op,
   so they stop being re-reported.
 - **More operators**: arithmetic, list operations, a deleted line.
+- **Wide conjunctions.** `conjunct` only reads a tall `?&` or `?|`. The
+  wide `&(a b)` and `|(a b)`, which orrery uses for most guards, are not
+  mutated yet.

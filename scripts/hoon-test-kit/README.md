@@ -88,7 +88,13 @@ scripts/hoon-test-kit/hoon-mutate.py <pier> --list                   # size a ru
 scripts/hoon-test-kit/hoon-mutate.py <pier>                          # boundary,conjunct
 scripts/hoon-test-kit/hoon-mutate.py <pier> --ops branch,equal,flag
 scripts/hoon-test-kit/hoon-mutate.py <pier> --only arm-a,arm-b       # recheck after a fix
+scripts/hoon-test-kit/hoon-mutate.py <pier> --since main              # only the arms a diff touches
 ```
+
+`--since <rev>` keeps the mutants in arms that `git diff <rev>` touches in
+the libs under test. On a big lib it is how the expensive ops stay
+affordable: on orrery's 6,200-line lib the whole menu is about 1,400
+mutants, and `--since HEAD` after one review pass was 428.
 
 `hoon-test.sh` exit codes:
 
@@ -100,7 +106,9 @@ scripts/hoon-test-kit/hoon-mutate.py <pier> --only arm-a,arm-b       # recheck a
 | 3 | a lib did not build (named). The compiler's message is only on the ship's terminal: clay slogs it and answers `~`. |
 | 4 | the ship did not answer. This is never a test verdict. |
 
-`hoon-mutate.py` needs about 10 s **and one commit** per mutant, and every
+`hoon-mutate.py` needs about 10 s **and one commit** per mutant (more for
+a big lib: each mutant rebuilds the whole lib and every test file, so
+orrery's 6,200 lines take about 16 s, and 15 to 60 s on a busy host), and every
 commit costs the ship loom. Size a run with `--list` first, and run long
 ones on a ship nothing else is building on (PLAYBOOK.md, "Look after the
 ship").
