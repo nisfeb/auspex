@@ -1667,6 +1667,8 @@ be diffed; **92 tests**, the discovery ones among them
 | A tampered body is `%forged`, not `%unverified`. | `test-tampered-body-is-forged` |
 | A tampered `life` is `%unverified`, not `%forged`. | `test-tampered-life-is-unverified` |
 | No key available is `%unverified`, never `%forged`. Moons land here. | `test-missing-key-is-unverified` |
+| With no keys at all, every copy is `%unverified`, a real forgery included: a missing key is never evidence of forgery. | `test-no-keys-is-all-unverified` |
+| The same chain with the keys does produce `%verified` and `%forged`, so the no-keys result is about the keys. | `test-no-keys-differs-from-keys` |
 | Merging the same chain twice is a no-op; double delivery must not duplicate. | `test-merge-dedupes` |
 | `+merge` orders by `sent` regardless of arrival order. | `test-merge-orders-by-sent` |
 | The thread root is the id of the root message, and every ship computes the same one. | `test-root-is-first-message-id` |
@@ -1686,17 +1688,20 @@ be diffed; **92 tests**, the discovery ones among them
 | A shadowed root (genuine plus tampered copy, same id) still resolves on first contact. | `test-thread-key-tolerates-a-shadowed-root` |
 | `+freeze` never overwrites a definitive verdict. | `test-freeze-keeps-a-definitive-verdict` |
 | `+freeze` lets a later poke upgrade an `%unverified`. | `test-freeze-upgrades-an-unverified` |
+| A delivery re-checks only unsettled copies: held `%verified` and `%forged` are skipped, a held `%unverified` and a new copy are checked. | `test-unsettled-skips-settled-copies` |
 | The input caps reject rather than truncate, and one bad message condemns the chain. | `test-input-caps-reject-on-any-message` |
 | The capacity bound counts distinct ids, not copies. | `test-distinct-ids-counts-ids-not-copies` |
 | The content address covers the length as well as the atom. | `test-blob-hash-covers-length` |
 | A blob is accepted only if its bytes hash to the address it was fetched under. | `test-blob-ok-rejects-wrong-bytes` |
 | `+describe`'s size and hash agree with the bytes it was built from. | `test-vectors-two-attachments` |
-| A file whose declared length is below its measured bytes is malformed. | `test-file-ok-rejects-malformed-octs` |
-| `+attach-ok` enforces the same caps as `+file-ok` without the bytes. | `test-attach-ok-enforces-the-same-caps` |
+| `+attach-ok` enforces `max-blob` and the `name` and `mime` caps from the metadata alone. | `test-attach-ok-enforces-the-same-caps` |
 | The attachment count cap is `max-attach` and not a number of its own. | `test-attaches-ok-caps-the-count` |
 | `name` and `mime` refuse control bytes at the boundary. | `test-text-ok-refuses-control-bytes` |
 | The send route checks a ref's count, `name` and `mime` before reading any blob. | `test-refs-ok-checks-all-but-size` |
 | Eviction takes unreferenced blobs, oldest first; a referenced blob is never evicted. | `test-unreferenced-is-oldest-first` |
+| Automatic download needs a `%verified` message from an unblocked author: an allowed one up to `max-blob`, anyone else up to `auto-size`, and never past 3/4 of the budget. | `test-auto-fetch-rules` |
+| Automatic download decides per attachment by the signed author, counting the running weight, so two files that each fit do not both fit past the share. | `test-auto-picks` |
+| Settings: the budget holds at least one largest file and at most `max-budget`, each list holds at most `max-listed`, and no ship is on both. | `test-settings-ok-bounds` |
 | `+shed-for` refuses rather than half-evicting when the store cannot be made to fit. | `test-shed-for-refuses-rather-than-half-evicting` |
 | Swapping an attachment breaks the signature. | `test-swapped-attachment-is-forged` |
 | The incoming attachment bound applies per message and rejects the chain whole. | `test-incoming-attachment-caps` |
@@ -1723,7 +1728,8 @@ be diffed; **92 tests**, the discovery ones among them
 | Search covers subject, body and the rendered sender. | `test-search-covers-subject-body-and-sender` |
 | Search finds a forged message and names it, drawing the row from the message that matched. | `test-search-finds-and-names-the-forged-message` |
 | An empty query has no newest match. | `test-newest-match-is-empty-without-a-query` |
-| Inbox is participant **or** direct, and not archived. | `test-inbox-is-participant-or-direct` |
+| Inbox is addressed to us, **or** from someone else, **or** direct, and not archived; our own sent thread alone is not Inbox. | `test-inbox-is-addressed-to-us-or-from-another` |
+| Every older meta reads as the current one, keeping its read set, labels and archive flag. | `test-the-meta-ladder-upgrades` |
 | A new thread's meta is neither archived nor direct. | `test-a-new-thread-is-neither-archived-nor-direct` |
 | A thread's time is its newest message's `sent`, whatever the order. | `test-last-sent-is-the-newest` |
 | Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
