@@ -211,7 +211,7 @@ pub fn diff(seen: &mut HashSet<String>, rows: &[Row]) -> Vec<Note> {
 fn note_for(r: &Row) -> Note {
     let subject = if r.subject.is_empty() { "(no subject)" } else { &r.subject };
     let title = if r.forged {
-        format!("FORGED · {} · {}", r.from, safe(subject, 120))
+        format!("FORGED · {} · {}", safe(&r.from, 60), safe(subject, 120))
     } else {
         format!("{} · {}", safe(&r.from, 60), safe(subject, 120))
     };
@@ -560,6 +560,10 @@ mod tests {
         r.forged = true;
         let n = note_for(&r);
         assert!(n.title.starts_with("FORGED · ~feb · "), "{}", n.title);
+        // a forgery's sender is escaped like everyone else's: it is the one
+        // field of a forged row that nobody signed as themselves
+        r.from = "<b>~feb</b>".into();
+        assert!(note_for(&r).title.starts_with("FORGED · &lt;b&gt;~feb&lt;/b&gt; · "), "{}", note_for(&r).title);
         // and a subject-less thread is still identifiable rather than ending
         // in a dangling separator
         let mut r = row("b", true);
