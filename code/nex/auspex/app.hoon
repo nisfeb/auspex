@@ -496,34 +496,9 @@
 ++  peer-rail   |=([root=@ud who=ship] ^-(road:tarball (rf root peer-dir (scot %p who))))
 ++  probe-dir   ^-(path /probe)
 ++  probe-rail  |=([root=@ud who=ship] ^-(road:tarball (rf root probe-dir (scot %p who))))
-::  +slot: the grub name of one SIGNED COPY.
-::
-::    (sham [id sig]), not a positional index. The spec writes this leaf as
-::    <n> without saying what n is; a position would have to be renumbered
-::    on every insert (a chain is ordered by `sent`, and mail arrives out of
-::    order), which is a thousand rewrites per delivery and, worse, makes
-::    the storage key something other than [id sig]. Deriving the name from
-::    [id sig] makes the anti-shadowing key and the storage key the same
-::    thing by construction: two copies of one message differing in
-::    signature cannot collide, a redelivery of the same chain is a no-op,
-::    and +prune sheds a copy by culling exactly one grub.
-::
-++  slot  |=([i=msg-id:uc s=@ux] ^-(@ta (scot %uv (sham [i s]))))
-::
-::  +node-dir: the directory one message's copies live in, relative to
-::  the thread's msg/ directory. Its segments ARE the message's ancestry,
-::  root first, so the path a copy is stored at is the whole answer to
-::  "what conversation led to this".
-::
-++  node-dir  |=(place=(list msg-id:uc) ^-(path (id-path:uc place)))
-::
-::  +sorted-dirs: directories shallowest first, which is the only order
-::  in which they can be made - a directory needs its parent.
-::
-++  sorted-dirs
-  |=  ds=(set path)
-  ^-  (list path)
-  (sort ~(tap in ds) |=([a=path b=path] (lth (lent a) (lent b))))
+++  slot  slot:uc
+++  node-dir  node-dir:uc
+++  sorted-dirs  sorted-dirs:uc
 ::
 ::  ── writes ──────────────────────────────────────────────────────────
 ::
@@ -610,31 +585,7 @@
   %+  murn  ~(val by contents.u.fil.ball.vw)
   |=  c=[=sang:tarball gain=? bang=(unit tang)]
   ?:((is-boom:tarball sang.c) ~ `(sang-noun:tarball sang.c))
-::
-::  +read-stored: %2 grubs only. %0 and %1 are REFUSED, not upgraded.
-::
-::    $stored-msg went to 1 when `unsigned` gained attachments and to 2
-::    when it gained body-mime and was frozen. An old grub is
-::    recognisable - its head is its version - but it cannot be
-::    migrated: msg-id and the signature both cover the shape, so
-::    rewriting an old message into the new shape leaves a message whose
-::    signature no longer matches its own contents, which every peer
-::    would then read as %forged. Turning genuine mail into apparent
-::    forgeries is worse than refusing it.
-::
-::    So an old grub is DROPPED HERE, before verification: it never
-::    reaches +verify-chain, is never labelled, is never counted, and
-::    renders as "unreadable" through the marc. The version was bumped
-::    rather than reused so a %1 grub is refused as cleanly as a %0 one
-::    instead of clamming into the new shape by accident.
-::
-::    $unsigned is now frozen, so this is the last such break. Nothing
-::    may be added to it again.
-::
-++  read-stored
-  |=  n=*
-  ^-  (unit stored-msg:uc)
-  (mole |.(;;(stored-msg:uc n)))
+++  read-stored  read-stored:uc
 ::
 ::  +read-meta: the local-state ladder, which DOES upgrade in place - see
 ::  +meta-from-noun:uc, which the marc reads through too.
@@ -729,20 +680,7 @@
   ^-  form:m
   ;<  n=(unit *)  bind:m  (peek-noun (peer-rail root who))
   (pure:m (biff n |=(x=* (mole |.(;;(peer-rec:uc x))))))
-::
-::  +known-proto: the record's answer, but only while it is believed.
-::
-::    Collapses THREE states into one, and they collapse correctly:
-::    no record, an expired record, and a record of a peer that answered
-::    nothing all mean "treat as version 1". Only a fresh record that
-::    actually carries a $proto constrains anything.
-::
-++  known-proto
-  |=  [rec=(unit peer-rec:uc) now=@da]
-  ^-  (unit proto:uc)
-  ?~  rec  ~
-  ?.  (peer-fresh:uc u.rec now)  ~
-  proto.u.rec
+++  known-proto  known-proto:uc
 ::
 ::  +read-probe: the discovery in flight for one ship, and the mail
 ::  queued behind it. ~ when there is none.
@@ -934,41 +872,9 @@
   ?~  kids  here
   =/  k  (walk-node (snoc base seg.i.kids) kid.i.kids)
   $(kids t.kids, here [(~(uni by ss.here) ss.k) (add lost.here lost.k)])
-::
-::  +chain-of: a thread's copies as one chain, WHOLE TREE INCLUDED.
-::
-::    This is the local view: opening a thread shows every branch of it,
-::    which is what a mail client does. Only a SEND narrows to a
-::    root-to-leaf path - see +do-send and +path-chain:uc.
-::
-::    +merge with an empty `old` is what re-imposes the canonical display
-::    order across branches. Sibling order matters for display and never
-::    for identity, so it is imposed here rather than stored.
-::
-++  chain-of
-  |=  ss=(map path stored-msg:uc)
-  ^-  chain:uc
-  (merge:uc ~ (turn ~(val by ss) |=(s=stored-msg:uc msg.s)))
-::
-++  verdicts-of
-  |=  ss=(map path stored-msg:uc)
-  ^-  (map [msg-id:uc @ux] verdict:uc)
-  %-  ~(gas by *(map [msg-id:uc @ux] verdict:uc))
-  %+  turn  ~(val by ss)
-  |=(s=stored-msg:uc [[(id:uc unsigned.msg.s) sig.msg.s] verdict.s])
-::
-::  +key-threads: every thread as the bare, UNSORTED copies +thread-key
-::  compares. It asks one question - is this [id sig] held - so the sort
-::  and dedupe of +chain-of, and participants and last-sent, were paid
-::  on every delivery for fields nothing read.
-::
-++  key-threads
-  |=  loaded=(map thread-id:uc (map path stored-msg:uc))
-  ^-  (map thread-id:uc thread:uc)
-  %-  ~(run by loaded)
-  |=  ss=(map path stored-msg:uc)
-  ^-  thread:uc
-  [(turn ~(val by ss) |=(s=stored-msg:uc msg.s)) ~ *@da]
+++  chain-of  chain-of:uc
+++  verdicts-of  verdicts-of:uc
+++  key-threads  key-threads:uc
 ::
 ::  ── the trace grub ──────────────────────────────────────────────────
 ::
@@ -1427,36 +1333,7 @@
   ;<  vw=view:nexus  bind:m  (peek:io (rv root (tdir t)) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
   (pure:m (my ~[[t (collect-slots ball.vw)]]))
-::
-::  +group-ids: which thread holds each of these message ids.
-::
-::    ONE PASS over what was read, shared by %read and %unread so the two
-::    cannot disagree about what a set of ids names. Flat on purpose: a
-::    roll nested inside a roll cannot thread the outer accumulator
-::    through, because the inner one starts from the BUNT of its own
-::    sample rather than from the value in hand - it silently drops what
-::    the outer had accumulated, and the `_acc` needed to spell it BANGS
-::    this file at spawn, which takes the writer with it.
-::
-::    Ids naming nothing are skipped rather than refused. A set is not a
-::    single request that can be wrong; it is a client reporting what it
-::    just rendered, and a thread deleted in another tab between render
-::    and poke would otherwise make the whole batch fail.
-::
-++  group-ids
-  |=  [loaded=(map thread-id:uc (map path stored-msg:uc)) ids=(set msg-id:uc)]
-  ^-  (list [t=thread-id:uc is=(set msg-id:uc)])
-  %+  murn  ~(tap by loaded)
-  |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
-  ^-  (unit [thread-id:uc (set msg-id:uc)])
-  =/  mine=(set msg-id:uc)
-    %-  ~(gas in *(set msg-id:uc))
-    %+  murn  ~(val by ss)
-    |=  st=stored-msg:uc
-    ^-  (unit msg-id:uc)
-    =/  i=msg-id:uc  (id:uc unsigned.msg.st)
-    ?:((~(has in ids) i) `i ~)
-  ?:(=(~ mine) ~ `[t mine])
+++  group-ids  group-ids:uc
 ::
 ::  ── labels, folders and archive ─────────────────────────────────────
 ::
@@ -2051,15 +1928,7 @@
 ::  desk's agent name.
 ::
 ++  mesa-agent  ^-(@ta %grubbery)
-::
-::  +blob-timeout: how long ONE blob keen waits. keen:io carries no
-::  deadline of its own - ames holds an unanswerable request forever - so
-::  this is the only bound. Sized for a max-blob file on the OLD protocol,
-::  which peers that have not migrated to directed messaging still use:
-::  measured 2026-09-24 between two fake ships, 16 MiB took 281s. The
-::  wait is a fetch fiber's, never the writer's.
-::
-++  blob-timeout  ^-(@dr ~m10)
+++  blob-timeout  blob-timeout:uc
 ::
 ::  +proto-probe-cases / +proto-timeout: /proto's case ladder.
 ::
@@ -2077,7 +1946,7 @@
 ::    the case below it.
 ::
 ++  proto-probe-cases  ^-(@ud 64)
-++  proto-timeout      ^-(@dr ~s10)
+++  proto-timeout  proto-timeout:uc
 ::
 ::  +keen-page: one %keen. ~ when OUR DEADLINE fired - nothing answered,
 ::  which for a case ladder means nothing is bound there yet; [~ ~] when
@@ -2559,26 +2428,7 @@
   %^  put-file  (rf root (weld dir pax) (slot (id:uc unsigned.mg) sig.mg))
     [/auspex %msg]
   [%2 mg v]
-::
-::  +want-slots: where every copy of a chain BELONGS in the tree.
-::
-::    One ancestor-map over the whole chain rather than a walk per
-::    message, then each copy's key is its message's ancestry as
-::    directories plus its own slot. Two copies of one id land at one
-::    node with two leaves; two replies to one message land as two
-::    sibling directories.
-::
-++  want-slots
-  |=  [c=chain:uc vs=(map [msg-id:uc @ux] verdict:uc)]
-  ^-  (map path stored-msg:uc)
-  =/  am=(map msg-id:uc (list msg-id:uc))  (ancestor-map:uc c)
-  %-  ~(gas by *(map path stored-msg:uc))
-  %+  turn  c
-  |=  mg=msg:uc
-  ^-  [path stored-msg:uc]
-  =/  i=msg-id:uc  (id:uc unsigned.mg)
-  :-  (snoc (node-dir (~(gut by am) i ~[i])) (slot i sig.mg))
-  [%2 mg (~(gut by vs) [i sig.mg] %unverified)]
+++  want-slots  want-slots:uc
 ::
 ::  +sync-slots: make the thread's grubs equal `want`.
 ::
@@ -2815,8 +2665,7 @@
           'let other ships deliver mail to you. Without this you can still read and send; people cannot reach you first'
       ==
   ==
-::
-++  send-timeout  ^-(@dr ~s20)
+++  send-timeout  send-timeout:uc
 ::
 ::  +remote-road: rewrite an absolute road into its /sys/ames mirror on
 ::  `shp`, so a dart routes to that ship. The peer's auspex sits at the
@@ -3415,74 +3264,9 @@
         ['threads' (inbox-json (page:uc keep off lim) rows q)]
     ==
   (send-json eyre-id jon)
-::
-::  +arg / +arg-ud: one query argument, decoded.
-::
-::    A quay is a (list [@t @t]) and a repeated key is legal in a URL, so
-::    the FIRST occurrence wins rather than the last - a client that
-::    sends ?view=inbox&view=archived gets the one it asked for first
-::    instead of whatever ended up at the end of the list.
-::
-++  arg
-  |=  [args=quay:eyre k=@t]
-  ^-  (unit @t)
-  ?~  args  ~
-  ?:(=(k p.i.args) `q.i.args $(args t.args))
-::
-++  arg-ud
-  |=  [args=quay:eyre k=@t]
-  ^-  (unit @ud)
-  =/  v=(unit @t)  (arg args k)
-  ?~  v  ~
-  ::  dim, not dem. +dem:ag is the DOT-GROUPED decimal parser - it reads
-  ::  9.999 and refuses 9999, so an offset past the first thousand
-  ::  threads would silently fall back to 0 and hand the client page one
-  ::  while it believed it was on page five hundred.
-  (rush u.v dim:ag)
-::
-::  +in-view: is this thread in the named view, under this query?
-::
-::    Pure, and every clause is a lib predicate rather than a rule
-::    written twice - +in-inbox and +in-sent are import-free and tested.
-::
-::    A THREAD WITH NO READABLE COPY IS NOT DROPPED. Its chain is empty,
-::    so it is a participant in nothing and would fail every view test;
-::    dropping it would make it vanish from the listing while its meta
-::    and its /mail/idx entry survived, which is exactly the silent
-::    disappearance the unreadable count exists to stop. It answers the
-::    only questions that can honestly be asked of it - archived or not
-::    - and it never answers a SEARCH, because we cannot search what we
-::    cannot read and saying we did would be a lie.
-::
-++  in-view
-  |=  [our=@p view=@t lab=@t q=@t r=(unit row)]
-  ^-  ?
-  ::  the index names a thread with nothing at all under it: a stale
-  ::  entry, which +inbox-json also drops.
-  ?~  r  |
-  ?:  &(=(~ ss.u.r) =(0 lost.u.r))  |
-  =/  mt=meta:uc  mt.u.r
-  ?:  =(~ ss.u.r)
-    ::  unreadable-only. No chain, so no participants, no authorship and
-    ::  no searchable text.
-    ?&  =('' q)
-        ?+  view  |
-          %inbox     !archived.mt
-          %all       &
-          %archived  archived.mt
-          %label     (~(has in labels.mt) `@tas`lab)
-        ==
-    ==
-  =/  c=chain:uc  c.u.r
-  ?&  ?+  view  |
-        %inbox     (in-inbox:uc our c archived.mt direct.mt)
-        %sent      (in-sent:uc our c)
-        %archived  archived.mt
-        %all       &
-        %label     ?&((label-ok:uc `@tas`lab) (~(has in labels.mt) `@tas`lab))
-      ==
-      (chain-matches:uc q c)
-  ==
+++  arg  arg:uc
+++  arg-ud  arg-ud:uc
+++  in-view  in-view:uc
 ::
 ::  +serve-drafts: the Drafts view.
 ::
@@ -3636,22 +3420,7 @@
           ['cache-control' 'no-store']
       ==
   `u.got
-::
-::  $row: one thread as the listing needs it, built ONCE per request.
-::
-::    The listing, its page, the Inbox's unread count and the label union
-::    all ask about every thread, and each question used to rebuild the
-::    chain - a sort and a +sham per message - and re-read the meta. One
-::    walk of the deep peek now builds each thread's chain, verdicts and
-::    meta once, and every question reads them.
-::
-+$  row
-  $:  ss=(map path stored-msg:uc)
-      c=chain:uc
-      vs=(map [msg-id:uc @ux] verdict:uc)
-      lost=@ud
-      mt=meta:uc
-  ==
++$  row  row:uc
 ::
 ++  collect-rows
   |=  b=ball:tarball
@@ -3678,277 +3447,16 @@
   ?~  c  ~
   ?:  (is-boom:tarball sang.u.c)  ~
   (meta-from-noun:uc (sang-noun:tarball sang.u.c))
-::
-::  +row-unread: does this thread hold a message nobody has read?
-::
-::    The spec is explicit that %forged messages "are never counted as
-::    unread and never sort into the normal inbox flow", so a count that
-::    included them would let one poke bold every row.
-::
-++  row-unread
-  |=  r=row
-  ^-  ?
-  %+  lien  c.r
-  |=  m=msg:uc
-  =/  i=msg-id:uc  (id:uc unsigned.m)
-  ?&  !=(%forged (~(gut by vs.r) [i sig.m] %unverified))
-      !(~(has in read.mt.r) i)
-  ==
-::
-++  inbox-unread
-  |=  [our=@p rows=(map thread-id:uc row)]
-  ^-  @ud
-  %-  lent
-  %+  skim  ~(val by rows)
-  |=  r=row
-  &((in-inbox:uc our c.r archived.mt.r direct.mt.r) (row-unread r))
-::
-::  +all-labels: every label in use. A label exists exactly as long as
-::  some thread carries it, so this is the whole label registry.
-::
-++  all-labels
-  |=  rows=(map thread-id:uc row)
-  ^-  (set @tas)
-  %+  roll  ~(val by rows)
-  |=([r=row acc=(set @tas)] (~(uni in acc) labels.mt.r))
-::
-++  sorted-labels
-  |=  ls=(set @tas)
-  ^-  json
-  [%a (turn (sort ~(tap in ls) aor) |=(l=@tas `json`[%s l]))]
-::
-::  ── json ────────────────────────────────────────────────────────────
-::
-::  Ported from the gall agent's renderers, contract unchanged.
-::
-::  A NOTE ON `enjs:format`, carried over from the agent: every arm below
-::  qualifies `pairs` / `time` / `numb` fully instead of `=,`-ing the core
-::  in. Face-injecting it made `(scot %p ...)` inside a nested |= nest-fail
-::  on this ship's hoon (reproduced live on ~wex and ~feb). Every ship
-::  rendered here sits inside a `turn` lambda, so the workaround is load
-::  bearing, not stylistic.
-::
-++  msg-json
-  |=  [vs=(map [msg-id:uc @ux] verdict:uc) rd=(set msg-id:uc) m=msg:uc]
-  ^-  json
-  =/  i=msg-id:uc  (id:uc unsigned.m)
-  %-  pairs:enjs:format
-  :~  ['id' [%s (scot %uv i)]]
-      ['from' [%s (scot %p from.unsigned.m)]]
-      ['to' (ships-json:uc to.unsigned.m)]
-      ['subject' [%s subj.unsigned.m]]
-      ['body' [%s body.unsigned.m]]
-    ::  the author's rendering instruction, signed and therefore
-    ::  unalterable in transit - and hostile input at the render
-    ::  boundary for exactly that reason: a signature proves the author
-    ::  CHOSE the value, never that it is safe. It is reported, not
-    ::  obeyed. The client renders every body as plain text and says so
-    ::  when the message asked for something else.
-      ['body-mime' [%s body-mime.unsigned.m]]
-      ['sent' (time:enjs:format sent.unsigned.m)]
-      ['prev' ?~(prev.unsigned.m ~ [%s (scot %uv u.prev.unsigned.m)])]
-    ::  ATTACHMENTS. They live INSIDE `unsigned`, so what is rendered
-    ::  here is covered by the same signature the verdict below was
-    ::  computed over: a reader comparing the two is comparing the same
-    ::  bytes, and swapping a file breaks the signature.
-    ::
-    ::  Emitted because the alternative was not "unrendered" but
-    ::  UNREPRESENTABLE: with no field here, a message carrying a file
-    ::  was indistinguishable through this API from one carrying none,
-    ::  and no client could have shown it however it was written. The
-    ::  storage marc has rendered them all along (see mar/auspex/msg),
-    ::  which is what made the gap easy to miss - the data was one
-    ::  route away the whole time.
-    ::
-    ::  `mime` is the author's claim about the file and NOTHING MORE,
-    ::  exactly as body-mime above is. It is signed, so an intermediary
-    ::  cannot change it; a signature proves the author chose it, never
-    ::  that it is true or safe, and the chain carrying it may have been
-    ::  delivered by any ship. It is reported for a human to read. It
-    ::  must never pick a renderer and must never reach a
-    ::  Content-Type header.
-    ::
-    ::  `hash` is the content address and the only field here that
-    ::  proves anything: the bytes live at /mail/blob/<hash>, any ship
-    ::  holding them can serve them, and bytes that do not hash to it
-    ::  are discarded. `size` is tied to it - the hash is over octs, so
-    ::  a lie about the size is a lie about the address.
-      ['attachments' [%a (turn attachments.unsigned.m attachment-json:uc)]]
-    ::  THE VERDICT IS PER MESSAGE, never per thread. A thread holding one
-    ::  unverified message is not an unverified thread, and this field is
-    ::  the whole product claim reaching the screen.
-      ['verdict' [%s (~(gut by vs) [i sig.m] %unverified)]]
-      ['read' [%b (~(has in rd) i)]]
-  ==
-::
-++  thread-json
-  |=  [t=thread-id:uc ss=(map path stored-msg:uc) mt=meta:uc lost=@ud]
-  ^-  json
-  ::  +chain-of re-imposes the canonical order, which the tree does not
-  ::  store: slots are named by (sham [id sig]) and a map has no order.
-  =/  c=chain:uc  (chain-of ss)
-  =/  vs=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
-  %-  pairs:enjs:format
-  :~  ['id' [%s (scot %uv t)]]
-      ['messages' [%a (turn c |=(m=msg:uc (msg-json vs read.mt m)))]]
-      ['participants' (ships-json:uc (participants:uc c))]
-      ['last' (time:enjs:format (last-sent:uc c))]
-    ::  copies stored here that THIS BUILD cannot read - grubs written
-    ::  under a pre-body-mime shape, refused rather than relabelled by
-    ::  +read-stored. Reported so a thread that renders short says why.
-      ['unreadable' (numb:enjs:format lost)]
-    ::  LOCAL STATE, rendered beside the signed content and never mixed
-    ::  into it. Nothing here travels and nothing here is covered by a
-    ::  signature; two ships holding this thread may disagree about
-    ::  every field below and still agree, byte for byte, about who
-    ::  signed what.
-      ['archived' [%b archived.mt]]
-      ['labels' (labels-json:uc labels.mt)]
-      ['folded' (ids-json:uc folded.mt)]
-  ==
-::
-::  +inbox-json: the listing. Deliberately not the full chains - the list
-::  view needs a subject and a sender, not a hundred message bodies.
-::
-::    +murn, not +turn: the index is a derived grub naming thread ids, and
-::    a thread whose grubs are gone should drop out of the listing rather
-::    than crash the route the way the agent's +got did.
-::
-++  inbox-json
-  |=  $:  order=(list thread-id:uc)
-          rows=(map thread-id:uc row)
-        ::  the search term, '' for an ordinary listing. It reaches
-        ::  +entry-json because a search row must be drawn from the
-        ::  message that MATCHED, not from the newest honest copy - see
-        ::  there.
-          q=@t
-      ==
-  ^-  json
-  :-  %a
-  %+  murn  order
-  |=  t=thread-id:uc
-  ^-  (unit json)
-  =/  r=(unit row)  (~(get by rows) t)
-  ?~  r  ~
-  ::  A THREAD WITH NO READABLE COPY STILL GETS A ROW, as long as
-  ::  something is actually stored under it. After the %1 refusal that
-  ::  is reachable on any ship carrying pre-freeze mail: every copy is
-  ::  refused, +entry-json has no message to draw a sender and subject
-  ::  from, and dropping the row made the thread disappear from the
-  ::  listing while its meta and its /mail/idx entry survived. That is
-  ::  the silent disappearance this build exists to stop saying
-  ::  nothing about, so the row says it instead.
-  ?:  =(~ ss.u.r)
-    ?:(=(0 lost.u.r) ~ `(unreadable-entry-json t lost.u.r mt.u.r))
-  `(entry-json t u.r q)
-::
-::  +unreadable-entry-json: the row for a thread this build cannot read
-::  a single message of.
-::
-::    Every field is a placeholder and none of them pretends otherwise:
-::    there is no sender to name, because naming one would mean reading
-::    a message we just said we cannot read. The count is the honest
-::    content of the row.
-::
-++  unreadable-entry-json
-  |=  [t=thread-id:uc n=@ud mt=meta:uc]
-  ^-  json
-  %-  pairs:enjs:format
-  :~  ['id' [%s (scot %uv t)]]
-      ['subject' [%s '']]
-      ['from' [%s '']]
-      ['snippet' [%s '']]
-      ['verdict' [%s %unverified]]
-      ['forged' [%b |]]
-      ['count' (numb:enjs:format 0)]
-      ['last' (time:enjs:format *@da)]
-      ['unread' [%b |]]
-      ['participants' [%a ~]]
-      ['unreadable' (numb:enjs:format n)]
-    ::  the row shape is uniform across both branches, so a client never
-    ::  has to ask which kind of row it is holding before reading a field.
-      ['archived' [%b archived.mt]]
-      ['labels' (labels-json:uc labels.mt)]
-  ==
-::
-++  entry-json
-  |=  [t=thread-id:uc r=row q=@t]
-  ^-  json
-  =/  c=chain:uc  c.r
-  =/  vs=(map [msg-id:uc @ux] verdict:uc)  vs.r
-  =/  mt=meta:uc  mt.r
-  ::  the list view is the surface a user scans fastest, and every field
-  ::  on it is attacker-chosen: anyone may poke a one-message chain
-  ::  claiming from=~zod, subject='Password reset' with a `sent` far in the
-  ::  future, and `sent` is what orders the chain. Two things follow.
-  ::
-  ::  One: the summary is drawn from the newest NON-%forged copy, not from
-  ::  (rear c). A message whose signature we checked and rejected has no
-  ::  business supplying the sender line of an inbox row.
-  ::
-  ::  Two: the row carries the verdict of whatever message it did draw
-  ::  from, so provenance is visible before the thread is opened rather
-  ::  than only after. If every copy is %forged there is nothing honest to
-  ::  fall back to - show the newest anyway, labeled %forged, since hiding
-  ::  the row would delete evidence.
-  =/  honest=chain:uc
-    %+  skip  c
-    |=(m=msg:uc =(%forged (~(gut by vs) [(id:uc unsigned.m) sig.m] %unverified)))
-  ::  ON A SEARCH, THE ROW IS DRAWN FROM THE MESSAGE THAT MATCHED.
-  ::
-  ::  The two rules above are right for a listing and wrong for a
-  ::  search. A search for a forgery answered with a row drawn from the
-  ::  newest honest copy would name a ship that did not write the thing
-  ::  the user searched for and label it `verified` - the safety
-  ::  mechanism telling a lie about the result it was asked to find.
-  ::  Search covers %forged messages deliberately; the row says which
-  ::  one it found and carries that copy's verdict, so a forged hit
-  ::  reads FORGED.
-  =/  picked=(unit msg:uc)  (newest-match:uc q c)
-  =/  newest=msg:uc  ?^(picked u.picked ?~(honest (rear c) (best-copy vs honest)))
-  %-  pairs:enjs:format
-  :~  ['id' [%s (scot %uv t)]]
-      ['subject' [%s subj.unsigned.newest]]
-      ['from' [%s (scot %p from.unsigned.newest)]]
-      ['snippet' [%s (crip (scag 140 (trip body.unsigned.newest)))]]
-      ['verdict' [%s (~(gut by vs) [(id:uc unsigned.newest) sig.newest] %unverified)]]
-      ['forged' [%b (lth (lent honest) (lent c))]]
-    ::  `count` is STORED COPIES, not distinct messages, and the client
-    ::  labels it as such. Up to max-copies copies of one message that
-    ::  differ in signature are kept on purpose - one genuine, the rest
-    ::  forged - so a forged copy cannot shadow a real one. A thread
-    ::  showing four may be one message and three forgeries, and calling
-    ::  that a message count would be a lie told by the safety mechanism.
-      ['count' (numb:enjs:format (lent c))]
-      ['last' (time:enjs:format (last-sent:uc c))]
-      ['unread' [%b (row-unread r)]]
-      ['participants' (ships-json:uc (participants:uc c))]
-    ::  copies stored here that this build cannot read. Usually 0; a row
-    ::  can be partly readable, which is why the count rides on the
-    ::  ordinary row too and not only on the placeholder one.
-      ['unreadable' (numb:enjs:format lost.r)]
-    ::  local state, so the sidebar can show which view a row is in
-    ::  without a second request per row.
-      ['archived' [%b archived.mt]]
-      ['labels' (labels-json:uc labels.mt)]
-  ==
-::
-::  +best-copy: which copy of the thread's newest honest message speaks
-::  for the row. Copies of one id carry the same words and differ only in
-::  signature, so the one to show is a %verified one when there is one:
-::  the last copy in sort order is ordered by signature bytes, which says
-::  nothing about which one checked. `c` is non-empty.
-::
-++  best-copy
-  |=  [vs=(map [msg-id:uc @ux] verdict:uc) c=chain:uc]
-  ^-  msg:uc
-  =/  top=msg:uc  (rear c)
-  =/  i=msg-id:uc  (id:uc unsigned.top)
-  =/  good=chain:uc
-    %+  skim  c
-    |=  m=msg:uc
-    &(=(i (id:uc unsigned.m)) =(%verified (~(gut by vs) [i sig.m] %unverified)))
-  ?~(good top (rear good))
+++  row-unread  row-unread:uc
+++  inbox-unread  inbox-unread:uc
+++  all-labels  all-labels:uc
+++  sorted-labels  sorted-labels:uc
+++  msg-json  msg-json:uc
+++  thread-json  thread-json:uc
+++  inbox-json  inbox-json:uc
+++  unreadable-entry-json  unreadable-entry-json:uc
+++  entry-json  entry-json:uc
+++  best-copy  best-copy:uc
 ::
 ::  ── writes ──────────────────────────────────────────────────────────
 ::
@@ -4049,19 +3557,7 @@
   ?:  =((lent bad) ~(wyt in to.u.req))  (send-err eyre-id 400 (refusal-line bad))
   ;<  ~  bind:m  (poke-writer [%send to.u.req subject.u.req body.u.req prev.u.req refs])
   (send-refused eyre-id bad)
-::
-::  +refusal-line: the whole refusal, on one line, for the case where
-::  there is no one left to send to. The composer shows one line.
-::
-++  refusal-line
-  |=  bad=(list [who=ship why=@t])
-  ^-  @t
-  ?~  bad  'no recipients'
-  ?~  t.bad  why.i.bad
-  %+  rap  3
-  :~  why.i.bad  ' (and '  (scot %ud (lent t.bad))
-      ' other recipient'  ?:(=(1 (lent t.bad)) '' 's')  ' refused)'
-  ==
+++  refusal-line  refusal-line:uc
 ::
 ::  +peer-refusals: EVERY recipient this send cannot reach, and why.
 ::

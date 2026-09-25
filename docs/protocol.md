@@ -1643,7 +1643,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  92 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  104 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  51 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 ```
@@ -1652,7 +1652,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **92 tests**, the discovery ones among them
+be diffed; **104 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1732,6 +1732,18 @@ be diffed; **92 tests**, the discovery ones among them
 | Every older meta reads as the current one, keeping its read set, labels and archive flag. | `test-the-meta-ladder-upgrades` |
 | A new thread's meta is neither archived nor direct. | `test-a-new-thread-is-neither-archived-nor-direct` |
 | A thread's time is its newest message's `sent`, whatever the order. | `test-last-sent-is-the-newest` |
+| A message renders exactly the API's fields: `id from to subject body body-mime sent prev attachments verdict read`; no verdict held is `unverified`. | `test-msg-json-is-the-api-shape` |
+| A thread renders its messages in canonical order, with its local state beside them. | `test-thread-json-orders-messages-and-reports-local-state` |
+| A listing row is drawn from the newest honest message and flags a forgery; a search row is drawn from what matched. | `test-entry-json-draws-from-the-newest-honest-copy` |
+| The listing drops stale index entries and empty threads, and shows a thread of unreadable copies as such. | `test-inbox-json-drops-stale-and-shows-unreadable` |
+| Each view admits exactly its threads, search narrows every view, and an unknown view admits none. | `test-in-view-by-view` |
+| Unread counts honest unread messages, and the Inbox count only Inbox threads. | `test-unread-counts` |
+| Query numbers are plain decimals: an offset of 9999 is 9999. | `test-arg-ud-reads-plain-decimals` |
+| A refused send reads as one line naming the first refusal and counting the rest. | `test-refusal-line` |
+| A thread's row prefers a verified copy of its newest message. | `test-best-copy-prefers-a-verified-copy-of-the-newest` |
+| Each copy is stored at its ancestry, in a slot of its own, and the tree reads back as the chain and verdicts it came from. | `test-want-slots-lays-out-the-tree` |
+| A read mark's ids are grouped by the thread that holds them. | `test-group-ids-by-thread` |
+| The label list is every thread's labels, once, sorted. | `test-labels-are-the-sorted-union` |
 | Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |

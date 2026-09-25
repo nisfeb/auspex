@@ -1378,6 +1378,13 @@
     ::  by this ship, so that is a clock that moved, and believing it
     ::  would pin the record forever.
     (expect !>(!(peer-fresh:auspex r ~2025.1.1)))
+    ::  and what a fresh record says is all a send ever reads of it
+    =/  q  r(proto `our-proto:auspex)
+    ;:  weld
+      (expect-eq !>(`(unit proto:sur)``our-proto:auspex) !>((known-proto:auspex `q ~2026.1.1)))
+      (expect-eq !>(`(unit proto:sur)`~) !>((known-proto:auspex `q (add ~2026.1.1 ~d2))))
+      (expect-eq !>(`(unit proto:sur)`~) !>((known-proto:auspex ~ ~2026.1.1)))
+    ==
   ==
 ::
 ::  A RECORD THAT REFUSES EXPIRES IN AN HOUR, NOT A DAY, and the
@@ -1612,4 +1619,243 @@
     ::  3/4 of 40 is 30: 15 held leaves room for one of the two
     (expect-eq !>(~[[0v1 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 15)))
   ==
+::
+::  ── what the nexus renders ──────────────────────────────────────────
+::
+::  The JSON below is the HTTP API's contract: the web client, talon,
+::  orrery and the Thunderbird add-on all read these fields by name.
+::
+++  jget
+  |=  [o=json k=@t]
+  ^-  json
+  ?>  ?=(%o -.o)
+  (~(got by p.o) k)
+::
+::  one stored copy, for building rows and trees
+++  st
+  |=  [m=msg:sur v=verdict:sur]
+  ^-  [path stored-msg:sur]
+  [/(scot %uv (id:auspex unsigned.m))/(scot %ux sig.m) [%2 m v]]
+::
+::  every field a message renders with, named and valued
+++  test-msg-json-is-the-api-shape
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b  (forge-with ~palnet-sampel (sy ~[~sampel-palnet]) 're' 'two' ~2026.1.2 `(id:auspex unsigned.a) ~[['f' 3 'text/plain' 0v1]])
+  =/  i  (id:auspex unsigned.b)
+  =/  j  (msg-json:auspex (my ~[[[i sig.b] %forged]]) (sy ~[i]) b)
+  ;:  weld
+    %+  expect-eq
+      !>  %-  sy
+          :~  'id'  'from'  'to'  'subject'  'body'  'body-mime'  'sent'
+              'prev'  'attachments'  'verdict'  'read'
+          ==
+    !>  ?>(?=(%o -.j) ~(key by p.j))
+    (expect-eq !>(`json`[%s (scot %uv i)]) !>((jget j 'id')))
+    (expect-eq !>(`json`[%s '~palnet-sampel']) !>((jget j 'from')))
+    (expect-eq !>(`json`[%a ~[[%s '~sampel-palnet']]]) !>((jget j 'to')))
+    (expect-eq !>(`json`[%s 're']) !>((jget j 'subject')))
+    (expect-eq !>(`json`[%s 'two']) !>((jget j 'body')))
+    (expect-eq !>(`json`[%s (scot %uv (id:auspex unsigned.a))]) !>((jget j 'prev')))
+    (expect-eq !>(`json`[%s 'forged']) !>((jget j 'verdict')))
+    (expect-eq !>(`json`[%b &]) !>((jget j 'read')))
+    =/  at  (jget j 'attachments')
+    (expect-eq !>(1) !>(?>(?=(%a -.at) (lent p.at))))
+    ::  no verdict held is %unverified, never %verified; no prev is null;
+    ::  unread is false
+    =/  k  (msg-json:auspex ~ ~ a)
+    ;:  weld
+      (expect-eq !>(`json`[%s 'unverified']) !>((jget k 'verdict')))
+      (expect-eq !>(`json`~) !>((jget k 'prev')))
+      (expect-eq !>(`json`[%b |]) !>((jget k 'read')))
+    ==
+  ==
+::
+::  a thread renders its messages in canonical order whatever the map
+::  gave, and its local state beside them
+++  test-thread-json-orders-messages-and-reports-local-state
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b  (forge ~palnet-sampel (sy ~[~sampel-palnet]) 're' 'two' ~2026.1.2 `(id:auspex unsigned.a))
+  =/  mt=meta:sur  [%3 ~ & (sy ~[%work]) | (sy ~[(id:auspex unsigned.a)])]
+  =/  j  (thread-json:auspex 0v7 (malt ~[(st b %verified) (st a %verified)]) mt 2)
+  =/  ms  (jget j 'messages')
+  ?>  ?=(%a -.ms)
+  ;:  weld
+    %+  expect-eq  !>(`(list json)`~[[%s 'one'] [%s 'two']])
+    !>  (turn p.ms |=(m=json (jget m 'body')))
+    (expect-eq !>(`json`[%s (scot %uv 0v7)]) !>((jget j 'id')))
+    (expect-eq !>(`json`(numb:enjs:format 2)) !>((jget j 'unreadable')))
+    (expect-eq !>(`json`[%b &]) !>((jget j 'archived')))
+    (expect-eq !>(`json`[%a ~[[%s 'work']]]) !>((jget j 'labels')))
+    (expect-eq !>(`json`[%a ~[[%s (scot %uv (id:auspex unsigned.a))]]]) !>((jget j 'folded')))
+    (expect-eq !>(`json`(time:enjs:format ~2026.1.2)) !>((jget j 'last')))
+  ==
+::
+::  a listing row is drawn from the newest HONEST message and says a
+::  forgery is in the thread; a search row is drawn from what matched
+++  test-entry-json-draws-from-the-newest-honest-copy
+  =/  real  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'invoice' (crip (reap 200 'x')) ~2026.1.1 ~)
+  =/  liar  (fake-from ~marbud-marbud ~sampel-palnet 'invoice' 'PAY HERE' ~2026.1.2)
+  =/  c=chain:sur  (merge:auspex ~ ~[real liar])
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet ~marbud-marbud]) c))
+  =/  r=row:sur  [(malt ~[(st real %verified) (st liar %forged)]) c vs 0 *meta:sur]
+  =/  row  (entry-json:auspex 0v7 r '')
+  =/  hit  (entry-json:auspex 0v7 r 'pay here')
+  ;:  weld
+    (expect-eq !>(`json`[%s 'verified']) !>((jget row 'verdict')))
+    (expect-eq !>(`json`[%s (crip (reap 140 'x'))]) !>((jget row 'snippet')))
+    (expect-eq !>(`json`[%b &]) !>((jget row 'forged')))
+    (expect-eq !>(`json`(numb:enjs:format 2)) !>((jget row 'count')))
+    (expect-eq !>(`json`[%b &]) !>((jget row 'unread')))
+    (expect-eq !>(`json`[%s 'forged']) !>((jget hit 'verdict')))
+    (expect-eq !>(`json`[%s 'PAY HERE']) !>((jget hit 'snippet')))
+  ==
+::
+::  the listing drops a stale index entry and a thread with nothing in
+::  it, and shows one whose copies this build cannot read as such
+++  test-inbox-json-drops-stale-and-shows-unreadable
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  full=row:sur   [(malt ~[(st a %verified)]) ~[a] ~ 0 *meta:sur]
+  =/  empty=row:sur  [~ ~ ~ 0 *meta:sur]
+  =/  lost=row:sur   [~ ~ ~ 3 *meta:sur]
+  =/  rows  (malt ~[[0v1 full] [0v2 empty] [0v3 lost]])
+  =/  j  (inbox-json:auspex ~[0v9 0v1 0v2 0v3] rows '')
+  ?>  ?=(%a -.j)
+  ;:  weld
+    (expect-eq !>(2) !>((lent p.j)))
+    (expect-eq !>(`json`[%s 'one']) !>((jget (snag 0 p.j) 'snippet')))
+    (expect-eq !>(`json`[%b |]) !>((jget (snag 0 p.j) 'forged')))
+    (expect-eq !>(`json`(numb:enjs:format 3)) !>((jget (snag 1 p.j) 'unreadable')))
+    (expect-eq !>(`json`(numb:enjs:format 0)) !>((jget (snag 1 p.j) 'count')))
+  ==
+::
+::  each view admits exactly its threads; an unknown view admits none
+++  test-in-view-by-view
+  =/  m0=meta:sur  *meta:sur
+  =/  us    ~sampel-palnet
+  =/  them  ~palnet-sampel
+  =/  ours   (forge us (sy ~[them]) 'mine' 'b' ~2026.1.1 ~)
+  =/  reply  (forge them (sy ~[us]) 'theirs' 'c' ~2026.1.2 ~)
+  =/  mk  |=([c=chain:sur mt=meta:sur] `row:sur`[(malt (turn c |=(m=msg:sur (st m %verified)))) c ~ 0 mt])
+  =/  sent   (mk ~[ours] *meta:sur)
+  =/  got    (mk ~[reply] *meta:sur)
+  =/  arch   (mk ~[reply] m0(archived &))
+  =/  lab    (mk ~[reply] m0(labels (sy ~[%work])))
+  =/  lost=row:sur  [~ ~ ~ 1 *meta:sur]
+  =/  v  |=([view=@t lab=@t q=@t r=row:sur] (in-view:auspex us view lab q `r))
+  ;:  weld
+    (expect !>((v 'inbox' '' '' got)))
+    (expect !>(!(v 'inbox' '' '' sent)))
+    (expect !>(!(v 'inbox' '' '' arch)))
+    (expect !>((v 'sent' '' '' sent)))
+    (expect !>(!(v 'sent' '' '' got)))
+    (expect !>((v 'archived' '' '' arch)))
+    (expect !>(!(v 'archived' '' '' got)))
+    (expect !>((v 'all' '' '' sent)))
+    (expect !>((v 'label' 'work' '' lab)))
+    (expect !>(!(v 'label' 'work' '' got)))
+    (expect !>(!(v 'label' 'Work' '' lab)))
+    (expect !>(!(v 'nonsense' '' '' got)))
+    ::  search narrows every view
+    (expect !>((v 'all' '' 'theirs' got)))
+    (expect !>(!(v 'all' '' 'nowhere' got)))
+    ::  a thread of unreadable copies is listed, but can never match a
+    ::  search: it has no text
+    (expect !>((v 'inbox' '' '' lost)))
+    (expect !>(!(v 'inbox' '' 'x' lost)))
+    (expect !>(!(v 'sent' '' '' lost)))
+    ::  and a stale entry is in no view
+    (expect !>(!(in-view:auspex us 'all' '' '' ~)))
+    (expect !>(!(in-view:auspex us 'all' '' '' `[~ ~ ~ 0 *meta:sur])))
+  ==
+::
+::  unread counts honest unread messages; the Inbox count only Inbox
+::  threads
+++  test-unread-counts
+  =/  m0=meta:sur  *meta:sur
+  =/  us  ~sampel-palnet
+  =/  a  (forge ~palnet-sampel (sy ~[us]) 's' 'b' ~2026.1.1 ~)
+  =/  i  (id:auspex unsigned.a)
+  =/  mk  |=([v=verdict:sur mt=meta:sur] `row:sur`[(malt ~[(st a v)]) ~[a] (my ~[[[i sig.a] v]]) 0 mt])
+  =/  new     (mk %verified *meta:sur)
+  =/  seen    (mk %verified m0(read (sy ~[i])))
+  =/  forged  (mk %forged *meta:sur)
+  =/  away    (mk %verified m0(archived &))
+  ;:  weld
+    (expect !>((row-unread:auspex new)))
+    (expect !>(!(row-unread:auspex seen)))
+    (expect !>(!(row-unread:auspex forged)))
+    (expect-eq !>(1) !>((inbox-unread:auspex us (malt ~[[0v1 new] [0v2 seen] [0v3 forged] [0v4 away]]))))
+  ==
+::
+::  query numbers are plain decimals, so offset 9999 is 9999
+++  test-arg-ud-reads-plain-decimals
+  =/  q=quay:eyre  ~[['offset' '9999'] ['limit' '9.999'] ['offset' '5'] ['x' 'y']]
+  ;:  weld
+    (expect-eq !>(`(unit @ud)``9.999) !>((arg-ud:auspex q 'offset')))
+    (expect-eq !>(`(unit @ud)`~) !>((arg-ud:auspex q 'limit')))
+    (expect-eq !>(`(unit @ud)`~) !>((arg-ud:auspex q 'x')))
+    (expect-eq !>(`(unit @ud)`~) !>((arg-ud:auspex q 'absent')))
+  ==
+::
+::  the one line a refused send shows
+++  test-refusal-line
+  ;:  weld
+    (expect-eq !>('no recipients') !>((refusal-line:auspex ~)))
+    (expect-eq !>('offline') !>((refusal-line:auspex ~[[~zod 'offline']])))
+    %+  expect-eq  !>('offline (and 1 other recipient refused)')
+    !>  (refusal-line:auspex ~[[~zod 'offline'] [~nec 'full']])
+    %+  expect-eq  !>('offline (and 2 other recipients refused)')
+    !>  (refusal-line:auspex ~[[~zod 'offline'] [~nec 'full'] [~bud 'old']])
+  ==
+::
+::  the newest message's verified copy, where it has one
+++  test-best-copy-prefers-a-verified-copy-of-the-newest
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'two' ~2026.1.2 ~)
+  =/  b2  b(sig 0x0)
+  =/  i  (id:auspex unsigned.b)
+  ;:  weld
+    (expect-eq !>(b) !>((best-copy:auspex (my ~[[[i sig.b] %verified]]) ~[a b b2])))
+    ::  none verified: the newest as it stands
+    (expect-eq !>(b2) !>((best-copy:auspex ~ ~[a b b2])))
+  ==
+::
+::  the storage layout: each copy at its ancestry, in a slot of its own,
+::  and the tree reads back as the chain and verdicts it was built from
+++  test-want-slots-lays-out-the-tree
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b  (forge ~palnet-sampel (sy ~[~sampel-palnet]) 're' 'two' ~2026.1.2 `(id:auspex unsigned.a))
+  =/  ia  (id:auspex unsigned.a)
+  =/  ib  (id:auspex unsigned.b)
+  =/  vs  (my ~[[[ia sig.a] %verified]])
+  =/  ss  (want-slots:auspex ~[a b] vs)
+  ;:  weld
+    %+  expect-eq
+      !>  %-  sy
+          :~  /(scot %uv ia)/(slot:auspex ia sig.a)
+              /(scot %uv ia)/(scot %uv ib)/(slot:auspex ib sig.b)
+          ==
+    !>  ~(key by ss)
+    (expect-eq !>(`chain:sur`~[a b]) !>((chain-of:auspex ss)))
+    %+  expect-eq
+      !>  (my ~[[[ia sig.a] %verified] [[ib sig.b] %unverified]])
+    !>  (verdicts-of:auspex ss)
+  ==
+::
+::  a read mark's ids, grouped by the thread that holds them
+++  test-group-ids-by-thread
+  =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
+  =/  b  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'yo' 'two' ~2026.1.2 ~)
+  =/  loaded  (malt ~[[0v1 (malt ~[(st a %verified)])] [0v2 (malt ~[(st b %verified)])]])
+  =/  ia  (id:auspex unsigned.a)
+  %+  expect-eq
+    !>  `(list [thread-id:sur (set msg-id:sur)])`~[[0v1 (sy ~[ia])]]
+  !>  (group-ids:auspex loaded (sy ~[ia 0v99]))
+::
+::  every label on any thread, once, sorted
+++  test-labels-are-the-sorted-union
+  =/  m0=meta:sur  *meta:sur
+  =/  mk  |=(ls=(set @tas) `row:sur`[~ ~ ~ 0 m0(labels ls)])
+  =/  ls  (all-labels:auspex (malt ~[[0v1 (mk (sy ~[%work %b]))] [0v2 (mk (sy ~[%a %work]))]]))
+  (expect-eq !>(`json`[%a ~[[%s 'a'] [%s 'b'] [%s 'work']]]) !>((sorted-labels:auspex ls)))
 --

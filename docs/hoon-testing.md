@@ -225,6 +225,67 @@ ship. Two rules came out of it:
   mutation run belongs on a ship nothing else is building on, and one that
   has been `|meld`ed recently. See lattice `/project/fake-ships/wex-loom-full`.
 
+## Reaching the nexus
+
+`nex/auspex/app.hoon` (4.5k lines) had no automated tests. Of its 188 arms,
+74 do not use the fiber monad at all; 114 do. The plan, in order:
+
+1. move the pure arms into a lib `-test` can build;
+2. a route script that drives the HTTP API on a live ship;
+3. a fiber harness that runs a fiber against scripted inputs (in the kit).
+
+### Step 1: the pure arms, 2026-09-25
+
+**Find what can move.** A script split the core into arms, marked each one
+that uses `;<`, `bind:m`, `pure:m` or `form:m` as a fiber, marked the ones
+naming grubbery's own types (`tarball`, `nexus`, `rail`, `dart`, `bowl`),
+and kept only arms whose every callee also qualified: a closed set. 42
+arms qualified. 28 carry logic, and they moved: the JSON renderers
+(`msg-json`, `thread-json`, `entry-json`, `inbox-json` and the rest),
+`in-view`, `arg-ud`, `want-slots`, `group-ids`, `refusal-line`,
+`best-copy`, the `row` mold. Path constants stayed: only the roads use them.
+
+**Move without touching callers.** Each moved arm left a one-line alias in
+the nexus, `++  msg-json  msg-json:uc`, so no call site changed. That
+matters: renaming call sites would have hit faces like `slot` and `arg`,
+which the nexus also uses as names. The lib is import-free, so the moved
+code only needed its `:uc` qualifiers dropped. The moved arms went into
+`auspex-chain.hoon`, beside its other JSON helpers.
+
+**Prove the nexus still behaves.** With the kit's suites passing, the new
+code went onto `~wex`'s auspex desk by `write-text` (lib first, then app;
+`?info=1` shows `bang: null` when it builds). A script captured 50 read
+routes (every view, searches, paging, each label, every thread, drafts,
+rules, lists, settings). Then the release-17 code went back on, the same
+capture ran again, and **all 50 responses were byte-identical**. Then the
+refactor went back on.
+
+**Then test and mutate.** 12 new tests pin the API's JSON by field name,
+each view's admission rule, the unread counts, `arg-ud`'s plain decimals,
+and the storage layout `want-slots` writes. Mutation over the moved arms:
+25 killed, 4 no-build, 3 survived. `sorted-dirs` was equivalent: ties are
+directories of equal depth. The other two were real: a thread with no
+forgery was never checked for `forged: false`, and `known-proto` had no
+test. Both are closed.
+
+Lessons:
+
+- **Aliases make a move safe to review.** The nexus diff is deletions plus
+  one line per arm, and the API capture is the proof it changed nothing.
+- **Capture the API before and after on the same ship.** Unit tests on the
+  moved arms can't show that the nexus still calls them the same way; 50
+  identical responses do.
+- **`?=(%a -.(expr))` and `*mold(field x)` are syntax errors.** `?=` needs
+  a wing and a bunt can't take changes: bind the value with `=/` first.
+- **`~wex` moved ports on restart.** It answers on 8080 now and `~feb` on
+  8081; `curl localhost:<port>/~/host` says which ship is which.
+
+**Web-lib mutation verdicts are void.** `calendar-df` found that
+`hoon-mutate.py` left the previous lib's last mutant on the desk when a run
+moved to the next lib, so every `auspex-web` mutant ran against two breaks.
+The chain lib is mutated first, so its verdicts stand; the web lib's "no
+survivors" must be rerun once the kit's fix lands.
+
 ## Porting to another app
 
 Use the kit: its README covers installing and configuring it, and its
