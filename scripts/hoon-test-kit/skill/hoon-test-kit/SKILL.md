@@ -54,6 +54,11 @@ lib behind one-line aliases; drive routes on a dev ship with a route script
 `hoon/fiber-test.hoon`, entering through the nexus's `+on-file` and
 asserting the pokes and responses the fiber sent.
 
+**Before a grubbery app releases** anything touching start-up, crash
+handling or reads of stored state, follow PLAYBOOK.md's "Never ship a crash
+loop": test the upgrade on a ship with old data (7) and with a refusing
+weir (8). A spinning ship is interrupted only by ^C in its dojo.
+
 ## Rules
 
 - **Size before you run.** Each mutant takes about 10 s and one commit, and

@@ -86,6 +86,7 @@ NOSYNC=1 scripts/hoon-test-kit/hoon-test.sh <pier>        # commit the mount as 
 
 scripts/hoon-test-kit/hoon-mutate.py <pier> --list                   # size a run first
 scripts/hoon-test-kit/hoon-mutate.py <pier>                          # boundary,conjunct
+scripts/hoon-test-kit/hoon-mutate.py <pier> --ops wide               # just the wide &( |( conditions
 scripts/hoon-test-kit/hoon-mutate.py <pier> --ops branch,equal,flag
 scripts/hoon-test-kit/hoon-mutate.py <pier> --only arm-a,arm-b       # recheck after a fix
 scripts/hoon-test-kit/hoon-mutate.py <pier> --since main              # only the arms a diff touches

@@ -352,6 +352,21 @@ Lessons:
 - **A peek is a fine place to stop.** Which grub a route reads is its
   decision; asserting that needs no fake answer.
 
+### The crash-loop rules, checked by reading, 2026-09-25
+
+`scripts/hoon-test-kit/PLAYBOOK.md`, "Never ship a crash loop", holds the
+rules calendar 18 and 19 taught. Auspex's code was read against them.
+Rules 7 and 8, the upgrade test and the refusing-weir test, have **not**
+been run.
+
+- **Rules 1 and 4 hold.** Every fiber opens with `rise-wait:io`, which
+  sends nothing, and every read of stored state is `mole`d or `mule`d.
+- **Rule 3 does not.** The writer drops the first poke after a crash (a
+  peer's delivery or a user's action, acked and lost), and `/ui/main`,
+  which dispatches the whole HTTP API, stays down after a crash until a
+  reload, because nothing pokes it. Both need calendar's `+rise-park` /
+  `+rise-later` pattern, and rules 7 and 8, before they ship.
+
 ### Wide conjunctions, 2026-09-25
 
 The orrery session noted that `conjunct` only read a tall `?&`/`?|`, while

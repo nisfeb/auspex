@@ -45,7 +45,7 @@ Each mutant ends in one of four ways:
 | `killed` | some test failed. Good. |
 | `SURVIVED` | every test passed with the code broken: a gap, or a mutant that changes nothing |
 | `no-build` | the mutant does not compile, and is discarded |
-| `timeout` | it ran past the limit; the kit sends ^C to the ship (SIGINT to the king process) |
+| `timeout` | it ran past the limit, and the ship may be spinning. The run stops and tells you to press ^C in the ship's dojo. With `DOJO_PANE=<tmux pane>` it types the ^C itself and goes on. A signal to the worker does **not** interrupt a spinning event. |
 
 **Check the run's health before reading survivors:**
 
@@ -69,6 +69,11 @@ Each mutant ends in one of four ways:
   can't compile. That is correct. The same goes for a tall `?&` condition
   that spans lines: the text-based finder splits it, and both halves fail
   to build.
+
+**After the kit gains an operator, rerun just that operator** over code
+already mutated. `--ops wide` is `conjunct`'s wide half alone: on auspex,
+whose earlier runs predated it, it found 67 new sites, and one real gap
+among the libs' 26.
 
 ## Triaging a survivor
 
@@ -119,6 +124,11 @@ with the reason, never as equivalent, since output can differ:
   the pass decides one way, and the next pass decides the same as either
   spelling would.
 - **A sort comparator on ties the output never promises to order.**
+
+`--since` names a line's arm by the nearest arm above it, so code
+appended at the end of a core credits its first lines to the core's old
+last arm, which then shows up in the run. Drop it with `--only` when the
+diff did not touch it.
 
 On orrery's first `--since` run, 44 of 51 mutants survived: 20 real gaps,
 20 accepted and 4 equivalent. Code written in a
@@ -192,9 +202,17 @@ app is a couple of hundred commits.
   fault: 0`, a fault at address 0, outside the loom. After `~nec`'s
   restart, `|mass` showed 617 MB marked of 2 GB, and three commits of a
   6,200-line lib added only about 16 MB. The mutant running at the time
-  only flipped a comparison. The cause is open. To size the risk on your
-  ship, read `total marked:` from `|mass` before and after a few
-  mutants.
+  only flipped a comparison. `~nec` died the same way again that
+  afternoon (`external fault: 0x10`), 37 mutants after a meld that had
+  freed 562 MB, on a harmless mutant. So neither a fresh meld nor a count
+  of commits predicts it (10, about 110 and 37 commits between deaths).
+  The cause is open; the common factor is vere 4.6 under the kit's
+  steady socket traffic, a commit and a build every few seconds. To size
+  the risk on your ship, read `total marked:` from `|mass` before and
+  after a few mutants.
+- **A batch of passes must stop at the first dead ship.** A script that
+  runs one `hoon-mutate.py` pass after another should check the first's
+  output for "stopped answering" before starting the next.
 
 - **Never type into a dojo someone may be using.** `|new-desk` and `|mount`
   are the owner's to run: if the pane shows input you did not send (a
@@ -244,6 +262,36 @@ order of value per hour. Auspex took the first two on 2026-09-25
    - A moved arm may use a lib from grubbery's own subject (`sut` in
      `app/grubbery.hoon`: `json-utils`, `html-utils`, ...). Put it in
      `PRELUDE` and fetch the real one with `SHIP_FILES`.
+   - **Then lift the decisions out of the fibers.** The closed pure set is
+     usually small: on orrery it was 21 arms of 238, about 280 of 5,600
+     lines, while the rules the business depends on sat inside fibers,
+     between a read and a write. Leave the fiber its reads and writes,
+     and move each decision into a pure arm that takes what was read:
+     - A refusal becomes `(unit [code=@ud why=@t])`, and the fiber sends
+       it: `?^  refused  (send-err eyre-id code.u.refused why.u.refused)`.
+       Keep the checks in their old order, so the same request gets the
+       same error.
+     - A router's `?:` chain becomes a table in the lib, answering a tag
+       and who may take the route (`%own`, `%writes`, `%any`), and the
+       nexus dispatches on the tag with `?+`. The access table is then
+       testable, and a new route can't be added without an access. Write
+       a script that generates the table and the nexus's dispatch from
+       the old chain, so no row is retyped, and generate the test's
+       expected table from the lib the same way.
+     - Look for the same rule written out more than once. Orrery had the
+       chat and mail readers' sifts, three copies of the owner's-timezone
+       fallback, and six of "today's count from the record": each became
+       one arm.
+     - When a lifted block took a binding the fiber still uses, the
+       nexus fails `-find.<face>`, one ship rebuild later. Before
+       staging, search the rest of the arm for the face in every form,
+       `s+day` included, not just `(day` and ` day `.
+     - Orrery moved 21 arms and 5 molds, and lifted 37 arms. A route
+       capture of 68 answers (every read route as the owner, a writing
+       key and a read-only key, plus every refusal the router makes) came
+       back identical, apart from timestamps and the passes that ran again
+       when the nexus reloaded. Mint the capture's keys before the first
+       capture, or their last-used stamps differ too.
 2. **A route script on a live dev ship.** Drive every route the clients
    use, the way they use them, including every refusal the API promises.
    This is the only layer that sees wiring: a route pointed at the wrong
@@ -286,6 +334,72 @@ order of value per hour. Auspex took the first two on 2026-09-25
      tested, and the router, whose survivors are exactly the routes no
      fiber test reaches yet.
 
+## Never ship a crash loop (grubbery apps)
+
+Calendar versions 18 and 19 locked their users' ships on 2026-09-24 and
+2026-09-25. Before touching any fiber's crash handling, its start-up code,
+or anything that reads stored state, know how that happened.
+
+**How one crash becomes a hung ship.** A fiber that returns `%fail` is
+restarted at once, with `prod=[~ tang]`, in the same Gall event, and
+`+abet` runs the take queue until it is empty. A fiber that fails again
+before it reaches a wait therefore restarts forever inside one event: HTTP
+dies and the worker sits at 100% CPU. A weir veto on a hard dart is a
+`%fail`. A fresh install's weir refuses everything until the user approves
+the permits, and a user can uncheck roads later. So `poke:io`,
+`set-timer:io`, `cancel-timer:io`, `get-time:io` and `nonce:io` can fail at
+any time; every poke and peek draws entropy from `/sys/bowl.sig`. And a
+poke that a fiber holds (`%skip`) while it waits hangs its sender, because
+grubbery re-offers every held poke on each step.
+
+1. **After a crash, the first thing a fiber does must be a wait that
+   cannot fail**, with no hard dart before it. `rise-wait:io` is safe: it
+   sends nothing and waits for a poke. To retry on a timer, make the clock
+   and the timer soft: send on a fixed wire (no nonce), and treat `%veto`
+   as "no timer, wait for a poke". Never `%fail` inside the crash handler.
+   Reference: calendar's `+rise-later`, `+soft-behn`, `+soft-now` and
+   `+rise-park` (`code/nex/calendar/app.hoon`, commit `da42ed6`).
+2. **Never retry without a wait between tries.** Back off 1, 2, 4, up to 60
+   minutes, and print the full trace only for the first couple of crashes.
+3. **While a crashed fiber waits, refuse pokes; don't hold them.** Return
+   `%fail` with a marker tang, and on restart treat that tang as "not a
+   crash". Never `%skip` them. `rise-wait` takes the first poke as its
+   restart signal and drops its payload, so a real poke arriving then is
+   lost. And a fiber nobody pokes (a sync loop, a tick, an HTTP
+   dispatcher) stays down under `rise-wait` until a reload.
+4. **Everything that runs at start must be total over old data.** Wrap
+   every read of stored state in `mole` with a fallback. Never apply
+   `need`, `snag`, `got:by`, `;;` or `!<` to a stored noun without one.
+   Make migrations idempotent, and `mole` them item by item, so an item
+   that won't convert is left as it was.
+5. **`mole` bounds crashes, not time.** Any loop whose length comes from
+   data needs a cap: an RRULE `COUNT`, an index, a date range, pages from
+   a remote. Urbit is single-threaded, so a long loop freezes the ship.
+6. **Validate at the door.** Never store what a later reader can't handle.
+   Calendar 17 stored a weekday spelled "Monday", and 18's start-up
+   conversion crashed on it every time.
+7. **Test the upgrade, not just the new code.** Put the previous release
+   on a test ship with old and malformed data, including whatever the old
+   code accepted unchecked. Switch to the new code and watch for five
+   minutes: the instance's bang is null, the worker is idle, the route
+   answers, and pokes are acked.
+8. **Test a refusing weir.** On a test ship, remove `/sys/behn/` and then
+   `/sys/bowl.sig` from the instance's poke weir (explorer action
+   `del-weir-road`, then `reload-nexus`). The app must park, with the
+   worker near 0% CPU, not spin. Measure CPU from deltas in
+   `/proc/<worker pid>/stat`, not `ps %cpu`. A slow `?info=1` is not a
+   hang, and a dead route with CPU at 0 is a parked fiber, not a spin.
+
+**If a ship is spinning,** press ^C in its dojo (with tmux:
+`tmux send-keys -t <pane> C-c`); `kill -INT` on the worker does nothing.
+Then remove the trigger straight away: approve the app's permits, or
+restore the weir. The interrupted event rolls back.
+
+**Releases.** A version bump pushed to the release branch reaches the
+publisher within about 15 minutes, and every subscriber minutes after
+that. Nothing gates it. Keep releases small, and never push start-up or
+crash-handling changes without doing 7 and 8 first.
+
 ## Traps in building the runner
 
 These are already handled in the scripts. They are here for anyone
@@ -324,6 +438,6 @@ changing them.
 - **An allowlist of reviewed equivalent mutants**, keyed by arm and op,
   so they stop being re-reported.
 - **More operators**: arithmetic, list operations, a deleted line.
-- **Wide conjunctions.** `conjunct` only reads a tall `?&` or `?|`. The
-  wide `&(a b)` and `|(a b)`, which orrery uses for most guards, are not
-  mutated yet.
+- **Wide conjunctions that span lines.** `conjunct` now reads the wide
+  `&(a b)`, `|(a b)`, `?&(…)` and `?|(…)` as well as the tall forms, but
+  only when the form opens and closes on one line.

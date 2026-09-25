@@ -6,10 +6,10 @@ report every break that no test noticed. See README.md and PLAYBOOK.md.
 
 Each mutant is written into the test desk's mount, never into the repo, and
 the clean lib is synced back when the run ends, however it ends. A mutant
-that loops forever is interrupted with SIGINT to the ship's king process,
-exactly what ^C in its dojo does.
+that loops forever stops the run, since only ^C typed in the ship's dojo
+ends a spinning event; with DOJO_PANE=<tmux pane> the runner types it.
 """
-import argparse, os, re, shlex, signal, subprocess, sys, time
+import argparse, os, re, shlex, subprocess, sys, time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KIT)
@@ -228,18 +228,6 @@ def mutants(menu):
                 yield lib, n + 1, arm_at(lines, n), what, ''.join(l for l in out if l is not None)
 
 
-def king_pid(pier):
-    name = os.path.basename(os.path.abspath(pier))
-    for pid in filter(str.isdigit, os.listdir('/proc')):
-        try:
-            argv = open(f'/proc/{pid}/cmdline', 'rb').read().split(b'\0')
-        except OSError:
-            continue
-        args = [a.decode(errors='replace') for a in argv if a]
-        if args and 'vere' in args[0] and 'work' not in args[1:2] and name in args[1:2]:
-            return int(pid)
-
-
 def run(pier, env=None, timeout=None):
     return subprocess.run([f'{KIT}/hoon-test.sh', pier],
                           env={**os.environ, 'HOON_TEST_CONF': CONF, **(env or {})},
@@ -286,9 +274,17 @@ def main():
                 break
             verdict = {0: 'SURVIVED', 1: 'killed', 3: 'no-build'}.get(r.returncode, 'timeout')
             if verdict == 'timeout':
-                pid = king_pid(a.pier)
-                if pid:
-                    os.kill(pid, signal.SIGINT)  # ^C: ends the looping event
+                # A spinning event is ended by ^C typed in the ship's dojo,
+                # and by nothing else: a signal to the worker (or the king)
+                # does not interrupt it. With DOJO_PANE set to the dojo's
+                # tmux pane, send that ^C and go on; without it, stop here.
+                pane = os.environ.get('DOJO_PANE')
+                if not pane:
+                    print(f'[{i}/{len(todo)}] timeout  {lib}:{line} +{arm} {what}: the ship may be '
+                          'spinning on this mutant. Press ^C in its dojo (or rerun with '
+                          'DOJO_PANE=<tmux pane>); results from here are void', flush=True)
+                    break
+                subprocess.run(['tmux', 'send-keys', '-t', pane, 'C-c'], check=False)
                 time.sleep(5)
             tally[verdict] = tally.get(verdict, 0) + 1
             if verdict == 'SURVIVED':
