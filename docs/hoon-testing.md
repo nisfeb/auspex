@@ -311,6 +311,47 @@ The first run corrected two of my own assumptions: `whoami`'s `caps` is
 `0v1.2345` is not a valid `@uv` (groups after the first are 5 digits), so
 it's a 400, and only a well-formed id that doesn't exist gets a 404.
 
+### Step 3: the fibers
+
+`tests/lib/auspex-fibers.hoon` runs the nexus's own request fiber with the
+kit's `hoon/fiber-test.hoon`, entering where grubbery does:
+`((on-file:app [/ui/requests %r1] *blot) ~)`, started with an
+`inbound-request` as its state. The harness answers `bowl.sig` reads and
+pokes and records every dart, so each test asserts what the route *did*:
+
+- an unauthenticated request gets 403 and pokes nothing;
+- `archive` pokes the writer with exactly `[%archive t &]`, then answers
+  `{"ok":true}`; a malformed body gets 400 and never reaches the writer;
+- a draft is stamped with the ship's clock, read through `bowl.sig`;
+- each of the five asset routes reads its own grub, and only for a GET;
+- `whoami` asks for `our`, then reads the caps grub.
+
+**Building the nexus on the test desk** took the grubbery dialect
+(`DIALECT=grubbery`, `CODE=code`), the faces its subject uses in `PRELUDE`
+(`tarball nexus loader io=fiberio http-utils`, found by counting uses in
+`app.hoon`), grubbery's own libs copied from the ship's `%grubbery` by the
+kit's new `SHIP_FILES`, and relative `/<` imports for the web client's
+files, which the kit now translates to `%mime` imports through the `html`,
+`js`, `json` and `svg` marks.
+
+**Mutating the router showed what the tests reached.** 28 mutants in
+`handle-request`: 11 survived at first, all in the five asset routes' path
+and method checks. One table test over those routes left 2, both at
+`whoami`, and its test left none: 27 killed, 1 no-build. Each nexus mutant
+rebuilds the whole nexus, about 20 s, so this runs by arm.
+
+Lessons:
+
+- **Test through `+on-file`.** The nexus file's product is cast to
+  `nexus:nexus`, which hides the internal arms, and the grub's fiber is
+  the boundary grubbery itself calls.
+- **Answer the way grubbery answers.** A bowl read gets a reply *and* an
+  ack. With only the reply, `take-bowl` waited forever for the ack, and
+  every run stopped after one dart. A trace of each step's input kind and
+  verb found it in one run.
+- **A peek is a fine place to stop.** Which grub a route reads is its
+  decision; asserting that needs no fake answer.
+
 **The web lib, rerun on the fixed runner.** `calendar-df` found that
 `hoon-mutate.py` left the previous lib's last mutant on the desk when a run
 moved to the next lib, so every `auspex-web` mutant had run against two

@@ -69,6 +69,7 @@ holds plain `KEY="value"` lines only. Paths are relative to the file.
 | `DIALECT` | `clay` (default), or `grubbery` for a desk built by grubbery: its libs are translated on the way (below). |
 | `CODE` | grubbery only: the code tree's root in the repo (e.g. `code`), which `/lib/...` imports are relative to. |
 | `PRELUDE` | grubbery only: faces grubbery puts in every lib's subject that the libs use (e.g. `tarball`). Each becomes a `/+` at the top of every translated lib; ship a lib of that name with `FILES` (a shim of just the molds used is enough). |
+| `SHIP_FILES` | optional `desk:path` entries (`grubbery:lib/nexus.hoon`) copied at setup from that desk **on the ship**, and refreshed whenever the ship's copy differs: the libs a grubbery app's code expects in its subject, at exactly the installed version. |
 | `TESTS` | a directory; every `*.hoon` in it lands in `tests/lib/`. |
 | `FILES` | optional fixtures, landing at the same path on the desk, or `src=dest` to move one (`code/sur/x.hoon=sur/x.hoon`). |
 | `MARKS` | marks copied from `%base` at setup. Default `json mime`: a `/*` of a json file needs both. |
@@ -114,13 +115,40 @@ Grubbery builds a desk's code itself, and its imports are not clay's:
 | `/<  *  /lib/a.hoon` | `/+  *a` |
 | `/&  face  /lib/dir/` | one `/*  face-N  %mime  /lib/dir/<file>/<ext>` per file, and `face` bound to the `(axal (map @ta mime))` grubbery hands over; the files are copied along |
 | `/&  face  /lib/x/f.txt` | `/*  face  %mime  /lib/x/f/txt` |
+| `/<  face  ui/app.js` (relative) | resolved against the importing file's directory (`./`, `../`): a `.hoon` as above; any other file as `/*  face  %mime  /<its path>`, copied along, its extension's mark in `MARKS` |
 
-Other runes (`/$`, `/%`) and relative paths are refused by name, not
-guessed at. Set `DIALECT=grubbery`, `CODE`, and `PRELUDE` for the faces
+Other runes (`/$`, `/%`), a relative `/&`, and a path that climbs out of
+the code tree are refused by name, not guessed at. Set `DIALECT=grubbery`, `CODE`, and `PRELUDE` for the faces
 grubbery supplies (see the calendar's `hoon-test.conf` for a whole
 example). A `/&` of text files needs their marks: `MARKS="json mime txt txt-diff"`.
 The first build of a lib with hundreds of `/*` imports takes a minute or
 more; later runs reuse it.
+
+## Driving a nexus's fibers
+
+`hoon/fiber-test.hoon` runs a grubbery fiber inside a unit test. List it in
+`FILES` (`scripts/hoon-test-kit/hoon/fiber-test.hoon=lib/fiber-test.hoon`),
+put the nexus itself in `LIBS`, and grubbery's own libs in `SHIP_FILES`
+and `PRELUDE`. Then a test starts a grub's fiber the way grubbery does,
+through the nexus's `+on-file`, and reads back what it did:
+
+```hoon
+/+  *test, ft=fiber-test, tarball
+/=  app  /nex/myapp/app
+=/  t  %^  run:ft  a-world:ft
+         ((on-file:app [/ui/requests %r1] *blot:tarball) ~)
+       (request:ft ~zod & %'POST' '/apps/myapp/api/x' '{"a":1}')
+(expect-eq !>([200 '{"ok":true}']) !>((status:ft t)))
+```
+
+`+run` steps the fiber the way the runtime does and answers `bowl.sig`
+reads (now, our, entropy) and pokes, recording every dart. It stops
+`%done`, `%fail`, or `%wait` on something only the test can answer (a peek,
+a keen, a timer), which `+feed` supplies. `+pokes` pulls out every poke with a
+given mark, `+responses` the HTTP responses, `+status` a request's one
+response. Test through `+on-file`, not internal arms: the nexus file's
+product is cast to `nexus:nexus`, which hides them, and the grub's own
+fiber is the boundary grubbery calls anyway.
 
 ## Logging in without a dojo
 

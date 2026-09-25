@@ -47,6 +47,12 @@ A **grubbery** app (libs importing with `/<` or `/&`) needs
 `DIALECT=grubbery`, `CODE` and `PRELUDE` in `hoon-test.conf`: the kit
 translates its libs for clay. README.md, "A grubbery app".
 
+**Nexus code** (PLAYBOOK.md, "Testing nexus code"): move pure arms to a
+lib behind one-line aliases; drive routes on a dev ship with a route script
+(log in with `ship-cookie.sh`, never the dojo); and drive fibers with
+`hoon/fiber-test.hoon`, entering through the nexus's `+on-file` and
+asserting the pokes and responses the fiber sent.
+
 ## Rules
 
 - **Size before you run.** Each mutant takes about 10 s and one commit, and

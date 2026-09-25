@@ -1646,6 +1646,7 @@ alongside the main suite:
 -test /=grubbery=/tests/lib/auspex-chain ~     ::  104 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
+-test /=grubbery=/tests/lib/auspex-fibers ~    ::  6 tests: the nexus's own fibers
 ```
 
 ### 8.4 Rule → test

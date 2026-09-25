@@ -11,8 +11,11 @@ disagree on imports and on what a lib's subject already holds:
   /&  face  /lib/x/f.txt      ->  /*  face  %mime  /lib/x/f/txt
 
 and the faces grubbery puts in every subject (tarball, nexus, ...) are
-PRELUDE: each becomes a /+ at the top. Other runes (/$, /%, relative paths)
-are refused by name rather than guessed at.
+PRELUDE: each becomes a /+ at the top. A relative /< resolves against the
+importing file's own directory: a .hoon as above, any other file (a web
+client's index.html, say) as /*  face  %mime  <its path>, copied along.
+Other runes (/$, /%) and relative /& are refused by name rather than
+guessed at.
 
     grubbery_clay.py <code-root> <src.hoon> <dest.hoon> <desk-root> [prelude ...]
 
@@ -48,8 +51,10 @@ def seg_path(rel):
     return '/' + '/'.join(segs)
 
 
-def translate(text, code_root, prelude=()):
-    """(clay text, [(src file, desk-relative dest)] of the files a /& names)."""
+def translate(text, code_root, prelude=(), here=''):
+    """(clay text, [(src file, desk-relative dest)] of the files a /& or a
+    relative /< names). `here` is the importing file's directory under
+    code_root, which a relative /< resolves against, as grubbery's does."""
     lines = text.split('\n')
     out, files, body = [f'/+  {p}' for p in prelude], [], []
     n = 0
@@ -59,6 +64,25 @@ def translate(text, code_root, prelude=()):
             out.append(line)
             continue
         m = IMPORT.match(s)
+        if m and not m.group(2).startswith('/'):
+            # RELATIVE: resolved against the importing file's own directory
+            # (./ and ../ as grubbery reads them). A .hoon lands where an
+            # absolute import would; any other file is what grubbery makes
+            # of it, a %mime built through its extension's mark.
+            face, path = m.groups()
+            rel = os.path.normpath(os.path.join(here or '.', path))
+            if rel == '..' or rel.startswith('../'):
+                raise Refused(f'{m.group(2)}: climbs out of the code tree')
+            path = '/' + rel
+            if not path.endswith('.hoon'):
+                if face == '*':
+                    raise Refused(f'{m.group(2)}: a file import needs a face')
+                rel = path.strip('/')
+                out.append(f'/*  {face}  %mime  {seg_path(rel)}')
+                files.append((os.path.join(code_root, rel), rel))
+                continue
+            out.append(f'/+  *{lib_face(path)}' if face == '*' else f'/+  {face}={lib_face(path)}')
+            continue
         if m:
             face, path = m.groups()
             out.append(f'/+  *{lib_face(path)}' if face == '*' else f'/+  {face}={lib_face(path)}')
@@ -109,7 +133,9 @@ def write_if_changed(path, data, mode='w'):
 def install(code_root, src, dest, desk_root, prelude=(), text=None):
     """Translate src (or text, a mutant of it) into dest on the desk, and
     copy the files it names. Answers the desk paths written."""
-    clay, files = translate(open(src).read() if text is None else text, code_root, prelude)
+    here = os.path.relpath(os.path.dirname(os.path.abspath(src)), os.path.abspath(code_root))
+    clay, files = translate(open(src).read() if text is None else text, code_root, prelude,
+                            '' if here == '.' else here)
     wrote = [dest] if write_if_changed(dest, clay) else []
     for f, rel in files:
         d = os.path.join(desk_root, rel)

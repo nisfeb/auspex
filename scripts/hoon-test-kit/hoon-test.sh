@@ -125,6 +125,36 @@ if [[ "${1:-}" == setup ]]; then
 ;<  ~  bind:m  (send-raw-card [%pass /setup %arvo %c %info %$DESK %& fil])
 (pure:m !>(%ok))
 EOF
+  # SHIP_FILES: libs the app's code expects from a desk on this ship
+  # (a grubbery nexus's tarball, nexus and fiberio come from %grubbery),
+  # copied from that desk so they match what is installed. Unlike the
+  # harness above, a copy that differs from the ship's is REFRESHED:
+  # these move whenever that desk is upgraded.
+  if [[ -n "${SHIP_FILES:-}" ]]; then
+    sf=""
+    for f in $SHIP_FILES; do
+      p=${f#*:}; p=${p%.hoon}
+      sf+=" [%${f%%:*} /$p/hoon]"
+    done
+    ted <<EOF
+=/  m  (strand ,vase)
+=/  paz=(list [@tas path])  ~[${sf# }]
+=|  fil=soba:clay
+|-
+?^  paz
+  =*  d  -.i.paz
+  =*  p  +.i.paz
+  ;<  t=@t  bind:m  (scry @t (weld \`path\`/cx/[d] p))
+  ;<  has=?  bind:m  (scry ? (weld /cu/$DESK p))
+  ?.  has  \$(paz t.paz, fil [[p %ins %hoon !>(t)] fil])
+  ;<  o=@t  bind:m  (scry @t (weld /cx/$DESK p))
+  ?:  =(o t)  \$(paz t.paz)
+  \$(paz t.paz, fil [[p %mut %hoon !>(t)] fil])
+?~  fil  (pure:m !>(%same))
+;<  ~  bind:m  (send-raw-card [%pass /setup %arvo %c %info %$DESK %& fil])
+(pure:m !>(%copied))
+EOF
+  fi
   exit
 fi
 

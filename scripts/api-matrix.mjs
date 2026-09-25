@@ -126,7 +126,10 @@ try {
     ok(/^~[a-z-]+$/.test(me), `ship is ${me}`)
     eq(r.json.caps?.keys, true, 'a dev ship holds its keys, so it can sign')
   })
-  if (!me) throw new Error('cannot continue without whoami')
+  if (!me) {
+    console.log('\nno session: is the cookie current, and is this the right ship?')
+    process.exit(1)
+  }
 
   await check('a send to ourselves lands in the Inbox as one verified message', async () => {
     const r = await post('/send', { to: [me], subject: tag, body: `one ${tag}`, prev: null })

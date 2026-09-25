@@ -182,6 +182,21 @@ order of value per hour. Auspex took the first two on 2026-09-25
      JSON, put the old code back, capture again, and diff. Auspex: 50
      routes, byte-identical.
    - Then test the moved arms and mutate them like any lib.
+   - **Count `+$` molds as arms** when you pick the closed set. A mold
+     between two arms is otherwise swallowed into the arm above it, stays
+     behind, and the lib fails `-find.<mold>`. Molds are pure: move them
+     and alias them too (`+$  x  x:uc`).
+   - **Make the route diff mean something.** Seed varied data first; a
+     ship with two items proves little. Capture twice with the old code
+     and check those two agree before comparing old with new, strip
+     any time-dependent field, and include the refusals. Calendar: 58
+     routes; auspex: 50, both byte-identical.
+   - **A grubbery build error is not on the console**, which says only
+     "did not compile". It's on the file: `GET /grubbery/ball/<desk>/code/
+     lib/x.hoon?info=1`, field `build.detail`.
+   - A moved arm may use a lib from grubbery's own subject (`sut` in
+     `app/grubbery.hoon`: `json-utils`, `html-utils`, ...). Put it in
+     `PRELUDE` and fetch the real one with `SHIP_FILES`.
 2. **A route script on a live dev ship.** Drive every route the clients
    use, the way they use them, including every refusal the API promises.
    This is the only layer that sees wiring: a route pointed at the wrong
@@ -194,12 +209,35 @@ order of value per hour. Auspex took the first two on 2026-09-25
      fetches `+code` over `conn.sock`, posts it on stdin (never in argv,
      never printed), keeps only the cookie, and refuses when the port
      answers as a different ship. Fake ships move ports on restart.
-3. **Drive the fibers.** A fiber is `$-(input output)` (`lib/nexus.hoon`),
-   the same shape as a spider strand, so a test can run one: feed it an
-   input, check the darts it emits, answer them, and repeat until `%done`
-   or `%fail`. That reaches the writer's ordering and the checks that live
-   only in fibers. It needs the nexus built on the test desk, which needs
-   `DIALECT=grubbery`.
+3. **Drive the fibers** with `hoon/fiber-test.hoon` (README, "Driving a
+   nexus's fibers"). A fiber is `$-(input output)`, so a test can run one
+   exactly as the runtime does. To get there:
+   - **Build the nexus on the test desk.** Put it in `LIBS` with
+     `DIALECT=grubbery`; put the faces grubbery gives every nexus that it
+     uses in `PRELUDE` (count them: auspex needed `tarball nexus loader
+     io=fiberio http-utils`), and the libs behind them in `SHIP_FILES`
+     from `%grubbery`. Its web-client files arrive as relative `/<`
+     imports, and those need their marks (`html js json svg`).
+   - **Enter through `+on-file`**, like grubbery: `((on-file:app rail blot)
+     ~)` is the grub's process, and its starting state is whatever that
+     grub holds. For a request grub that is `[src inbound-request]`, which
+     `+request` builds.
+   - **Assert what the fiber did:** the pokes it sent (the writer's actions,
+     by mark) and the response it gave. How it did it is not the contract.
+   - **Answer like grubbery answers.** Every bowl read gets a reply *and*
+     an ack; answering with only the reply leaves `take-bowl` waiting
+     forever for the ack, and the run stops `%wait` after one dart. When a
+     run stalls, print each step's input kind and verb: the stall is the
+     step whose input it wanted and never got.
+   - **An asset or read route stops at its peek.** The harness leaves
+     peeks unanswered, and that is enough: assert which grub the route
+     read (`+peeks`). Auspex's router went from 11 surviving mutants to
+     none with one table test over its five asset routes and one for
+     `whoami`.
+   - Mutating the nexus rebuilds it per mutant (about 20 s each on
+     auspex), so mutate by arm with `--only`: the route handlers you
+     tested, and the router, whose survivors are exactly the routes no
+     fiber test reaches yet.
 
 ## Traps in building the runner
 
@@ -231,6 +269,11 @@ changing them.
   runner decodes it into text.
 - **Name sites by `+$` and `+*` as well as `++`**, or a default inside a
   mold is credited to the next arm.
+
+## Writing Hoon tests: traps
+
+- **`roll` or `weld` over an untyped literal list mull-grows.** Cast it
+  (`` `(list entry)`~[…] ``) or weld through a dry gate.
 
 ## Not built yet
 
