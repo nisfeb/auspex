@@ -2109,4 +2109,26 @@
     (expect-eq !>((sy ~[0v1 0v2 0v3])) !>((marks:auspex (sy ~[0v1 0v2]) (sy ~[0v2 0v3]) &)))
     (expect-eq !>((sy ~[0v1])) !>((marks:auspex (sy ~[0v1 0v2]) (sy ~[0v2 0v3]) |)))
   ==
+::
+::  storing a thread counts as a change when it writes or culls anything,
+::  and a redelivery that does neither is no change at all
+++  test-plan-writes
+  =/  a  (um ~zod 'a' ~)
+  =/  one  (want-slots:auspex ~[a] ~)
+  =/  st=stored-msg:sur  [%2 a %verified]
+  ;:  weld
+    (expect !>(!(plan-writes:auspex ~ ~ ~)))
+    (expect !>((plan-writes:auspex ~[[/x st]] ~ ~)))
+    (expect !>((plan-writes:auspex ~ ~[/x] ~)))
+    (expect !>((plan-writes:auspex ~ ~ ~[/x])))
+    (expect !>(!(plan-writes:auspex (slot-plan:auspex one one))))
+  ==
+::
+::  discovery reads a peer's /proto up to and including the last case
+++  test-discovery-reads-every-case-it-promises
+  ;:  weld
+    (expect !>((more-cases:auspex 1)))
+    (expect !>((more-cases:auspex proto-probe-cases:auspex)))
+    (expect !>(!(more-cases:auspex +(proto-probe-cases:auspex))))
+  ==
 --

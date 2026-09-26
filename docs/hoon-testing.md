@@ -479,6 +479,62 @@ Lessons:
   was paused for another session's release checks on `~wex`. The runner
   then left a mutant in the mount, which the kit's runner now prevents.
 
+### Measuring the fibers live, 2026-09-26
+
+The 44 mutants left in the writer's fibers are control flow: acting on a
+refusal, `apply`'s dispatch, "nothing changed" early returns. No unit
+test reaches them. The kit's new `hoon-mutate.py --live` deploys each
+mutant to `~wex`'s auspex instance and judges it by the app's own live
+checks, named in `hoon-test.conf`:
+
+- `scripts/live-deploy.sh` writes the file with `write-text`, which
+  answers only once the desk has rebuilt and the nexus reloaded, then
+  reads the file's `build.status`.
+- `scripts/live-check.sh` runs `api-matrix` (16 route checks) and
+  `xship.mjs`: mail both ways with `~feb`, with discovery forgotten on
+  both sides first, a thread archived before the peer answers in it, an
+  auto-downloading attachment, and a labelling rule.
+
+About 80 to 150 s per mutant.
+
+| round | mutants | killed | survived | no-build |
+|---|---|---|---|---|
+| pilot, `do-label` | 3 | 2 | 0 | 1 |
+| the writer's fibers, first judge | 41 | 14 | 18 | 9 |
+| survivors' arms, extended `xship` | 22 | 12 | 9 | 1 |
+| `file-arrival`, labels checked on an unarchived thread | 4 | 4 | 0 | 0 |
+
+**Every survivor showed a hole in the judge before it showed anything
+about the code.** The first `xship` never replied into an existing
+thread, archived a thread, fetched a file, or forgot a peer, so every
+fiber path behind those survived. Adding each step killed the mutants
+behind it. The last: a rule's label is written only when the thread's
+archive state doesn't change, so it has to be checked on a thread that
+was never archived.
+
+Two survivors were decisions after all, and were lifted and unit-tested:
+"did storing this emit any dart" (`+plan-writes`, which the redelivery
+rule depends on) and the probe's case bound (`+more-cases`, at exactly
+64).
+
+**What is left, with reasons:**
+- `deliver`'s `?|(wrote fresh)`, the `fresh` half: a chain we already
+  hold, newly delivered to us directly. It needs a BCC'd redelivery to
+  reach, and no live check makes one.
+- `publish-proto`, 3 branches: the farm keeps a ship's earlier /proto,
+  so a ship that has published once can't show a skipped republish. It
+  needs a check on a never-published ship.
+
+Lessons:
+
+- **A survivor of a live run is first a question about the judge.** Ask
+  which user-visible step would have noticed, and add that step.
+- **The judge is re-read for every mutant.** Don't edit the check
+  scripts during a run, or later mutants face a different judge.
+- **State the ship keeps can hide a mutant:** a published /proto, a peer
+  record. Clear what you can first (`forget-peer`), and name what you
+  can't.
+
 ### Wide conjunctions, 2026-09-25
 
 The orrery session noted that `conjunct` only read a tall `?&`/`?|`, while

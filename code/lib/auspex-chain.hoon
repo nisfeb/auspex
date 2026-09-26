@@ -3066,4 +3066,24 @@
   |=  [old=(set msg-id) is=(set msg-id) rd=?]
   ^-  (set msg-id)
   ?:(rd (~(uni in old) is) (~(dif in old) is))
+::
+::  +plan-writes: did storing this plan emit a single dart? A redelivery
+::  of a chain already held writes nothing and must not look like new
+::  mail; a delivery that only culls (a copy shed by +prune) changed the
+::  thread and must.
+++  plan-writes
+  |=  [puts=(list [pk=path st=stored-msg]) dead=(list path) gone=(list path)]
+  ^-  ?
+  ?|(?=(^ puts) ?=(^ dead) ?=(^ gone))
+::
+::  +proto-probe-cases: how many cases of a peer's /proto discovery reads
+::  before it stops. gall gives each re-publish the next case up, so a
+::  peer that republished often sits at a high case.
+++  proto-probe-cases  ^-(@ud 64)
+::
+::  +more-cases: is case `c` still within the probe?
+++  more-cases
+  |=  c=@ud
+  ^-  ?
+  (lte c proto-probe-cases)
 --

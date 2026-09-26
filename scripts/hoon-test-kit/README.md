@@ -87,6 +87,7 @@ NOSYNC=1 scripts/hoon-test-kit/hoon-test.sh <pier>        # commit the mount as 
 scripts/hoon-test-kit/hoon-mutate.py <pier> --list                   # size a run first
 scripts/hoon-test-kit/hoon-mutate.py <pier>                          # boundary,conjunct
 scripts/hoon-test-kit/hoon-mutate.py <pier> --ops wide               # just the wide &( |( conditions
+scripts/hoon-test-kit/hoon-mutate.py <pier> --live --only <fiber-arms> # judged by a running app (below)
 scripts/hoon-test-kit/hoon-mutate.py <pier> --ops branch,equal,flag
 scripts/hoon-test-kit/hoon-mutate.py <pier> --only arm-a,arm-b       # recheck after a fix
 scripts/hoon-test-kit/hoon-mutate.py <pier> --since main              # only the arms a diff touches
@@ -167,6 +168,27 @@ given mark, `+responses` the HTTP responses, `+status` a request's one
 response. Test through `+on-file`, not internal arms: the nexus file's
 product is cast to `nexus:nexus`, which hides them, and the grub's own
 fiber is the boundary grubbery calls anyway.
+
+## Mutating what only a running app exercises
+
+A nexus's fibers are control flow around reads and writes: no unit test
+reaches them, but a live route does. `hoon-mutate.py --live` deploys each
+mutant to a **dev** instance and judges it by the app's own live checks,
+named in `hoon-test.conf`:
+
+| key | meaning |
+|---|---|
+| `LIVE_DEPLOY` | a command that deploys `$LIVE_FILE` (the raw source, which the instance builds itself) as `$LIVE_SRC` (its repo path). Exit 0 built, 3 did not build, anything else: the ship is in trouble, and the run stops. |
+| `LIVE_CHECK` | a command that exercises the app. Exit 0 all pass (the mutant SURVIVED), 1 a check failed (killed), anything else: it couldn't finish, and the run stops. |
+
+Both run from the repo root. The clean files are deployed again at the
+end, however the run ends, and a ^C stops it between mutants. On a
+grubbery desk, `write-text` answers only once the desk has rebuilt and
+the nexus reloaded, so a deploy script can simply check the file's
+`?info=1` `build.status` afterwards (`vase` means built). Auspex's
+`scripts/live-deploy.sh` and `scripts/live-check.sh` are a worked example:
+every route, plus mail both ways between two ships. At about 80 s a
+mutant, use `--only` for the fibers you mean.
 
 ## Logging in without a dojo
 

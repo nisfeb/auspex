@@ -1913,7 +1913,7 @@
 ::    a busy publisher took more than 4s on ~feb, and stopping there read
 ::    the case below it.
 ::
-++  proto-probe-cases  ^-(@ud 64)
+++  proto-probe-cases  proto-probe-cases:uc
 ++  proto-timeout  proto-timeout:uc
 ::
 ::  +keen-page: one %keen. ~ when OUR DEADLINE fired - nothing answered,
@@ -1983,7 +1983,7 @@
   |=  [who=ship case=@ud best=(unit proto:uc)]
   =/  m  (fiber:fiber:nexus ,(unit proto:uc))
   ^-  form:m
-  ?:  (gth case proto-probe-cases)  (pure:m best)
+  ?.  (more-cases:uc case)  (pure:m best)
   ;<  n=(unit (unit *))  bind:m
     (keen-page who (proto-keen-path:uc mesa-agent case) proto-timeout proto-page-mark:uc)
   ?~  n  (pure:m best)
@@ -2453,7 +2453,7 @@
   ::  the answer +deliver needs: did this emit a single dart? A
   ::  redelivery of a chain we already hold emits none, and must not be
   ::  allowed to look like new mail.
-  (pure:m ?|(?=(^ puts) ?=(^ dead) ?=(^ gone)))
+  (pure:m (plan-writes:uc puts dead gone))
 ::
 ::  recursion by ARM NAME, not by $. A $ with arguments inside a ;<
 ::  continuation cannot find the trap (-find.$.+2).

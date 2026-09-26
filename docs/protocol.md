@@ -1643,7 +1643,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  118 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  120 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
@@ -1653,7 +1653,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **118 tests**, the discovery ones among them
+be diffed; **120 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1759,6 +1759,8 @@ be diffed; **118 tests**, the discovery ones among them
 | A label change is a no-op, a new set, or refused past max-labels, and a thread past the cap may still lose one. | `test-relabel` |
 | A mailing list never holds our own ship nor more than max-to members, and only a new list is refused at max-lists. | `test-list-rules` |
 | Marking adds to the read or fold set; unmarking takes away. | `test-marks` |
+| Storing a thread counts as a change when it writes or culls anything, and a redelivery that does neither is no change. | `test-plan-writes` |
+| Discovery reads a peer's /proto up to and including its last case. | `test-discovery-reads-every-case-it-promises` |
 | Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |

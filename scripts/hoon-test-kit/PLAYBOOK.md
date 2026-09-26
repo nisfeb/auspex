@@ -353,6 +353,31 @@ order of value per hour. Auspex took the first two on 2026-09-25
      tested, and the router, whose survivors are exactly the routes no
      fiber test reaches yet.
 
+## Mutating fibers against a running app (`--live`)
+
+When the pure decisions are lifted and covered, what is left in a fiber
+is control flow: acting on a refusal, dispatch, "nothing changed" early
+returns. `hoon-mutate.py --live` measures it with the app's own live
+checks (README, "Mutating what only a running app exercises"). What
+auspex's first runs taught (2026-09-26, 70 live mutants, about 2 h):
+
+- **A survivor is first a question about the judge.** Every survivor of
+  auspex's first live run pointed at a step no check took: a reply into
+  an existing thread, an archived thread getting mail, an attachment
+  fetched from another ship, a forgotten peer. Adding each step killed
+  the mutants behind it (18 survivors to 9 to 3). Ask which user-visible
+  step would have noticed, and add it.
+- **Check where the effect is not masked.** A rule's label was written
+  only when a thread's archive state didn't change, so checking it on
+  the thread whose un-archiving rewrote everything missed it.
+- **Some survivors are decisions after all.** A one-line "did this write
+  anything" that other logic depends on is worth lifting and testing.
+- **State the ship keeps can hide a mutant.** A /proto already in the
+  farm, a cached peer record. Clear what the API lets you (auspex's
+  `forget-peer`), and name what it doesn't.
+- **The judge is re-read for every mutant.** Don't edit the check
+  scripts during a run.
+
 ## Never ship a crash loop (grubbery apps)
 
 Calendar versions 18 and 19 locked their users' ships on 2026-09-24 and
