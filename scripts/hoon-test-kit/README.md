@@ -154,7 +154,10 @@ through the nexus's `+on-file`, and reads back what it did:
 reads (now, our, entropy), pokes and makes, recording every dart. It stops
 `%done`, `%fail`, or `%wait` on something only the test can answer (a peek,
 a keen, a timer). `+feed` supplies an answer and goes on, and
-`+answer-peek` answers the last peek with a view (`[%none ~]` for "no such
+`+answer-peek` answers the last peek with a view. `+run-behind` starts a
+process with a real input delivered BEFORE its start kick, as grubbery
+does after a reload (crash-loop rule 9), and every step runs under `mule`,
+so a crashing step is a `%fail`, as grubbery makes it. `+answer-peek` answers the last peek with a view (`[%none ~]` for "no such
 grub"). The `world` sets the clock, the ship, `refuse` (road prefixes a weir
 refuses; a dart there gets `%veto`), and `nack` (poke marks refused on
 consumption, the way a crashed, waiting fiber refuses them). Those two are

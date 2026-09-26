@@ -155,6 +155,11 @@ after the change.
   calendar's first run found `FREQ=weekly` refused (RFC 5545 values are
   case-insensitive).
 
+- **A loobean bunts to `%.y`.** A value built from a bunt
+  (`*inbound-request:eyre`) has every flag set to yes: its
+  `authenticated` is `%.y`, so every request in a test looked like the
+  owner's and an auth check passed everything. Set each flag the arm
+  reads. The mutant on the auth check is what showed it (calendar).
 ## Writing the missing test
 
 - **Put it in the test that already owns the rule.** Add a new test only
@@ -192,6 +197,20 @@ app is a couple of hundred commits.
   tests, and `|meld` it before a long run. `~wex` died mid-run at
   `--loom 33` with `loom: external fault`, about 150 test-desk commits
   into a day, while another session rebuilt a nexus on the same ship.
+- **On a shared ship, ask before a long run, and stop it cleanly.** One
+  session's release checks failed when another's mutations built beside
+  them. `^C` (or `kill -INT` to the runner) now finishes the mutant in
+  flight and restores the clean libs before exiting; a second `^C` stops
+  at once. The suite runs in its own session, so a terminal ^C for the
+  runner doesn't cut it off mid-build. An interrupted run before this fix
+  left a mutant in the mount: compare the mount with a fresh translation
+  before trusting the desk.
+- **Another session's gates fail with it, and look like bugs.** When
+  `~wex` died (`external fault: 0`) during a mutation run on
+  2026-09-25, calendar's two-ship gates were running there and three
+  checks failed; they passed on a quiet rerun. Tell the other sessions on
+  a ship before a long run, and rerun a failure on a quiet ship before
+  believing it.
 - **A crash is stop-and-report.** Only the ship's owner restarts a pier.
   Believe the runner when it says the ship stopped answering. On
   2026-09-25, `~nec`'s vere process was still listed while the ship was
@@ -340,6 +359,19 @@ Calendar versions 18 and 19 locked their users' ships on 2026-09-24 and
 2026-09-25. Before touching any fiber's crash handling, its start-up code,
 or anything that reads stored state, know how that happened.
 
+- **A restartable fiber's first step takes the kick; it never sends.**
+  After a reload or restart grubbery queues the start's null kick behind
+  any inputs already waiting (a timer wake, news, a late HTTP answer). A
+  first step that only sends (`send-dart`, so also `poke`, `get-time`,
+  `cancel-timer`, `nonce`) asserts it was kicked, and a queued real
+  input crashes it: `real-input-to-oneshot-step`. With a back-off it does
+  not spin, but every reload is a crash and each lengthens the wait: a
+  day of reloads left calendar's sync fiber parked an hour, publishing
+  nothing, which read as a cross-version share bug. Start the handler
+  with `|=(input :+ ~ q.state ?~(in [%done ~] [%skip ~]))` (calendar's
+  `+take-kick`, commit 9733316). Test: reload the instance several times
+  with writes in flight; `rise.json` must not move. Any `+rise-later`
+  ported before 2026-09-25 evening has this.
 **How one crash becomes a hung ship.** A fiber that returns `%fail` is
 restarted at once, with `prod=[~ tang]`, in the same Gall event, and
 `+abet` runs the take queue until it is empty. A fiber that fails again
@@ -421,6 +453,37 @@ grubbery re-offers every held poke on each step.
   lines that finish mean building. Wait at least one build's length
   before sending ^C, because ^C rolls back whatever event it interrupts,
   and on a shared ship that may be someone else's write.
+
+What orrery's run of 7 and 8 added (2026-09-25):
+
+- **Test on the stock kernel.** A grubbery build that parks a fiber whose
+  dart was refused (a kernel-side guard) acts before the app's own crash
+  handler, so on such a kernel test 8 proves only the kernel. Check which
+  one acted: the app's own messages and its `rise.json`, or a grub bang
+  saying "fiber parked: a dart was refused by the weir".
+- **Refusing behn or bowl.sig only tests parking.** To test the back-off
+  itself, refuse a road that leaves the clock and the timer alone, and
+  make a fiber use it: with `/sys/iris/` refused, a forced model call
+  crashes the generator, which then waits 1, 2 and 4 minutes, printing
+  "again (3 times running)" on the third, and comes back each time.
+- **Know when a poke should be refused.** Only a fiber parked in its wait
+  refuses. A poke that lands during a settle or a pass is taken, and may
+  be what starts the pass that crashes, so it answers ok.
+- **Porting `+rise-later` brings its marks.** `+soft-now` names `%bowl-req`
+  and `%time`; a guest desk must carry `mar/bowl-req.hoon` and
+  `mar/time.hoon`, or its closure check fails.
+- **Fibers that crash together share one record.** With a refused weir
+  every fiber crashes at once, each writes `rise.json` back from what it
+  read, and some rows are lost: those fibers' counts restart at 1. They
+  still wait; a grub per fiber would end it.
+- **A kernel reload drops staged code.** Code written into a desk's tree
+  with `write-text`, not committed to the desk's source, is replaced when
+  grubbery reloads. After someone else's kernel commit, check the code
+  that runs by a route whose answer changed, not by the version route.
+- **Feed the upgrade test through the old code's own routes**: settings
+  of the wrong types, inbox items with odd fields, values at the size
+  caps, actions with payloads of odd shapes. Orrery's
+  `scripts/upgrade-seed.py` and `scripts/ship-watch.py` are the pair.
 
 **If a ship is spinning,** press ^C in its dojo (with tmux:
 `tmux send-keys -t <pane> C-c`); `kill -INT` on the worker does nothing.

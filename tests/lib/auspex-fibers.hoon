@@ -203,4 +203,18 @@
     (expect-eq !>(`(list *)`~[/rise]) !>((turn (pokes:ft t [/ %timer-rest]) |=([* =noun] noun))))
     (expect !>(!=(%fail end.t)))
   ==
+::
+::  after a reload an input can reach a fiber before its start kick: a
+::  timer wake left from before, a late answer. The start must take its
+::  kick and hold that input, not crash on it (every reload a crash).
+++  test-a-start-behind-a-queued-input-does-not-crash
+  =/  wake=intake:ft  [%poke *from:fiber:nexus [[/ %timer-wake] !>(/rise)]]
+  =/  w  (run-behind:ft a-world:ft (writer ~) !>(~) wake)
+  =/  u  (run-behind:ft a-world:ft (ui-main ~) !>(~) wake)
+  ;:  weld
+    (expect !>(!=(%fail end.w)))
+    (expect !>(!=(%fail end.u)))
+    ::  and the clean start still clears the old wait
+    (expect-eq !>(`(list *)`~[/rise]) !>((turn (pokes:ft w [/ %timer-rest]) |=([* =noun] noun))))
+  ==
 --

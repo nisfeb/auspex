@@ -9,7 +9,7 @@ the clean lib is synced back when the run ends, however it ends. A mutant
 that loops forever stops the run, since only ^C typed in the ship's dojo
 ends a spinning event; with DOJO_PANE=<tmux pane> the runner types it.
 """
-import argparse, os, re, shlex, subprocess, sys, time
+import argparse, os, re, shlex, signal, subprocess, sys, time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KIT)
@@ -231,7 +231,10 @@ def mutants(menu):
 def run(pier, env=None, timeout=None):
     return subprocess.run([f'{KIT}/hoon-test.sh', pier],
                           env={**os.environ, 'HOON_TEST_CONF': CONF, **(env or {})},
-                          capture_output=True, text=True, timeout=timeout)
+                          capture_output=True, text=True, timeout=timeout,
+                          # its own session, so a ^C for the runner is not
+                          # also delivered to the suite mid-run
+                          start_new_session=True)
 
 
 def main():
@@ -257,8 +260,22 @@ def main():
         sys.exit('the suites fail on the clean libs; fix that first')
     tally, survivors = {}, []
     last = None
+    # ^C (or kill -INT) asks to stop BETWEEN mutants: the one running
+    # finishes, then the clean libs go back. Interrupted mid-mutant, the
+    # runner never reached its restore and left a mutant on the desk.
+    # A second ^C stops at once, as before.
+    stop = []
+    def ask_stop(sig, frame):
+        if stop:
+            raise KeyboardInterrupt
+        stop.append(1)
+        print('stopping after this mutant; ^C again to stop now', flush=True)
+    signal.signal(signal.SIGINT, ask_stop)
     try:
         for i, (lib, line, arm, what, text) in enumerate(todo, 1):
+            if stop:
+                print(f'[{i}/{len(todo)}] stopped by request; the rest did not run', flush=True)
+                break
             src, dest = next((p, d) for p, d, n in LIBS if n == lib)
             # one mutant at a time: the lib the last mutant broke goes back
             # to clean first, or every later mutant runs against two breaks

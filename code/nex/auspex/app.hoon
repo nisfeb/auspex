@@ -2930,6 +2930,13 @@
   |=  [=prod:fiber:nexus msg=tape]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
+  ::  TAKE THE START KICK FIRST. After a reload or restart grubbery queues
+  ::  the kick BEHIND any input already waiting (a timer wake, news, a
+  ::  late answer), and a step that only sends a dart asserts it was
+  ::  kicked, so a real input arriving first crashed it: every reload
+  ::  counted as a crash. Found in calendar (its 9733316, rule 9 of the
+  ::  crash-loop rules); +take-kick holds whatever came ahead of the kick.
+  ;<  ~  bind:m  take-kick
   ::  a clean start takes down any wait an earlier run left set: its wake
   ::  would come to a fiber no longer waiting for it
   ?~  prod
@@ -2964,6 +2971,15 @@
     (soft-behn /rise/set [[/ %timer-set] `[wire @da]`[/rise until]])
   %-  ?:(|(set !crash) same (slog leaf+"{msg}: no timer (weir?); waiting for a poke" ~))
   (rise-park note)
+::
+::  +take-kick: the start's null kick, holding (%skip) any real input
+::  that was queued ahead of it, so it reaches the step that wants it
+++  take-kick
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  |=  input:fiber:nexus
+  :+  ~  q.state
+  ?~(in [%done ~] [%skip ~])
 ::
 ::  +rise-park: wait for the /rise wake; a poke meanwhile is refused with
 ::  note (the restart it brings is not a crash, see +rise-later)
