@@ -1876,4 +1876,237 @@
     ::  a record of the wrong shape is no record, never a crash
     (expect-eq !>(`(unit [n=@ud last=@da until=@da])`~) !>((de-rise:auspex (need (de:json:html '{"n":"many","last":"yesterday","until":[1,2]}')))))
   ==
+::
+::  ── the writer's decisions ──────────────────────────────────────────
+::
+::  Unsigned messages: every check here is structural, and signing a
+::  thousand messages would make the suite slow for nothing.
+++  um
+  |=  [who=ship body=@t prev=(unit msg-id:sur)]
+  ^-  msg:sur
+  [[who 1 (sy ~[~nec]) 's' body '' ~2026.1.1 prev ~] 0x0]
+::  a chain n messages deep, each answering the one before
+++  deep
+  |=  n=@ud
+  ^-  chain:sur
+  =|  acc=chain:sur
+  =|  prev=(unit msg-id:sur)
+  =|  i=@ud
+  |-
+  ?:  =(i n)  (flop acc)
+  =/  x  (um ~zod (scot %ud i) prev)
+  $(i +(i), acc [x acc], prev `(id:auspex unsigned.x))
+::  n messages from n different ships, n distinct ids
+++  many
+  |=  n=@ud
+  ^-  chain:sur
+  (turn (gulf 1 n) |=(i=@ud (um `@p`i (scot %ud i) ~)))
+::
+::  each cap of a delivered chain answers its own reason, and the first
+::  cap broken is the one named
+++  test-incoming-refusal-names-the-first-cap-broken
+  =/  ok  (um ~zod 'b' ~)
+  =/  mime  ok(body-mime.unsigned (crip (reap +(max-mime:auspex) 'm')))
+  =/  att  ok(attachments.unsigned (reap +(max-attach:auspex) ['a' 1 'text/plain' 0v1]))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((incoming-refusal:auspex ~[ok])))
+    (expect-eq !>(`(unit @t)``'chain too long') !>((incoming-refusal:auspex (reap +(max-chain:auspex) ok))))
+    (expect-eq !>(`(unit @t)`~) !>((incoming-refusal:auspex (reap max-chain:auspex ok))))
+    (expect-eq !>(`(unit @t)``'body too long') !>((incoming-refusal:auspex ~[ok(body.unsigned (crip (reap +(max-body:auspex) 'a')))])))
+    (expect-eq !>(`(unit @t)``'subject too long') !>((incoming-refusal:auspex ~[ok(subj.unsigned (crip (reap +(max-subj:auspex) 'a')))])))
+    (expect-eq !>(`(unit @t)``'too many recipients') !>((incoming-refusal:auspex ~[ok(to.unsigned (sy (turn (gulf 1 +(max-to:auspex)) |=(i=@ `@p`i))))])))
+    (expect-eq !>(`(unit @t)``'too many attachments') !>((incoming-refusal:auspex ~[att])))
+    (expect-eq !>(`(unit @t)``'bad body mime') !>((incoming-refusal:auspex ~[mime])))
+    (expect-eq !>(`(unit @t)``'chain too deep') !>((incoming-refusal:auspex (deep +(max-depth:auspex)))))
+    (expect-eq !>(`(unit @t)`~) !>((incoming-refusal:auspex (deep max-depth:auspex))))
+    (expect-eq !>(`(unit @t)``'too many signers') !>((incoming-refusal:auspex (many +(max-signers:auspex)))))
+    (expect-eq !>(`(unit @t)`~) !>((incoming-refusal:auspex (many max-signers:auspex))))
+    ::  a chain breaking two caps is refused for the first in the order
+    %+  expect-eq  !>(`(unit @t)``'body too long')
+    !>  (incoming-refusal:auspex ~[ok(body.unsigned (crip (reap +(max-body:auspex) 'a')), subj.unsigned (crip (reap +(max-subj:auspex) 'a')))])
+  ==
+::
+::  merged with the thread: distinct ids, depth, and the thread cap, which
+::  a thread already held is never refused by
+++  test-admit-refusal
+  =/  ok  (deep 2)
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((admit-refusal:auspex ok | 0)))
+    (expect-eq !>(`(unit @t)``'too many messages') !>((admit-refusal:auspex (many +(max-chain:auspex)) | 0)))
+    (expect-eq !>(`(unit @t)`~) !>((admit-refusal:auspex (many max-chain:auspex) | 0)))
+    (expect-eq !>(`(unit @t)``'chain too deep') !>((admit-refusal:auspex (deep +(max-depth:auspex)) | 0)))
+    (expect-eq !>(`(unit @t)``'too many threads') !>((admit-refusal:auspex ok | max-threads:auspex)))
+    (expect-eq !>(`(unit @t)`~) !>((admit-refusal:auspex ok | (dec max-threads:auspex))))
+    (expect-eq !>(`(unit @t)`~) !>((admit-refusal:auspex ok & max-threads:auspex)))
+  ==
+::
+::  what a send is refused for before it reads anything
+++  test-compose-refusal
+  =/  ships  |=(n=@ud (sy (turn (gulf 1 n) |=(i=@ `@p`i))))
+  =/  cap  |=([n=@ud c=@t] (crip (reap n c)))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((compose-refusal:auspex (cap max-body:auspex 'a') (cap max-subj:auspex 'a') (ships max-to:auspex))))
+    (expect-eq !>(`(unit @t)``'body too long') !>((compose-refusal:auspex (cap +(max-body:auspex) 'a') 's' ~)))
+    (expect-eq !>(`(unit @t)``'subject too long') !>((compose-refusal:auspex 'b' (cap +(max-subj:auspex) 'a') ~)))
+    (expect-eq !>(`(unit @t)``'too many recipients') !>((compose-refusal:auspex 'b' 's' (ships +(max-to:auspex)))))
+  ==
+::
+::  the chain a send would carry, once signed
+++  test-sent-refusal
+  =/  ok  (um ~zod 'b' ~)
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((sent-refusal:auspex (deep max-depth:auspex))))
+    (expect-eq !>(`(unit @t)``'chain too long') !>((sent-refusal:auspex (reap +(max-chain:auspex) ok))))
+    (expect-eq !>(`(unit @t)``'chain too deep') !>((sent-refusal:auspex (deep +(max-depth:auspex)))))
+    (expect-eq !>(`(unit @t)``'too many signers') !>((sent-refusal:auspex (many +(max-signers:auspex)))))
+  ==
+::
+::  a reply finds the thread that holds what it answers, and may answer
+::  only a message with a copy that is not forged
+++  test-a-reply-finds-its-thread-and-an-honest-copy
+  =/  a  (um ~zod 'a' ~)
+  =/  b  (um ~nec 'b' ~)
+  =/  ia  (id:auspex unsigned.a)
+  =/  ss-a  (malt ~[(st a %verified)])
+  =/  loaded  (malt ~[[0v1 ss-a] [0v2 (malt ~[(st b %verified)])]])
+  ;:  weld
+    (expect-eq !>(`(unit thread-id:sur)``0v1) !>((thread-holding:auspex loaded ia)))
+    (expect-eq !>(`(unit thread-id:sur)`~) !>((thread-holding:auspex loaded 0v99)))
+    (expect !>((honest-copy:auspex ~ ~)))
+    (expect !>((honest-copy:auspex ss-a `ia)))
+    (expect !>(!(honest-copy:auspex (malt ~[(st a %forged)]) `ia)))
+    (expect !>((honest-copy:auspex (malt ~[(st a %forged) (st a(sig 0x1) %unverified)]) `ia)))
+    (expect !>(!(honest-copy:auspex ss-a `0v99)))
+  ==
+::
+::  new mail un-archives unless a rule archives it; mail that wrote
+::  nothing only adds a rule's archive; labels join up to the cap
+++  test-filing
+  =/  m0=meta:sur  *meta:sur
+  =/  arch  m0(archived &, labels (sy ~[%a]))
+  =/  full  m0(labels (sy (turn (gulf 1 max-labels:auspex) |=(i=@ `@tas`(cat 3 'l' (scot %ud i))))))
+  ;:  weld
+    (expect-eq !>([| (sy ~[%a])]) !>((filing:auspex arch [~ |] &)))
+    (expect-eq !>([& (sy ~[%a])]) !>((filing:auspex arch [~ |] |)))
+    (expect-eq !>([& (sy ~[%a %b])]) !>((filing:auspex arch [(sy ~[%b]) &] &)))
+    (expect-eq !>([& ~]) !>((filing:auspex m0 [~ &] |)))
+    (expect-eq !>([| ~]) !>((filing:auspex m0 [~ |] |)))
+    ::  a rule's labels that would pass the cap are not added, none of them
+    (expect-eq !>(labels.full) !>(ls:(filing:auspex full [(sy ~[%extra]) |] &)))
+    ::  and exactly at the cap they are
+    =/  one-short  full(labels (~(del in labels.full) %l1))
+    (expect-eq !>((~(put in labels.one-short) %extra)) !>(ls:(filing:auspex one-short [(sy ~[%extra]) |] &)))
+  ==
+::
+::  storing a thread's wanted slots over what it held: identical writes
+::  nothing, a new reply writes its slot, a message gone is culled with
+::  its node
+++  test-slot-plan
+  =/  a  (um ~zod 'a' ~)
+  =/  b  (um ~nec 'b' `(id:auspex unsigned.a))
+  =/  one  (want-slots:auspex ~[a] ~)
+  =/  two  (want-slots:auspex ~[a b] ~)
+  =/  sw  |=(p=[puts=(list [pk=path st=stored-msg:sur]) dead=(list path) gone=(list path)] [(lent puts.p) (lent dead.p) (lent gone.p)])
+  ;:  weld
+    (expect-eq !>([0 0 0]) !>((sw (slot-plan:auspex two two))))
+    (expect-eq !>([1 0 0]) !>((sw (slot-plan:auspex one two))))
+    (expect-eq !>([2 0 0]) !>((sw (slot-plan:auspex ~ two))))
+    ::  dropping b culls b's node directory, which takes b's slot with it
+    (expect-eq !>([0 1 0]) !>((sw (slot-plan:auspex two one))))
+    ::  a changed verdict rewrites that slot alone
+    =/  flipped  (want-slots:auspex ~[a b] (my ~[[[(id:auspex unsigned.b) sig.b] %forged]]))
+    (expect-eq !>([1 0 0]) !>((sw (slot-plan:auspex two flipped))))
+  ==
+::
+::  the writer's dispatch by mark, and who may act
+++  test-the-writer-sorts-pokes-and-sources
+  ;:  weld
+    (expect-eq !>(%chain) !>((poke-kind:auspex [/ %auspex-chain])))
+    (expect-eq !>(%action) !>((poke-kind:auspex [/ %auspex-action])))
+    (expect-eq !>(%blob-in) !>((poke-kind:auspex [/auspex %blob-in])))
+    (expect-eq !>(%probe) !>((poke-kind:auspex [/auspex %probereq])))
+    (expect-eq !>(%other) !>((poke-kind:auspex [/auspex %auspex-chain])))
+    (expect-eq !>(%other) !>((poke-kind:auspex [/ %blob-in])))
+    (expect !>((may-act:auspex ~zod ~)))
+    (expect !>((may-act:auspex ~zod `~zod)))
+    (expect !>(!(may-act:auspex ~zod `~nec)))
+  ==
+::
+::  discovery: publish when unbound or changed, keep the best valid
+::  answer, and trust a fresh record without asking again
+++  test-discovery-decisions
+  =/  p  our-proto:auspex
+  =/  bad  p(versions ~)
+  =/  r=peer-rec:sur  [%0 ~nec `p ~2026.1.1]
+  ;:  weld
+    (expect !>(!(proto-stale:auspex & p)))
+    (expect !>((proto-stale:auspex | p)))
+    (expect !>((proto-stale:auspex & bad)))
+    (expect-eq !>(`(unit proto:sur)``p) !>((better-proto:auspex ~ `p)))
+    (expect-eq !>(`(unit proto:sur)``p) !>((better-proto:auspex `p `bad)))
+    (expect-eq !>(`(unit proto:sur)``p) !>((better-proto:auspex `p ~)))
+    %+  expect-eq  !>(`(unit [p=(unit proto:sur) asked=@da])``[`p ~2026.1.1])
+    !>  (cached-probe:auspex `r ~2026.1.1)
+    (expect-eq !>(`(unit [p=(unit proto:sur) asked=@da])`~) !>((cached-probe:auspex `r (add ~2026.1.1 ~d2))))
+    (expect-eq !>(`(unit [p=(unit proto:sur) asked=@da])`~) !>((cached-probe:auspex ~ ~2026.1.1)))
+  ==
+::
+::  fetched bytes are stored only if they arrived, fit, carry no more
+::  than their size says, and hash to the address they were asked for
+++  test-blob-refusal
+  =/  ok=octs  [5 'hello']
+  =/  h  (blob-hash:auspex ok)
+  =/  big=octs  [+(max-blob:auspex) 0]
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h)))
+    (expect-eq !>(`(unit @t)``'blob fetch missed') !>((blob-refusal:auspex ~ h)))
+    (expect-eq !>(`(unit @t)``'blob too large') !>((blob-refusal:auspex `big (blob-hash:auspex big))))
+    ::  exactly max-blob is not too large
+    =/  cap=octs  [max-blob:auspex 0]
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `cap (blob-hash:auspex cap))))
+    ::  a size short of the bytes is malformed; a size past them is only
+    ::  trailing zeroes, and fine
+    =/  short=octs  [4 'hello']
+    (expect-eq !>(`(unit @t)``'blob malformed') !>((blob-refusal:auspex `short (blob-hash:auspex short))))
+    =/  long=octs  [6 'hello']
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `long (blob-hash:auspex long))))
+    (expect-eq !>(`(unit @t)``'blob hash mismatch') !>((blob-refusal:auspex `ok 0v1)))
+  ==
+::
+::  a label change: nothing, a new set, or a refusal past the cap, which
+::  never stops a thread already past it from losing one
+++  test-relabel
+  =/  ls  (sy ~[%a %b])
+  =/  full  (sy (turn (gulf 1 max-labels:auspex) |=(i=@ `@tas`(cat 3 'l' (scot %ud i)))))
+  ;:  weld
+    (expect-eq !>(`(unit (each (set @tas) @t))`~) !>((relabel:auspex ls %a &)))
+    (expect-eq !>(`(unit (each (set @tas) @t))`~) !>((relabel:auspex ls %c |)))
+    (expect-eq !>(`(unit (each (set @tas) @t))``[%& (sy ~[%a %b %c])]) !>((relabel:auspex ls %c &)))
+    (expect-eq !>(`(unit (each (set @tas) @t))``[%& (sy ~[%b])]) !>((relabel:auspex ls %a |)))
+    (expect-eq !>(`(unit (each (set @tas) @t))``[%| 'too many labels']) !>((relabel:auspex full %x &)))
+    %+  expect-eq  !>(`(unit (each (set @tas) @t))``[%& (~(put in (~(del in full) %l1)) %x)])
+    !>  (relabel:auspex (~(del in full) %l1) %x &)
+    (expect-eq !>(`(unit (each (set @tas) @t))``[%& (~(del in full) %l1)]) !>((relabel:auspex full %l1 |)))
+  ==
+::
+::  a mailing list's members, and the store's cap on lists
+++  test-list-rules
+  =/  ships  |=(n=@ud (sy (turn (gulf 2 +(n)) |=(i=@ `@p`i))))
+  =/  ls=(list [name=@t members=(set @p)])
+    (turn (gulf 1 max-lists:auspex) |=(i=@ud [(scot %ud i) ~]))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((members-refusal:auspex (ships max-to:auspex) ~zod)))
+    (expect-eq !>(`(unit @t)``'too many members') !>((members-refusal:auspex (ships +(max-to:auspex)) ~zod)))
+    (expect-eq !>(`(unit @t)``'a list may not hold your own ship') !>((members-refusal:auspex (sy ~[~zod ~nec]) ~zod)))
+    (expect !>((lists-full:auspex ls 'new')))
+    (expect !>(!(lists-full:auspex ls '1')))
+    (expect !>(!(lists-full:auspex (snip ls) 'new')))
+  ==
+::
+::  marking adds to the read (or fold) set, unmarking takes away
+++  test-marks
+  ;:  weld
+    (expect-eq !>((sy ~[0v1 0v2 0v3])) !>((marks:auspex (sy ~[0v1 0v2]) (sy ~[0v2 0v3]) &)))
+    (expect-eq !>((sy ~[0v1])) !>((marks:auspex (sy ~[0v1 0v2]) (sy ~[0v2 0v3]) |)))
+  ==
 --

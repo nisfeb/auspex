@@ -1023,29 +1023,26 @@
   ^-  form:m
   ::  a chain from ANYONE. src is deliberately not checked against the
   ::  participants: the signatures are the authority, not the courier.
-  ?:  =([/ %auspex-chain] p.sage)
+  =/  kind  (poke-kind:uc p.sage)
+  ?:  ?=(%chain kind)
     =/  res  (mule |.(~|(%auspex-bad-chain ;;(chain:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed chain')
     (deliver root p.res)
-  ?.  ?|  =([/ %auspex-action] p.sage)
-          =([/auspex %blob-in] p.sage)
-          =([/auspex %probereq] p.sage)
-      ==
-    ::  an unknown blot. Ignore it rather than crash - see the header.
-    (pure:m |)
+  ::  an unknown blot. Ignore it rather than crash - see the header.
+  ?:  ?=(%other kind)  (pure:m |)
   ;<  our=@p  bind:m  bowl-our
   ::  +get-poke-src reads the SHIP off the transport, never the payload.
   ::  ~ is a fiber inside this nexus; our own ship arrives named, because
   ::  the agent-facing surface makes every caller a /sys/ames/ships/<who>.
   =/  src=(unit @p)  (get-poke-src:io from)
-  ?.  ?|(?=(~ src) =(our u.src))
+  ?.  (may-act:uc our src)
     (reject root 'foreign action refused')
   ::  a fetch fiber's answer. Local-only for the same reason an action
   ::  is: the blot has a path prefix, which the agent-facing surface and
   ::  a dojo poke cannot name, but a peer poking over ames can - so the
   ::  source check is what makes that harmless. The hash is re-checked
   ::  in +take-blob regardless.
-  ?:  =([/auspex %blob-in] p.sage)
+  ?:  ?=(%blob-in kind)
     =/  res  (mule |.(~|(%auspex-bad-blob-in ;;(blob-in:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed blob-in')
     (take-blob root p.res)
@@ -1056,7 +1053,7 @@
   ::  discovery cache could tell us it speaks a version it does not, or
   ::  caps larger than it enforces, and either one turns a send into a
   ::  message that vanishes.
-  ?:  =([/auspex %probereq] p.sage)
+  ?:  ?=(%probe kind)
     =/  res  (mule |.(~|(%auspex-bad-probe ;;(probe-req:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed probe result')
     (take-probe-done root p.res)
@@ -1168,12 +1165,8 @@
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
     (reject root 'this ship cannot sign mail: Auspex has not been granted the key road')
-  ?.  (lte (met 3 body) max-body:uc)
-    (reject root 'body too long')
-  ?.  (lte (met 3 subject) max-subj:uc)
-    (reject root 'subject too long')
-  ?.  (lte ~(wyt in to) max-to:uc)
-    (reject root 'too many recipients')
+  =/  bad=(unit @t)  (compose-refusal:uc body subject to)
+  ?^  bad  (reject root u.bad)
   ::  A ref naming no stored blob refuses the WHOLE send: nothing is
   ::  signed. The route has already answered 400 with the hash; this is
   ::  the point-of-use half, for the other callers and for a blob evicted
@@ -1189,14 +1182,7 @@
   ::
   ::  ponytail: a walk of every thread per reply, the one writer walk left
   ::  on the send path; a [msg-id -> thread-id] index grub retires it.
-  =/  tid=(unit thread-id:uc)
-    ?~  prev  ~
-    =/  hits
-      %+  skim  ~(tap by loaded)
-      |=  [t=thread-id:uc ss=(map path stored-msg:uc)]
-      %+  lien  ~(val by ss)
-      |=(s=stored-msg:uc =((id:uc unsigned.msg.s) u.prev))
-    ?~(hits ~ `p.i.hits)
+  =/  tid=(unit thread-id:uc)  ?~(prev ~ (thread-holding:uc loaded u.prev))
   ?:  &(?=(^ prev) ?=(~ tid))
     (reject root 'unknown prev')
   =/  ss=(map path stored-msg:uc)  ?~(tid ~ (~(gut by loaded) u.tid ~))
@@ -1205,12 +1191,7 @@
   ::  nobody wrote as the parent of ours - and anyone can poke us a
   ::  forged copy of an id. The clients refuse to offer it; this is where
   ::  it is actually refused.
-  =/  honest-prev=?
-    ?~  prev  &
-    %+  lien  ~(val by ss)
-    |=  s=stored-msg:uc
-    &(=((id:uc unsigned.msg.s) u.prev) !=(%forged verdict.s))
-  ?.  honest-prev
+  ?.  (honest-copy:uc ss prev)
     (reject root 'every copy of the message this answers is forged')
   ;<  our=@p    bind:m  bowl-our
   ;<  now=@da   bind:m  bowl-now
@@ -1232,19 +1213,16 @@
   ::  the outgoing chain must clear the same length bound the recipient
   ::  will apply on arrival, or the send is a silent no-op at the far end
   ::  while looking successful here.
-  ?.  (fits-length:uc new max-chain:uc)
-    (reject root 'chain too long')
   ::  and the same for depth, for the same reason: a reply past the cap
   ::  would be stored here and refused by every recipient, silently.
-  ?.  (fits-depth:uc new max-depth:uc)
-    (reject root 'chain too deep')
   ::  and the same for signers. A thread can only exceed the cap through
   ::  our own sends, since delivery refuses such a chain on arrival, so
   ::  this is unreachable in practice - which is the point: it fails
   ::  LOUDLY here, at the one moment a human is looking, instead of
   ::  succeeding locally and being discarded by every recipient.
-  ?.  (fits-signers:uc new max-signers:uc)
-    (reject root 'too many signers')
+  ::  (all three are +sent-refusal's, in this order)
+  =/  big=(unit @t)  (sent-refusal:uc new)
+  ?^  big  (reject root u.big)
   ::  the thread is already resolved: `tid` came from `prev`, which names
   ::  exactly one message, and a compose is by definition a new root.
   ::  Re-deriving it with +thread-key here would be slower AND wrong -
@@ -1363,12 +1341,12 @@
   ;<  ex=?  bind:m  (peek-exists:io (rv root (tdir t)))
   ?.  ex  (reject root 'unknown thread')
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  =/  now=(set @tas)  ?:(add (~(put in labels.mt) l) (~(del in labels.mt) l))
   ::  a no-op writes nothing. Removing a label a thread does not carry
-  ::  is a request a client makes freely.
-  ?:  =(now labels.mt)  (pure:m |)
-  ?.  (lte ~(wyt in now) max-labels:uc)  (reject root 'too many labels')
-  ;<  ~  bind:m  (put-file (meta-rail root t) [/auspex %meta] mt(labels now))
+  ::  is a request a client makes freely. (+relabel)
+  =/  change  (relabel:uc labels.mt l add)
+  ?~  change  (pure:m |)
+  ?:  ?=(%| -.u.change)  (reject root p.u.change)
+  ;<  ~  bind:m  (put-file (meta-rail root t) [/auspex %meta] mt(labels p.u.change))
   ;<  ~  bind:m  (note root 'label' & l)
   (pure:m |)
 ::
@@ -1492,17 +1470,16 @@
   ^-  form:m
   ?.  (list-name-ok:uw name)  (reject root 'bad list name')
   ;<  our=@p  bind:m  bowl-our
-  ?:  (~(has in members) our)  (reject root 'a list may not hold your own ship')
-  ::  a list larger than a send may carry is a list that cannot be used.
-  ?.  (lte ~(wyt in members) max-to:uc)  (reject root 'too many members')
+  ::  never our own ship, and a list larger than a send may carry is a
+  ::  list that cannot be used (+members-refusal)
+  =/  bad=(unit @t)  (members-refusal:uc members our)
+  ?^  bad  (reject root u.bad)
   ;<  ~  bind:m  (ensure-dir root list-dir)
   ;<  ls=(list [name=@t members=(set @p)])  bind:m  (read-lists root)
   ::  the store bound counts only a list we do not already hold, so
   ::  overwriting an existing list is never refused for capacity - which
   ::  is the whole copy-from-a-message flow at the cap.
-  ?.  ?|  (lien ls |=(o=[name=@t members=(set @p)] =(name.o name)))
-          (lth (lent ls) max-lists:uc)
-      ==
+  ?:  (lists-full:uc ls name)
     (reject root 'too many lists')
   ;<  ~  bind:m
     (put-file (list-rail root name) [/auspex %list] `mail-list:uc`[%0 members])
@@ -1548,13 +1525,11 @@
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
   =/  got  (apply-rules:uc rs c)
   ;<  mt=meta:uc  bind:m  (read-meta root t)
-  =/  arch=?  ?:(wrote archive.got |(archived.mt archive.got))
-  =/  want=(set @tas)  (~(uni in labels.mt) add.got)
   ::  the label bound refuses the ADDITION, never the delivery: a rule
   ::  that would push a thread past the cap simply does not add. Nacking
   ::  the chain instead would turn a rule the user wrote into a way for
-  ::  a sender to get their own mail rejected.
-  =/  ls=(set @tas)  ?:((lte ~(wyt in want) max-labels:uc) want labels.mt)
+  ::  a sender to get their own mail rejected. (+filing)
+  =/  [arch=? ls=(set @tas)]  (filing:uc mt got wrote)
   ?:  &(=(arch archived.mt) =(ls labels.mt))  (pure:m ~)
   ;<  ~  bind:m
     (put-file (meta-rail root t) [/auspex %meta] mt(archived arch, labels ls))
@@ -1613,25 +1588,20 @@
   ::  partially trustworthy. This governs the INCOMING poke only; once
   ::  merged, excess capacity is a different question with a different
   ::  answer, and +prune sheds there rather than rejecting.
-  ?.  (fits-length:uc c max-chain:uc)      (reject root 'chain too long')
-  ?.  (fits-bodies:uc c max-body:uc)       (reject root 'body too long')
-  ?.  (fits-subjects:uc c max-subj:uc)     (reject root 'subject too long')
-  ?.  (fits-recipients:uc c max-to:uc)     (reject root 'too many recipients')
+  ::  every cap below is +incoming-refusal's, in this order:
+  ::  length, bodies, subjects, recipients, then these.
   ::  a delivered chain carries attachment METADATA and never bytes, so
   ::  this bounds what a hostile peer can make us store per message and
   ::  what it can later make us try to fetch. Rejected, not truncated:
   ::  the metadata is inside the signature, so trimming it would forge.
-  ?.  (fits-attachments:uc c max-attach:uc)  (reject root 'too many attachments')
   ::  body-mime is a signed field a recipient cannot repair, so it is
   ::  bounded here where the chain is still refusable whole.
-  ?.  (fits-body-mimes:uc c max-mime:uc)   (reject root 'bad body mime')
   ::  DEPTH, refused before verification because it is the cheapest
   ::  refusal and the walk is bounded. A message is stored under its
   ::  ancestry and every peek of the mail tree rebuilds those keys, so
   ::  depth is quadratic and is NOT off the read path - see +max-depth.
   ::  This one bounds a single poke; the merged check below is what
   ::  actually bounds what ends up on disk.
-  ?.  (fits-depth:uc c max-depth:uc)       (reject root 'chain too deep')
   ::  DISTINCT SIGNERS, and this one is refused HERE - above the two
   ::  binds below - because those two binds are the cost it bounds.
   ::  +key-map does one scry to /sys/scry per distinct [ship life], so
@@ -1644,7 +1614,8 @@
   ::  measured in round trips rather than in bytes. See +max-signers for
   ::  why the number is 128 and for the per-source rate budget this
   ::  deliberately does not attempt.
-  ?.  (fits-signers:uc c max-signers:uc)   (reject root 'too many signers')
+  =/  bad=(unit @t)  (incoming-refusal:uc c)
+  ?^  bad  (reject root u.bad)
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  thread identity is never (root:uc c). `c` is attacker-controlled and
   ::  unsorted, so the head-as-supplied is not a stable identity.
@@ -1662,19 +1633,16 @@
   ::  a genuine state-capacity limit, and it stays a reject: shedding a
   ::  distinct non-root id would orphan the prev pointers of later
   ::  messages. The cost is recorded in the spec and not hidden.
-  ?.  (lte (distinct-ids:uc new) max-chain:uc)
-    (reject root 'too many messages')
   ::  and the merged depth, since two chains each inside the cap can
   ::  compose past it. Same reasoning as the distinct-id cap directly
   ::  above, including the cost: a thread genuinely deeper than
   ::  max-depth accepts nothing further.
-  ?.  (fits-depth:uc new max-depth:uc)
-    (reject root 'chain too deep')
   ::  an EXISTING thread always accepts - a reply must never be refused
   ::  because some unrelated thread filled the cap. Only a brand-new
   ::  thread id is capped.
-  ?.  ?|((~(has by loaded) rid) (lth ~(wyt by loaded) max-threads:uc))
-    (reject root 'too many threads')
+  ::  all three are +admit-refusal's, in this order
+  =/  over=(unit @t)  (admit-refusal:uc new (~(has by loaded) rid) ~(wyt by loaded))
+  ?^  over  (reject root u.over)
   ::  fold this poke's verdicts into the stored ones BEFORE pruning:
   ::  +prune needs a verdict for every message in `new`, including ones
   ::  stored by an earlier poke that this one did not carry.
@@ -1875,7 +1843,7 @@
     (trace:io ~[leaf+"auspex: no key road; /proto not published"])
   ;<  bound=?  bind:m  (farm-has proto-spur:uc)
   ;<  last=proto:uc  bind:m  (read-proto-pub root)
-  ?:  &(bound =(last our-proto:uc))
+  ?.  (proto-stale:uc bound last)
     (trace:io ~[leaf+"auspex: /proto unchanged; not republishing"])
   ::  IT CHANGED, or the binding is gone. GROW, NEVER CULL: the grow
   ::  lands one case above every earlier one, and +keen-proto takes the
@@ -2021,7 +1989,7 @@
   ?~  n  (pure:m best)
   =/  got=(unit proto:uc)
     (biff u.n |=(x=* (mole |.(;;(proto:uc x)))))
-  =?  best  &(?=(^ got) (proto-ok:uc u.got))  got
+  =.  best  (better-proto:uc best got)
   (keen-proto who +(case) best)
 ::
 ::  +enqueue-chain: hand this send to the peer's probe fiber.
@@ -2173,8 +2141,8 @@
   ;<  rec=(unit peer-rec:uc)  bind:m  (read-peer root who)
   =/  n  (fiber:fiber:nexus ,[(unit proto:uc) @da])
   ;<  [got=(unit proto:uc) asked=@da]  bind:m
-    ?:  &(?=(^ rec) (peer-fresh:uc u.rec now))
-      (pure:n [proto.u.rec asked.u.rec])
+    =/  hit  (cached-probe:uc rec now)
+    ?^  hit  (pure:n [p.u.hit asked.u.hit])
     ;<  p=(unit proto:uc)  bind:n  (probe-keen root who)
     (pure:n [p now])
   ;<  rq=(unit probe-req:uc)  bind:m  (read-probe root who)
@@ -2372,14 +2340,11 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (rf root /fetch id.b))
-  ?~  res.b  (reject root 'blob fetch missed')
-  ::  bound what a hostile publisher can hand back before we measure it
-  ?.  (lte p.u.res.b max-blob:uc)
-    (reject root 'blob too large')
-  ?.  (gte p.u.res.b (met 3 q.u.res.b))
-    (reject root 'blob malformed')
-  ?.  (blob-ok:uc u.res.b hash.b)
-    (reject root 'blob hash mismatch')
+  =/  bad=(unit @t)  (blob-refusal:uc res.b hash.b)
+  ?^  bad  (reject root u.bad)
+  ::  (the size bounds what a hostile publisher can hand back before it
+  ::  is measured; see +blob-refusal)
+  ?>  ?=(^ res.b)
   ;<  room=?  bind:m  (make-room root p.u.res.b)
   ?.  room
     (reject root 'blob store full')
@@ -2479,18 +2444,8 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   =/  dir=path  (mdir t)
-  =/  wn=(set path)  (node-dirs:uc ~(tap in ~(key by want)))
-  =/  stale=(set path)
-    %-  ~(gas in *(set path))
-    %+  skip  ~(tap in (node-dirs:uc ~(tap in ~(key by have))))
-    |=(pk=path (~(has in wn) pk))
-  =/  puts=(list [pk=path st=stored-msg:uc])
-    %+  skip  ~(tap by want)
-    |=([pk=path st=stored-msg:uc] =(`st (~(get by have) pk)))
-  =/  gone=(list path)
-    %+  skip  ~(tap in ~(key by have))
-    |=(pk=path ?|((~(has by want) pk) (under-any:uc pk stale)))
-  =/  dead=(list path)  (minimal-dirs:uc stale)
+  =/  [puts=(list [pk=path st=stored-msg:uc]) dead=(list path) gone=(list path)]
+    (slot-plan:uc have want)
   ;<  ~  bind:m  (ensure-nodes root dir (sorted-dirs (node-dirs:uc (turn puts |=([pk=path *] pk)))))
   ;<  ~  bind:m  (put-slots root dir puts)
   ;<  ~  bind:m  (cull-dirs root dir dead)
@@ -2573,7 +2528,7 @@
   ^-  form:m
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   =/  old=(set msg-id:uc)  ?-(k %read read.mt, %folded folded.mt)
-  =/  nex=(set msg-id:uc)  ?:(rd (~(uni in old) is) (~(dif in old) is))
+  =/  nex=(set msg-id:uc)  (marks:uc old is rd)
   ::  a mark that changes nothing writes nothing: a thread opened twice,
   ::  or a relay echoing a mark back, is not a meta rewrite.
   ?:  =(nex old)  (pure:m ~)

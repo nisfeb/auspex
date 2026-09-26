@@ -407,6 +407,78 @@ decode live in the chain lib (`+rise-json`, `+de-rise`, using `di`), and
 the test build's record went 1, 2, 3 at 1, 2 and 4 minutes, CPU 0% between,
 and a POST while it waited got its 503 in 0.9 s.
 
+### Covering the writer, 2026-09-25
+
+Mutating the nexus left about 24 wide-conjunction survivors in the
+writer and delivery paths, and the rest of the menu had never been run
+there: 303 nexus mutants in all, at 20 to 30 s each, since each one
+rebuilds the nexus. So the writer was covered the way the orrery session's
+playbook entry says, by **lifting its decisions out of the fibers**. The
+fibers keep their reads and writes, and each decision becomes a pure arm
+in the chain lib that takes what the fiber read:
+
+| decision | lifted arm | from |
+|---|---|---|
+| a delivered chain's caps, first one broken | `+incoming-refusal` | `deliver` |
+| merged: distinct ids, depth, thread cap | `+admit-refusal` | `deliver` |
+| a send's body, subject, recipient caps | `+compose-refusal` | `do-send` |
+| the thread holding the message a reply answers | `+thread-holding` | `do-send` |
+| may a reply answer it (not every copy forged) | `+honest-copy` | `do-send` |
+| the signed chain's length, depth, signers | `+sent-refusal` | `do-send` |
+| how new mail files a thread (archive, labels) | `+filing` | `file-arrival` |
+| the slots and directories a store writes and culls | `+slot-plan` | `sync-slots` |
+| what reached the writer, and who may act | `+poke-kind`, `+may-act` | `apply` |
+| publish /proto, keep the best answer, trust a record | `+proto-stale`, `+better-proto`, `+cached-probe` | discovery |
+| fetched bytes: missed, too large, malformed, wrong hash | `+blob-refusal` | `take-blob` |
+| a label change, list members, the list cap, a read mark | `+relabel`, `+members-refusal`, `+lists-full`, `+marks` | handlers |
+
+A refusal is `(unit @t)` naming the first check that fails, in the order
+the fiber always made them, so the same input gets the same answer.
+Comments explaining a check stayed at the call. The `blob-refusal`
+lift closes an item the audit had left open: the "declared length short
+of the bytes is malformed" check lived only in a fiber, untested.
+
+**Results.** The 18 lifted arms carry 71 mutants: **67 killed, 4
+no-build (type narrowing), 0 survivors**, after one gap the run found,
+since closed (no test had a merged chain of exactly `max-chain` distinct
+messages). The nexus with its fibers rewired passed all 200 unit tests,
+`api-matrix`'s 16 route checks, and live mail both ways between ships:
+`~feb` (release 17) to `~wex` (the new `deliver`), and a reply back
+through the new `do-send`, both verified.
+
+**What is left in the fibers: 44 mutants, not yet measured.** They are
+the control flow around the decisions: acting on a refusal (`?^  bad`),
+`apply`'s dispatch by kind, the "nothing changed, write nothing" early
+returns, `?|(wrote fresh)`. They're real behaviour, since a flipped one
+could refuse every valid send, but no unit test reaches them. The live
+routes exercise them: `api-matrix` for send, label, lists and read marks,
+the cross-ship test for `deliver`. The kit can't yet mutate code that
+only a live route exercises: that needs a mutant deployed to a dev
+instance and `api-matrix` as the oracle, about two minutes per mutant.
+
+**Rule 9, found by calendar the same day.** After a reload grubbery
+delivers a waiting input before the start's null kick, and `+rise-later`'s
+first step only sent a dart, which asserts it was kicked: each reload with
+an input queued was a crash. Auspex's copy had it. The fix is calendar's
+`+take-kick` as the first step. The kit harness's new `+run-behind`
+delivers an input ahead of the kick, and
+`test-a-start-behind-a-queued-input-does-not-crash` failed without the fix
+and passes with it.
+
+Lessons:
+
+- **Match comments, not just code, when rewiring.** Most of the
+  substitutions failed first because a comment sat between two checks.
+  Replace a check line by line, and keep the comments above the call
+  that now makes the check.
+- **Plumbing stays in the fiber.** `?|(wrote fresh)` or "did any list
+  come back non-empty" decide nothing a test could pin without the fiber;
+  lifting them to kill a mutant would be a test of `|`. They're recorded
+  as plumbing, not hidden.
+- **Ask before mutating on a shared ship, and stop cleanly.** This run
+  was paused for another session's release checks on `~wex`. The runner
+  then left a mutant in the mount, which the kit's runner now prevents.
+
 ### Wide conjunctions, 2026-09-25
 
 The orrery session noted that `conjunct` only read a tall `?&`/`?|`, while

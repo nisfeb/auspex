@@ -2872,4 +2872,198 @@
   %-  mole  |.
   %.  j
   (ot:dejs:format ~[n+ni:dejs:format last+di:dejs:format until+di:dejs:format])
+::
+::  ── the writer's decisions ──────────────────────────────────────────
+::
+::  Lifted out of nex/auspex/app's writer fibers so -test can reach them:
+::  each takes what its fiber read and answers what the fiber should do.
+::  The fibers keep their reads and writes, and call these. A refusal is
+::  the reason for the FIRST check that fails, in the order the fiber
+::  always made them, so the same input gets the same answer.
+::
+::  +incoming-refusal: a delivered chain, before anything is read. Reject
+::  rather than truncate: a chain that breaks a limit is not partially
+::  trustworthy, and trimming signed metadata would forge it.
+++  incoming-refusal
+  |=  c=chain
+  ^-  (unit @t)
+  ?.  (fits-length c max-chain)        `'chain too long'
+  ?.  (fits-bodies c max-body)         `'body too long'
+  ?.  (fits-subjects c max-subj)       `'subject too long'
+  ?.  (fits-recipients c max-to)       `'too many recipients'
+  ?.  (fits-attachments c max-attach)  `'too many attachments'
+  ?.  (fits-body-mimes c max-mime)     `'bad body mime'
+  ?.  (fits-depth c max-depth)         `'chain too deep'
+  ?.  (fits-signers c max-signers)     `'too many signers'
+  ~
+::
+::  +admit-refusal: the delivered chain merged with what the thread held.
+::  A thread already held always accepts (a reply must never be refused
+::  because another thread filled the cap); only a new one is capped.
+++  admit-refusal
+  |=  [new=chain known=? threads=@ud]
+  ^-  (unit @t)
+  ?.  (lte (distinct-ids new) max-chain)        `'too many messages'
+  ?.  (fits-depth new max-depth)                `'chain too deep'
+  ?.  ?|(known (lth threads max-threads))       `'too many threads'
+  ~
+::
+::  +compose-refusal: what a send is refused for before it reads anything
+++  compose-refusal
+  |=  [body=@t subject=@t to=(set ship)]
+  ^-  (unit @t)
+  ?.  (lte (met 3 body) max-body)      `'body too long'
+  ?.  (lte (met 3 subject) max-subj)   `'subject too long'
+  ?.  (lte ~(wyt in to) max-to)        `'too many recipients'
+  ~
+::
+::  +sent-refusal: the chain a send would carry, once signed
+++  sent-refusal
+  |=  new=chain
+  ^-  (unit @t)
+  ?.  (fits-length new max-chain)      `'chain too long'
+  ?.  (fits-depth new max-depth)       `'chain too deep'
+  ?.  (fits-signers new max-signers)   `'too many signers'
+  ~
+::
+::  +thread-holding: the thread that holds a copy of this message
+++  thread-holding
+  |=  [loaded=(map thread-id (map path stored-msg)) i=msg-id]
+  ^-  (unit thread-id)
+  =/  hits
+    %+  skim  ~(tap by loaded)
+    |=  [t=thread-id ss=(map path stored-msg)]
+    %+  lien  ~(val by ss)
+    |=(s=stored-msg =((id unsigned.msg.s) i))
+  ?~(hits ~ `p.i.hits)
+::
+::  +honest-copy: may a reply answer `prev`? Only if some copy of it is
+::  not %forged: every copy forged means the message was never written
+::  by who it names. No prev at all is a new thread, always fine.
+++  honest-copy
+  |=  [ss=(map path stored-msg) prev=(unit msg-id)]
+  ^-  ?
+  ?~  prev  &
+  %+  lien  ~(val by ss)
+  |=(s=stored-msg &(=((id unsigned.msg.s) u.prev) !=(%forged verdict.s)))
+::
+::  +filing: how new mail files its thread. Mail that wrote something
+::  un-archives it unless a rule archives it; mail that wrote nothing
+::  only ever adds the rules' archive. The rules' labels join the
+::  thread's, unless that would pass max-labels, in which case none do.
+++  filing
+  |=  [mt=meta got=[add=(set @tas) archive=?] wrote=?]
+  ^-  [arch=? ls=(set @tas)]
+  =/  want=(set @tas)  (~(uni in labels.mt) add.got)
+  :-  ?:(wrote archive.got |(archived.mt archive.got))
+  ?:((lte ~(wyt in want) max-labels) want labels.mt)
+::
+::  +slot-plan: what storing `want` over `have` writes and culls, in one
+::  thread's tree. puts: slots new or changed. dead: node directories no
+::  wanted slot is under, outermost only. gone: slots to cull that no
+::  culled directory takes with it.
+++  slot-plan
+  |=  [have=(map path stored-msg) want=(map path stored-msg)]
+  ^-  [puts=(list [pk=path st=stored-msg]) dead=(list path) gone=(list path)]
+  =/  wn=(set path)  (node-dirs ~(tap in ~(key by want)))
+  =/  stale=(set path)
+    %-  ~(gas in *(set path))
+    %+  skip  ~(tap in (node-dirs ~(tap in ~(key by have))))
+    |=(pk=path (~(has in wn) pk))
+  :+  %+  skip  ~(tap by want)
+      |=([pk=path st=stored-msg] =(`st (~(get by have) pk)))
+    (minimal-dirs stale)
+  %+  skip  ~(tap in ~(key by have))
+  |=(pk=path ?|((~(has by want) pk) (under-any pk stale)))
+::
+::  +poke-kind: what reached the writer, by the poke's mark
+++  poke-kind
+  |=  b=[path @ta]
+  ^-  ?(%chain %action %blob-in %probe %other)
+  ?:  =([/ %auspex-chain] b)     %chain
+  ?:  =([/ %auspex-action] b)    %action
+  ?:  =([/auspex %blob-in] b)    %blob-in
+  ?:  =([/auspex %probereq] b)   %probe
+  %other
+::
+::  +may-act: a local action, blob or probe result from this ship only.
+::  A chain may come from anyone (the signatures are the authority); an
+::  action is the owner's alone. No source at all is our own fiber.
+++  may-act
+  |=  [our=@p src=(unit @p)]
+  ^-  ?
+  ?|(?=(~ src) =(our u.src))
+::
+::  +proto-stale: must /proto be (re)published? Unless it is bound in
+::  the farm and what was last published is what this build speaks.
+++  proto-stale
+  |=  [bound=? last=proto]
+  ^-  ?
+  !&(bound =(last our-proto))
+::
+::  +better-proto: a discovery answer replaces the best so far only if
+::  it reads as a valid protocol; the highest valid case wins
+++  better-proto
+  |=  [best=(unit proto) got=(unit proto)]
+  ^-  (unit proto)
+  ?:(&(?=(^ got) (proto-ok u.got)) got best)
+::
+::  +cached-probe: a fresh peer record answers a probe without asking the
+::  peer again, with the proto it holds and when it was asked
+++  cached-probe
+  |=  [rec=(unit peer-rec) now=@da]
+  ^-  (unit [p=(unit proto) asked=@da])
+  ?.  &(?=(^ rec) (peer-fresh u.rec now))  ~
+  `[proto.u.rec asked.u.rec]
+::
+::  +blob-refusal: whether fetched bytes may be stored at their address.
+::  A miss, a claimed size past max-blob, a claimed size SHORT of the
+::  bytes that arrived (the atom carries more than its octs says, so the
+::  address the sender computed is not the one they would re-measure
+::  to), or bytes that do not hash to the address they were fetched
+::  under. In that order.
+++  blob-refusal
+  |=  [res=(unit octs) hash=@uv]
+  ^-  (unit @t)
+  ?~  res                             `'blob fetch missed'
+  ?.  (lte p.u.res max-blob)           `'blob too large'
+  ?.  (gte p.u.res (met 3 q.u.res))    `'blob malformed'
+  ?.  (blob-ok u.res hash)             `'blob hash mismatch'
+  ~
+::
+::  +relabel: a label added to or taken off a thread. ~ when nothing
+::  changes (not an error, and not a cap check: a thread already past
+::  the cap may still lose a label); otherwise the new set, or a refusal
+::  when it would pass max-labels.
+++  relabel
+  |=  [labels=(set @tas) l=@tas add=?]
+  ^-  (unit (each (set @tas) @t))
+  =/  now=(set @tas)  ?:(add (~(put in labels) l) (~(del in labels) l))
+  ?:  =(now labels)  ~
+  ?.  (lte ~(wyt in now) max-labels)  `[%| 'too many labels']
+  `[%& now]
+::
+::  +members-refusal: a mailing list's members. Never our own ship (a
+::  list is who to send TO), and no more than one message may name.
+++  members-refusal
+  |=  [members=(set @p) our=@p]
+  ^-  (unit @t)
+  ?:  (~(has in members) our)            `'a list may not hold your own ship'
+  ?.  (lte ~(wyt in members) max-to)     `'too many members'
+  ~
+::
+::  +lists-full: may no NEW list be saved? A list already saved can
+::  always be saved again, even at the cap.
+++  lists-full
+  |=  [ls=(list [name=@t members=(set @p)]) name=@t]
+  ^-  ?
+  ?!  ?|  (lien ls |=(o=[name=@t members=(set @p)] =(name.o name)))
+          (lth (lent ls) max-lists)
+      ==
+::
+::  +marks: a read or fold set after marking `is` (rd: add, else take off)
+++  marks
+  |=  [old=(set msg-id) is=(set msg-id) rd=?]
+  ^-  (set msg-id)
+  ?:(rd (~(uni in old) is) (~(dif in old) is))
 --

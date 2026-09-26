@@ -1643,17 +1643,17 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  105 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  118 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
--test /=grubbery=/tests/lib/auspex-fibers ~    ::  14 tests: the nexus's own fibers
+-test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
 ```
 
 ### 8.4 Rule → test
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **105 tests**, the discovery ones among them
+be diffed; **118 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1746,6 +1746,19 @@ be diffed; **105 tests**, the discovery ones among them
 | A read mark's ids are grouped by the thread that holds them. | `test-group-ids-by-thread` |
 | The label list is every thread's labels, once, sorted. | `test-labels-are-the-sorted-union` |
 | A fiber's crash record reads back as written, in milliseconds; a record of the wrong shape is no record. | `test-the-crash-record-reads-back-as-written` |
+| A delivered chain is refused for the first cap it breaks, in a fixed order: length, bodies, subjects, recipients, attachments, body mime, depth, signers. | `test-incoming-refusal-names-the-first-cap-broken` |
+| Merged with its thread, a chain is refused past max-chain distinct ids or max-depth, and a new thread past max-threads; a thread already held is never refused for the thread cap. | `test-admit-refusal` |
+| A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
+| The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |
+| A reply belongs to the thread holding what it answers, and may answer it only if some copy is not forged. | `test-a-reply-finds-its-thread-and-an-honest-copy` |
+| New mail un-archives its thread unless a rule archives it; mail that wrote nothing only adds a rule's archive; rule labels join up to max-labels, or none do. | `test-filing` |
+| Storing a thread writes only new or changed slots and culls only what is no longer wanted, outermost directories first. | `test-slot-plan` |
+| The writer takes a chain from anyone, and an action, blob or probe result only from this ship. | `test-the-writer-sorts-pokes-and-sources` |
+| /proto is published when unbound or changed; discovery keeps the best valid answer; a fresh peer record is trusted without asking again. | `test-discovery-decisions` |
+| Fetched bytes are stored only if they arrived, fit max-blob, carry no more than their declared size, and hash to their address. | `test-blob-refusal` |
+| A label change is a no-op, a new set, or refused past max-labels, and a thread past the cap may still lose one. | `test-relabel` |
+| A mailing list never holds our own ship nor more than max-to members, and only a new list is refused at max-lists. | `test-list-rules` |
+| Marking adds to the read or fold set; unmarking takes away. | `test-marks` |
 | Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |
