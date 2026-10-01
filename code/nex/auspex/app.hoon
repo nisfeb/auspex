@@ -438,6 +438,31 @@
       ==
     --
 |%
+::  ── the console ─────────────────────────────────────────────────────
+::
+::  A ship that is working prints nothing. A line means something left
+::  its normal range and a person can act on it; everything else is in
+::  the tree (/caps, /tr/last, /tr/discovery) or behind +dbg.
+::
+::  +dbg: the routine traces print only when this is yes.
+::
+++  dbg  ^-(? |)
+::  +say: a routine trace. Silent unless +dbg, and never with a marker.
+::
+++  say
+  |=  msg=tape
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ?.  dbg  (pure:m ~)
+  (trace:io ~[leaf+msg])
+::  +warn: one line at >>, for a degradation a person can act on.
+::
+++  warn
+  |=  msg=tape
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  ~>  %slog.[2 leaf+msg]
+  (pure:m ~)
 ::  ── paths ───────────────────────────────────────────────────────────
 ::
 ::  ROADS HERE ARE NEXUS-RELATIVE, and `root` is not a path any more: it
@@ -907,7 +932,7 @@
   |=  [root=@ud why=@t]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: rejected: {(trip why)}"])
+  ;<  ~  bind:m  (say "auspex: rejected: {(trip why)}")
   ;<  ~  bind:m  (note root 'reject' | why)
   (pure:m |)
 ::
@@ -955,7 +980,7 @@
   =/  gdir=road:tarball  [%& %| /sys/ames/usergroups/'public.grp']
   ;<  ok=?  bind:m  (exists-soft gdir)
   ?.  ok
-    (trace:io ~[leaf+"auspex: no public usergroup, delivery is local only"])
+    (warn "auspex: other ships cannot deliver mail here: no public usergroup is reachable; grant /sys/ames/usergroups/ at /apps/grubbery/permits, then reload")
   ::  SOFT, both of them. A veto is a crashed event, so it rolls back
   ::  whatever this fiber already wrote - and that is not hypothetical
   ::  here: /sys/ames/registry was missing from weir.json, the key probe's
@@ -969,14 +994,12 @@
   ::  the weir.json copy above promises.
   ;<  reg=(unit tang)  bind:m  (reg-register-at-soft:io writer-rail)
   ?^  reg
-    %-  (slog leaf+"auspex: no registry road, delivery is local only" u.reg)
-    (pure:m ~)
+    (warn "auspex: other ships cannot deliver mail here: the registry road is refused; grant /sys/ames/registry at /apps/grubbery/permits, then reload")
   ;<  how=(unit tang)  bind:m
     %+  reg-how-soft:io  /public
     [make=~ poke=(sy ~[`road:tarball`(rf root / %'main.sig')]) peek=~]
   ?~  how  (pure:m ~)
-  %-  (slog leaf+"auspex: registry refused the public grant" u.how)
-  (pure:m ~)
+  (warn "auspex: other ships cannot deliver mail here: the registry refused the public grant")
 ::
 ::  ── the writer ──────────────────────────────────────────────────────
 ::
@@ -1715,7 +1738,7 @@
   ::  is the application.
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
-    (trace:io ~[leaf+"auspex: no key road; blob {<h>} stays unpublished"])
+    (say "auspex: no key road; blob {<h>} stays unpublished")
   ::  NOTHING MAY GROW A SPUR IT HAS NOT ESTABLISHED IS UNBOUND. gall
   ::  assigns las+1 on a non-empty fan, so a second %grow at a bound
   ::  spur would move the blob off the case 1 every fetcher asks for.
@@ -1769,7 +1792,7 @@
   ::  road is ever granted.
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
-    (trace:io ~[leaf+"auspex: no key road; not republishing blobs"])
+    (say "auspex: no key road; not republishing blobs")
   ::  no ?~ early-return on `held`: it would narrow the face to a lest,
   ::  and the ;< continuations below are gates whose bodies mull against
   ::  BOTH branches of that narrowing, so the null case then fails to
@@ -1792,7 +1815,7 @@
   ;<  ~  bind:m
     ?~  o  (pure:m ~)
     ;<  ~  bind:m  (grow:io (blob-spur:uc h.i.rs) [blob-page-mark:uc u.o])
-    (trace:io ~[leaf+"auspex: republished blob {<h.i.rs>}"])
+    (say "auspex: republished blob {<h.i.rs>}")
   (republish-loop root t.rs)
 ::
 ::  +publish-proto: bind what this nexus speaks where any ship can read it.
@@ -1840,11 +1863,11 @@
   ::  the peer one probe.
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
-    (trace:io ~[leaf+"auspex: no key road; /proto not published"])
+    (say "auspex: no key road; /proto not published")
   ;<  bound=?  bind:m  (farm-has proto-spur:uc)
   ;<  last=proto:uc  bind:m  (read-proto-pub root)
   ?.  (proto-stale:uc bound last)
-    (trace:io ~[leaf+"auspex: /proto unchanged; not republishing"])
+    (say "auspex: /proto unchanged; not republishing")
   ::  IT CHANGED, or the binding is gone. GROW, NEVER CULL: the grow
   ::  lands one case above every earlier one, and +keen-proto takes the
   ::  HIGHEST case that answers and stops at the first that does not. A
@@ -1867,9 +1890,7 @@
   ;<  ~  bind:m  (grow:io proto-spur:uc [proto-page-mark:uc our-proto:uc])
   ;<  ~  bind:m
     (put-file (rf root / %'proto-pub') [/auspex %proto] our-proto:uc)
-  %-  trace:io
-  :~  leaf+"auspex: /proto {?:(bound "changed" "published")}; grown into the farm"
-  ==
+  (say "auspex: /proto {?:(bound "changed" "published")}; grown into the farm")
 ::
 ::  +read-proto-pub: what we last grew. The bunt when the grub is absent
 ::  or unreadable, and the bunt is never a real $proto, so either way the
@@ -2022,7 +2043,7 @@
     ?~  rq  [%0 who now ~[c] ~ 0]
     u.rq(pending (queue-chain:uc pending.u.rq c))
   ;<  ~  bind:m  (put-file (probe-rail root who) [/auspex %probereq] nex)
-  (trace:io ~[leaf+"auspex: handing a send to {<who>} to its fiber"])
+  (say "auspex: handing a send to {<who>} to its fiber")
 ::
 ::  +deliver-chain: THE DECISION, made on the probe fiber and nowhere
 ::  else.
@@ -2083,25 +2104,25 @@
     ::    There is nothing this branch can add to either.
     ::
     ::    So: the record STAYS, the user is told nothing, and the fact
-    ::    is written where an operator looks - the console.
+    ::    is traced only under +dbg: it fires on every successful send,
+    ::    so on the console it would be a line per message that means
+    ::    nothing.
     ::
     ::    An explicit NACK is different in kind and is handled below: it
     ::    is the far end SAYING no, which is a fact, and it does drop
     ::    the record.
-    %-  trace:io
-    :~  leaf+"auspex: {(trip (late-ack-note:uc who (div send-timeout ~s1)))}"
-        leaf+"auspex: grubbery returns no poke-ack to a nexus fiber; not a failure"
-    ==
+    (say "auspex: {(trip (late-ack-note:uc who (div send-timeout ~s1)))}; grubbery returns no poke-ack to a nexus fiber, so this is not a failure")
   ?~  u.res  (pure:m ~)
   ;<  ~  bind:m  (cull-if-there (peer-rail root who))
   (say-send (nacked-note:uc who))
 ::
-::  +say-send: one sentence, to the console. The fiber that says it does
-::  not write the tree; the writer records what discovery learned.
+::  +say-send: one sentence, to the console, at >>: a send the far end
+::  refused or that could not be made. The fiber that says it does not
+::  write the tree; the writer records what discovery learned.
 ::
 ++  say-send
   |=  why=@t
-  (trace:io ~[leaf+"auspex: {(trip why)}"])
+  (warn "auspex: {(trip why)}")
 ::
 ::  +run-probe: the ephemeral discovery fiber. Runs OFF the writer, and
 ::  it is the fiber that SENDS the mail it was holding.
@@ -2133,7 +2154,7 @@
   ^-  form:m
   =/  wu=(unit @p)  (slaw %p id)
   ?~  wu
-    (trace:io ~[leaf+"auspex: probe at {<id>} is not a ship name"])
+    (say "auspex: probe at {<id>} is not a ship name")
   =/  who=ship  u.wu
   ;<  now=@da  bind:m  get-time:io
   ::  A FRESH RECORD IS THE ANSWER, and it keeps the time it was asked:
@@ -2212,7 +2233,7 @@
     ?~  proto.rec
       (rap 3 ~[(scot %p who.rec) ' published no /proto'])
     (rap 3 ~[(scot %p who.rec) ' speaks ' (num-list:uc versions.u.proto.rec)])
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: discovery: {(trip spoke)}"])
+  ;<  ~  bind:m  (say "auspex: discovery: {(trip spoke)}")
   (note-at root %discovery 'discovery' & spoke)
 ::
 ::  +requeue: hand held chains to a fresh probe fiber. Writing the grub
@@ -2245,7 +2266,7 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (peer-rail root who))
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: forgot what {<who>} speaks"])
+  ;<  ~  bind:m  (say "auspex: forgot what {<who>} speaks")
   ;<  ~  bind:m  (note-at root %discovery 'forget-peer' & (scot %p who))
   (pure:m |)
 ::
@@ -2726,7 +2747,7 @@
   ::  the reach. If we were not granted the road, execution stops on
   ::  this line and the two below never run.
   ;<  *  bind:m  (our-life our)
-  ;<  ~  bind:m  (trace:io ~[leaf+"auspex: key road reachable"])
+  ;<  ~  bind:m  (say "auspex: key road reachable")
   %+  poke:io  (rf root / %'main.sig')
   [[/ %auspex-action] `action:uc`[%set-caps &]]
 ::
