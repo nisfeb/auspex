@@ -155,7 +155,7 @@
           %-  pairs:enjs:format
           :~  title+s+'Auspex'
               info+s+'Signed mail, verified end to end'
-              color+s+'#2563eb'
+              color+s+'#1E1B4B'
               image+s+'/grubbery/tiles/icon/auspex'
               href+s+'/apps/auspex'
           ==
