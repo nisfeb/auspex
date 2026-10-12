@@ -11,6 +11,7 @@ dojo**, and check that they actually catch breaks.
 - `grubbery_clay.py`: for a grubbery app, rewrites each lib's grubbery
   imports (`/<`, `/&`) into clay's on the way to the test desk, so libs
   written for grubbery's builder test unchanged.
+- `offline-test.py`: runs one suite's `test-` arms through `vere eval` with no ship at all, in seconds. It covers pure libs only (no clay, scries or agents), so it is the inner loop and the ship run stays the verdict. Run it from the app repo: it resolves each `/+` import from `hoon-test.conf`'s `FILES` and `LIBS`, then `lib/` and `vendor/`, then a mounted `%base` (`$BASE_DIR`, else the fleet dev platform's), and `OFFLINE_LIB_<name>=path` overrides one. It follows imports inside the libs too (`/+`, and `/-` under `sur/`), building each lib once. With `DIALECT=grubbery` it reads `/<` imports under `CODE`, binds a `/&` directory as the `(axal (map @ta mime))` grubbery hands over (calendar's 599 zone files make a suite take about a minute), and puts each `PRELUDE` face in every lib's subject, as on the ship.
 - `hoon-mutate.py`: breaks one thing at a time in those libs (a boundary,
   a guard's condition, a branch, an equality, a flag), reruns the suites,
   and reports every break that no test noticed.
@@ -32,8 +33,8 @@ Vendor the kit, write one config file, and set up a desk once per ship.
 
 ```sh
 # from the app repo
-rsync -a --delete --exclude .git ~/software/personal/hoon-test-kit/ scripts/hoon-test-kit/
-git -C ~/software/personal/hoon-test-kit rev-parse --short HEAD > scripts/hoon-test-kit/.kit-version
+rsync -a --delete --exclude .git ~/software/personal/hoon-development/kit/ scripts/hoon-test-kit/
+git -C ~/software/personal/hoon-development rev-parse --short HEAD > scripts/hoon-test-kit/.kit-version
 cp scripts/hoon-test-kit/hoon-test.conf.example hoon-test.conf   # then edit it
 ```
 
@@ -108,7 +109,9 @@ mutants, and `--since HEAD` after one review pass was 428.
 | 3 | a lib did not build (named). The compiler's message is only on the ship's terminal: clay slogs it and answers `~`. |
 | 4 | the ship did not answer. This is never a test verdict. |
 
-`hoon-mutate.py` needs about 10 s **and one commit** per mutant (more for
+`MUTANT_T=<s>` sets how long a mutant may run before it counts as a spin
+(default 120). A spin can kill the ship sooner, so set it near a few
+honest runs. `hoon-mutate.py` needs about 10 s **and one commit** per mutant (more for
 a big lib: each mutant rebuilds the whole lib and every test file, so
 orrery's 6,200 lines take about 16 s, and 15 to 60 s on a busy host), and every
 commit costs the ship loom. Size a run with `--list` first, and run long
