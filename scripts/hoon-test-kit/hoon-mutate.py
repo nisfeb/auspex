@@ -208,7 +208,7 @@ def touched_arms(rev):
     """The arms a git diff against rev touches, per lib: where a big lib's
     change is, so the expensive ops run there and not over every arm."""
     arms = set()
-    for path, lib in LIBS:
+    for path, _, lib in LIBS:
         diff = subprocess.run(['git', '-C', ROOT, 'diff', '-U0', rev, '--', path],
                               capture_output=True, text=True, check=True).stdout
         lines = open(path).readlines()
@@ -367,7 +367,9 @@ def main():
             put_lib(a.pier, src, dest, text)
             last = (src, dest)
             t0 = time.time()
-            r = run(a.pier, {'NOSYNC': '1', 'TEST_T': '120'})
+            # MUTANT_T: seconds before a mutant counts as spinning. A spin can
+            # kill the ship before 120 s, so set it near a few honest runs
+            r = run(a.pier, {'NOSYNC': '1', 'TEST_T': os.environ.get('MUTANT_T', '120')})
             if r.returncode == 4:  # no answer: the ship is down, stop here
                 print(f'[{i}/{len(todo)}] the ship stopped answering during {lib}:{line} +{arm} {what}; '
                       'results from here are void', flush=True)
