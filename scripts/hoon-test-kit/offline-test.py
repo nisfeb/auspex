@@ -14,7 +14,10 @@ Each /+ import NAME is found, in order, in:
      (an entry ending in NAME.hoon),
   2. ./lib/NAME.hoon, ./lib/A/B.hoon for NAME a-b, the same under CODE,
      then ./vendor/NAME.hoon,
-  3. a mounted %base: $BASE_DIR, else the dev platform ship's
+  3. hoon-test.conf's SHIP_FILES (an entry DESK:lib/NAME.hoon), read
+     from that desk mounted on a fleet pier: $OFFLINE_DESK_<desk>, else
+     ~/fleet/piers/*/<desk>, the dev platform's first,
+  4. a mounted %base: $BASE_DIR, else the dev platform ship's
      ~/fleet/piers/*/base (for test.hoon and other stock libs).
 A /- import is found the same way under sur/. Imports inside the libs are
 followed too. With DIALECT=grubbery in hoon-test.conf, a lib's
@@ -50,6 +53,16 @@ def bases():
     return sorted(found, key=lambda p: '/pex/' not in p)
 
 
+def desks(desk):
+    """where a SHIP_FILES desk is mounted: $OFFLINE_DESK_<desk>, else on
+    fleet piers, the dev platform's first"""
+    env = os.environ.get('OFFLINE_DESK_' + desk.replace('-', '_'))
+    if env:
+        return [env]
+    found = sorted(glob.glob(os.path.expanduser(f'~/fleet/piers/*/{desk}')))
+    return sorted(found, key=lambda p: '/pex/' not in p)
+
+
 def find(name, c, sur=False):
     env = os.environ.get('OFFLINE_LIB_' + name.replace('-', '_'))
     if env and not sur:
@@ -72,6 +85,12 @@ def find(name, c, sur=False):
     cands = [os.path.join(r, top, x) for r in roots for x in rels]
     if not sur:
         cands.append(f'vendor/{name}.hoon')
+    # SHIP_FILES (grubbery:lib/nexus.hoon): the desk as mounted on a fleet
+    # pier, the copy hoon-test.sh puts on the test desk
+    for entry in c.get('SHIP_FILES', '').split():
+        desk, _, p = entry.partition(':')
+        if p in [f'{top}/{x}' for x in rels]:
+            cands += [os.path.join(d, p) for d in desks(desk)]
     cands += [os.path.join(b, top, x) for b in bases() for x in rels]
     for p in cands:
         if os.path.exists(p):
@@ -174,9 +193,10 @@ def main():
     path, only = sys.argv[1], sys.argv[2:]
     c = conf()
     b = Build(c)
-    for name in b.prelude:
-        f = b.lib(find(name, c))
-        b.prelude_libs.append(f'=/  {name}  {f}')
+    for entry in b.prelude:  # NAME, or FACE=NAME
+        face, _, name = entry.partition('=')
+        f = b.lib(find(name or face, c))
+        b.prelude_libs.append(f'=/  {face}  {f}')
     body = b.expr(open(path).read(), os.path.dirname(path), lib=False)
     arms = re.findall(r'^\+\+  (test-[\w-]+)', body, re.M)
     if only:
