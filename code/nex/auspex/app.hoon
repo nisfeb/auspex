@@ -2605,7 +2605,7 @@
           %+  line  '/sys/eyre/'
           'serve the mail client at /apps/auspex'
           %+  line  '/sys/scry/'
-          'verify a signature against the public key of the ship that sent it, sign the mail you send, and fetch attachments from other ships. This one road also carries the private key of this ship: signing needs it, and nothing narrower can be asked for today'
+          'verify a signature against the public key of the ship that sent it, sign the mail you send, fetch attachments from other ships, and follow the theme you set in talon (with your contacts profile colour). This one road also carries the private key of this ship: signing needs it, and nothing narrower can be asked for today'
         ::  The registry WRITE, and it belongs beside the usergroup read
         ::  below rather than with the four above: same feature, same
         ::  optionality. +grant-public registers this writer with the
@@ -3252,6 +3252,8 @@
         [%api %rules ~]     (serve-rules eyre-id)
         [%api %settings ~]  (serve-settings eyre-id)
         [%api %lists ~]     (serve-lists eyre-id)
+    ::  the theme the owner set in talon, for a client that follows it.
+        [%api %'talon-theme' ~]  (serve-talon-theme eyre-id)
     ==
   ?.  =(%'POST' meth)  (send-err eyre-id 404 'not found')
   ::  POST /api/blob: THE UPLOAD, and the only route whose REQUEST body
@@ -3440,6 +3442,106 @@
   ^-  form:m
   ;<  s=settings:uc  bind:m  (read-settings nexus-root)
   (send-json eyre-id (settings-json:uc s))
+::
+::  +serve-talon-theme: the theme the owner set in talon, so an auspex
+::  that follows it draws the same colours.
+::
+::    THREE RAW STRINGS, derived on the client. The nexus hands over
+::    talon's `themes` and `accent` entries (the %settings agent, desk
+::    talon, bucket ui-prefs) and our own %contacts profile, each as the
+::    JSON it was stored as; the client runs talon's colour maths over
+::    them. Keeping every colour decision in one place - the client -
+::    rather than half here and half there.
+::
+::    Gated on may-scry, like every other reach into /sys/scry: a ship
+::    that never proved that road is handed nulls and the client keeps
+::    auspex's own palette, rather than a request that reaches for a road
+::    it was refused. A ship WITHOUT talon, or without %contacts, answers
+::    null for that field and never crashes - see +talon-themes-raw.
+::
+++  serve-talon-theme
+  |=  eyre-id=@ta
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  =/  nul=json  ~
+  =/  str  |=(u=(unit @t) ^-(json ?~(u nul s+u.u)))
+  ;<  may=?  bind:m  (may-scry nexus-root)
+  ?.  may
+    %+  send-json  eyre-id
+    (pairs:enjs:format ~[['themes' nul] ['accent' nul] ['profile' nul]])
+  ;<  [t=(unit @t) a=(unit @t)]  bind:m  talon-themes-raw
+  ;<  p=(unit @t)  bind:m  profile-self-raw
+  %+  send-json  eyre-id
+  (pairs:enjs:format ~[['themes' (str t)] ['accent' (str a)] ['profile' (str p)]])
+::
+::  +talon-themes-raw: talon's `themes` and `accent` %settings entries
+::  (desk talon, bucket ui-prefs), as the raw JSON cords they were stored
+::  as; [~ ~] when %settings does not run here. A missing entry is ~.
+::
+++  talon-themes-raw
+  =/  m  (fiber:fiber:nexus ,[themes=(unit @t) accent=(unit @t)])
+  ^-  form:m
+  ;<  up=(unit vase)  bind:m  (scry %noun ~[%gu %settings %$])
+  ?.  (running up)  (pure:m [~ ~])
+  ;<  t=(unit @t)  bind:m  (talon-entry 'themes')
+  ;<  a=(unit @t)  bind:m  (talon-entry 'accent')
+  (pure:m [t a])
+::
+::  +talon-entry: one talon ui-prefs entry, as its raw JSON cord; ~ when
+::  there is no such entry. Existence is checked first (has-entry): the
+::  scry service catches no failure, and a failed scry takes the whole
+::  event down, the page request with it.
+::
+++  talon-entry
+  |=  key=@t
+  =/  m  (fiber:fiber:nexus ,(unit @t))
+  ^-  form:m
+  =/  at=path  /talon/'ui-prefs'/[key]/noun
+  ;<  has=(unit vase)  bind:m  (scry %noun (weld /gx/settings/'has-entry' at))
+  ?.  (running has)  (pure:m ~)
+  ;<  e=(unit vase)  bind:m  (scry %noun (weld /gx/settings/entry at))
+  ?~  e  (pure:m ~)
+  (pure:m (bind (mole |.(;;([%entry %s @t] q.u.e))) |=([* * t=@t] t)))
+::
+::  +profile-self-raw: our own %contacts profile, as its raw v1 JSON;
+::  ~ when %contacts does not run here. Talon's accent, when set to the
+::  profile colour, takes it from this.
+::
+++  profile-self-raw
+  =/  m  (fiber:fiber:nexus ,(unit @t))
+  ^-  form:m
+  ;<  up=(unit vase)  bind:m  (scry %noun ~[%gu %contacts %$])
+  ?.  (running up)  (pure:m ~)
+  ;<  j=(unit vase)  bind:m  (scry %json /gx/contacts/v1/self/json)
+  ?~  j  (pure:m ~)
+  (pure:m (bind (mole |.(!<(json u.j))) |=(jo=json (en:json:html jo))))
+::
+::  +running: did a %gu existence peek come back true? A grubbery scry
+::  answers (unit vase); [~ &] is "the agent runs here".
+::
+++  running  |=(u=(unit vase) =([~ &] (bind u |=(v=vase q.v))))
+::
+::  +scry: a scry of one of this ship's agents, through /sys/scry, its
+::  answer handed back under a mark we keep; ~ when the road is refused.
+::  Ask only for what the agent surely answers (hence %gu and has-entry
+::  first): the service catches no failure, and a failed scry takes the
+::  whole event down, the request with it.
+::
+++  scry
+  |=  [mark=@tas pax=path]
+  =/  m  (fiber:fiber:nexus ,(unit vase))
+  ^-  form:m
+  ;<  err=(unit tang)  bind:m
+    (poke-soft:io &+&+[/sys/scry %'main.sig'] [[/ %scry-request] [mark pax]])
+  ?^  err  (pure:m ~)
+  |=  input:fiber:nexus
+  :+  ~  q.state
+  ?+  in  [%skip ~]
+      ~  [%wait ~]
+      [~ %poke * *]
+    ?.  =([/ mark] p.sage.u.in)  [%skip ~]
+    [%done `q.sage.u.in]
+  ==
 ::
 ++  serve-rules
   |=  [eyre-id=@ta]

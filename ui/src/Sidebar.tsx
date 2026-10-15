@@ -39,7 +39,7 @@ const FIXED: { view: View; name: string; hint: string }[] = [
 
 export default function Sidebar({
   view, label, labels, drafts, rules, lists, unread, onView, onCompose,
-  theme, onTheme, installable, onInstall,
+  theme, onTheme, followTalon, onFollowTalon, installable, onInstall,
 }: {
   view: View | 'drafts' | 'rules' | 'lists' | 'attachments'
   label: string
@@ -53,6 +53,9 @@ export default function Sidebar({
   onCompose: () => void
   theme: 'light' | 'dark'
   onTheme: () => void
+  // Whether auspex wears the theme the owner set in talon, or its own.
+  followTalon: boolean
+  onFollowTalon: () => void
   // Only true once the browser has actually offered the prompt. There is
   // no way to install on demand and no way to ask whether one is
   // installed, so a permanent "Install" entry would be a button that
@@ -164,6 +167,16 @@ export default function Sidebar({
           className="btn touch w-full justify-start"
         >
           {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+        </button>
+        <button
+          type="button"
+          onClick={onFollowTalon}
+          title="Follow the theme you set in talon, or use auspex's own colours. On
+            by default: auspex wears whatever theme and accent your talon is set to.
+            Your choice is remembered in this browser."
+          className="btn touch w-full justify-start"
+        >
+          {followTalon ? "Auspex's own theme" : 'Follow talon theme'}
         </button>
         {/* THE ONE QUIET LINE. Beside the theme control rather than
             over the inbox, because it is a standing fact about this

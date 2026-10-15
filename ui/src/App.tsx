@@ -13,6 +13,7 @@ import Drafts from './Drafts'
 import AttachmentSettings from './AttachmentSettings'
 import Filters from './Filters'
 import Lists from './Lists'
+import { following, setFollowing, applyFollow, clearFollow } from './talon-theme'
 
 // One page of rows per request. The nexus counts the whole view and
 // returns a page of it, so this number is a rendering choice and not a
@@ -93,6 +94,11 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(
     () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
   )
+  // Follow the theme the owner set in talon (the default), or wear
+  // auspex's own palette. On by default; see talon-theme.ts. index.html's
+  // pre-paint script has already applied the cached talon palette, so the
+  // effect below refreshes it rather than deciding it the first time.
+  const [followTalon, setFollowTalon] = useState<boolean>(following)
   // Whether the browser has offered to install. There is no way to ask,
   // so the only honest signal is the event itself: no event, no entry.
   const [install, setInstall] = useState<InstallPrompt | null>(null)
@@ -113,15 +119,21 @@ export default function App() {
   // Below md the three panes are one pane, and the sidebar is a drawer.
   const [navOpen, setNavOpen] = useState(false)
 
-  // THE CLASS, AND ONLY THE CLASS. Persisting here would write a
-  // preference nobody expressed: this effect also runs on mount, so a
-  // first visit stored whatever the system happened to say that day and
-  // the app stopped following the system from then on. The one place a
-  // real choice is made is the sidebar toggle, and that is the only
-  // place that writes storage.
+  // THE CLASS AND THE PALETTE. When following talon, +applyFollow fetches
+  // its theme, derives every colour token, puts them inline on <html> and
+  // sets the dark class to the theme's own mode (a custom talon theme
+  // brings its own, which is why this owns the class rather than the line
+  // below). When not following, the stylesheet's own palette shows and
+  // this just sets the class from the light/dark choice. Persisting the
+  // choice is the sidebar toggle's job, not this effect's: it runs on
+  // mount too, and a first visit must be able to keep following the system.
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-  }, [theme])
+    if (followTalon) { void applyFollow(theme === 'dark') }
+    else {
+      clearFollow()
+      document.documentElement.classList.toggle('dark', theme === 'dark')
+    }
+  }, [followTalon, theme])
 
   // FOLLOW THE SYSTEM WHILE NOTHING IS STORED. index.html makes this
   // same decision once, before the first paint; this keeps it true for a
@@ -484,6 +496,12 @@ export default function App() {
               const next = theme === 'dark' ? 'light' : 'dark'
               setTheme(next)
               try { localStorage.setItem(THEME_KEY, next) } catch { /* private mode */ }
+            }}
+            followTalon={followTalon}
+            onFollowTalon={() => {
+              const next = !followTalon
+              setFollowTalon(next)
+              setFollowing(next)
             }}
             installable={install !== null}
             onInstall={() => {

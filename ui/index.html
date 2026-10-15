@@ -28,6 +28,19 @@
           var dark = saved === 'dark' || (saved !== 'light'
             && window.matchMedia('(prefers-color-scheme: dark)').matches)
           if (dark) document.documentElement.classList.add('dark')
+          // FOLLOW TALON, BEFORE FIRST PAINT. When auspex is following
+          // talon's theme (the default), the last palette it derived is
+          // cached; apply it here so a reload shows talon's colours with
+          // no flash of auspex's own. The class the cache carries wins,
+          // because a custom talon theme brings its own light or dark.
+          if (localStorage.getItem('auspex:follow-talon') !== 'off') {
+            var c = localStorage.getItem('auspex:talon-cache')
+            if (c) {
+              c = JSON.parse(c)
+              document.documentElement.classList.toggle('dark', !!c.dark)
+              document.documentElement.style.cssText = c.css
+            }
+          }
         } catch (e) { /* private mode: fall through to the light default */ }
       })()
     </script>
