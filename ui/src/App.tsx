@@ -30,6 +30,7 @@ interface InstallPrompt extends Event {
 }
 
 const THEME_KEY = 'auspex:theme'
+const PALETTE_KEY = 'auspex:palette'
 
 export default function App() {
   const [pane, setPane] = useState<Pane>('inbox')
@@ -93,6 +94,14 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(
     () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
   )
+  // The palette family: talon (the default) or the classic Gmail blue.
+  // Unlike the theme there is no system to follow, so storage is the
+  // whole of the state — index.html has already set the attribute from
+  // it before first paint, and this reads that decision back.
+  const [palette, setPalette] = useState<'talon' | 'classic'>(
+    () => (document.documentElement.getAttribute('data-palette') === 'classic'
+      ? 'classic' : 'talon'),
+  )
   // Whether the browser has offered to install. There is no way to ask,
   // so the only honest signal is the event itself: no event, no entry.
   const [install, setInstall] = useState<InstallPrompt | null>(null)
@@ -122,6 +131,14 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
+
+  // The attribute, and only the attribute. The classic palette carries
+  // it; talon, the default, is its absence.
+  useEffect(() => {
+    const el = document.documentElement
+    if (palette === 'classic') el.setAttribute('data-palette', 'classic')
+    else el.removeAttribute('data-palette')
+  }, [palette])
 
   // FOLLOW THE SYSTEM WHILE NOTHING IS STORED. index.html makes this
   // same decision once, before the first paint; this keeps it true for a
@@ -484,6 +501,12 @@ export default function App() {
               const next = theme === 'dark' ? 'light' : 'dark'
               setTheme(next)
               try { localStorage.setItem(THEME_KEY, next) } catch { /* private mode */ }
+            }}
+            palette={palette}
+            onPalette={() => {
+              const next = palette === 'classic' ? 'talon' : 'classic'
+              setPalette(next)
+              try { localStorage.setItem(PALETTE_KEY, next) } catch { /* private mode */ }
             }}
             installable={install !== null}
             onInstall={() => {

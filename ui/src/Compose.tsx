@@ -351,7 +351,14 @@ export default function Compose({
           ships={to}
           pending={pending}
           onShips={(next) => { touched.current = true; setTo(next) }}
-          onPending={(next) => { touched.current = true; setPending(next) }}
+          // ONLY A NON-EMPTY PENDING IS A TOUCH. Blurring the To field
+          // commits whatever is typed, and that commit calls back with an
+          // empty string even when nothing was typed — so counting every
+          // onPending as a touch marked an untouched composer touched the
+          // moment focus left the field, and closing it laid a draft
+          // nobody wrote. Real typing always arrives with characters
+          // first, so this guard loses nothing.
+          onPending={(next) => { if (next) touched.current = true; setPending(next) }}
           onError={setError}
           lists={lists}
           label={forward ? 'Forward to' : 'To'}

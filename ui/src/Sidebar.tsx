@@ -39,7 +39,7 @@ const FIXED: { view: View; name: string; hint: string }[] = [
 
 export default function Sidebar({
   view, label, labels, drafts, rules, lists, unread, onView, onCompose,
-  theme, onTheme, installable, onInstall,
+  theme, onTheme, palette, onPalette, installable, onInstall,
 }: {
   view: View | 'drafts' | 'rules' | 'lists' | 'attachments'
   label: string
@@ -53,6 +53,9 @@ export default function Sidebar({
   onCompose: () => void
   theme: 'light' | 'dark'
   onTheme: () => void
+  // The palette family: talon (default) or the classic Gmail blue.
+  palette: 'talon' | 'classic'
+  onPalette: () => void
   // Only true once the browser has actually offered the prompt. There is
   // no way to install on demand and no way to ask whether one is
   // installed, so a permanent "Install" entry would be a button that
@@ -164,6 +167,16 @@ export default function Sidebar({
           className="btn touch w-full justify-start"
         >
           {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+        </button>
+        <button
+          type="button"
+          onClick={onPalette}
+          title="The colour palette. Talon is the nisfeb family's amber-on-stone look
+            and the default; classic is the original Gmail blue. Your choice is
+            remembered in this browser."
+          className="btn touch w-full justify-start"
+        >
+          {palette === 'classic' ? 'Talon colours' : 'Classic colours'}
         </button>
         {/* THE ONE QUIET LINE. Beside the theme control rather than
             over the inbox, because it is a standing fact about this

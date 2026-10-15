@@ -36,7 +36,78 @@
   --color-forged-line: var(--u-forged-line);
 }
 
+/* THE DEFAULT PALETTE IS TALON'S — amber on warm stone in light, amber
+   on a deep aubergine in dark, the look the nisfeb app family shares.
+   The original Gmail-blue palette is still here, one setting away: it
+   lives in the `[data-palette="classic"]` blocks below, which
+   index.html's head script turns on before first paint from the
+   `auspex:palette` key. Warn and forged are semantic, not part of
+   talon's five-colour scheme, so both palettes keep the same values. */
 :root {
+  color-scheme: light;
+  --u-surface: #fafaf9;
+  --u-raised: #ffffff;
+  --u-sunken: #f5f5f4;
+  --u-line: #e7e5e4;
+  --u-line-strong: #a8a29e;
+  --u-ink: #1c1917;
+  --u-ink-dim: #57534e;
+  --u-ink-faint: #78716c;
+  --u-accent: #f59e0b;
+  --u-accent-hover: #d97706;
+  --u-accent-ink: #1c1917;
+  --u-accent-soft: #fef3c7;
+  --u-accent-soft-ink: #78350f;
+  --u-ok: #059669;
+  --u-danger: #dc2626;
+  --u-danger-soft: #fee2e2;
+  --u-warn-soft: #fef7e0;
+  --u-warn-ink: #7a5900;
+  --u-warn-line: #fdd663;
+  /* FORGED HAS ITS OWN THREE TOKENS in both palettes, and they are not
+     derived from the danger ones. A failed signature is the one thing
+     on this surface that must never soften into "an error happened":
+     red-on-dark is not automatically legible, so the dark values are
+     picked for contrast against the dark forged ground rather than
+     inherited from the light ones. */
+  --u-forged-bg: #fce8e6;
+  --u-forged-ink: #a50e0e;
+  --u-forged-line: #d93025;
+}
+
+.dark {
+  color-scheme: dark;
+  --u-surface: #0f0d1a;
+  --u-raised: #1a1625;
+  --u-sunken: #27232f;
+  --u-line: #292524;
+  --u-line-strong: #44403c;
+  --u-ink: #f5f5f4;
+  --u-ink-dim: #a8a29e;
+  --u-ink-faint: #78716c;
+  --u-accent: #fbbf24;
+  --u-accent-hover: #fcd34d;
+  --u-accent-ink: #1c1917;
+  --u-accent-soft: #78350f;
+  --u-accent-soft-ink: #fef3c7;
+  --u-ok: #34d399;
+  --u-danger: #f87171;
+  --u-danger-soft: #7f1d1d;
+  --u-warn-soft: #3a2f0b;
+  --u-warn-ink: #fdd663;
+  --u-warn-line: #7a5900;
+  --u-forged-bg: #601410;
+  --u-forged-ink: #ffdad6;
+  --u-forged-line: #ff5449;
+}
+
+/* CLASSIC — the original Gmail-blue palette. These blocks carry a
+   second class/attribute over the talon defaults, so they outrank them
+   on any element that carries `data-palette="classic"`, in either mode.
+   The dark block must stay last: `.dark[data-palette="classic"]` beats
+   bare `[data-palette="classic"]` only by coming after it at equal-plus
+   specificity. */
+[data-palette="classic"] {
   color-scheme: light;
   --u-surface: #ffffff;
   --u-raised: #ffffff;
@@ -57,18 +128,12 @@
   --u-warn-soft: #fef7e0;
   --u-warn-ink: #7a5900;
   --u-warn-line: #fdd663;
-  /* FORGED HAS ITS OWN THREE TOKENS in both palettes, and they are not
-     derived from the danger ones. A failed signature is the one thing
-     on this surface that must never soften into "an error happened":
-     red-on-dark is not automatically legible, so the dark values are
-     picked for contrast against the dark forged ground rather than
-     inherited from the light ones. */
   --u-forged-bg: #fce8e6;
   --u-forged-ink: #a50e0e;
   --u-forged-line: #d93025;
 }
 
-.dark {
+.dark[data-palette="classic"] {
   color-scheme: dark;
   --u-surface: #17181a;
   --u-raised: #202124;
