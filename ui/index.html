@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafaf9" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f0d1a" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17181a" />
     <!-- `crossorigin="use-credentials"`, and it is not optional here. auspex
          has NO unauthenticated surface — every route including this one sits
          behind the owner gate — and a manifest is fetched anonymously by
@@ -28,12 +28,6 @@
           var dark = saved === 'dark' || (saved !== 'light'
             && window.matchMedia('(prefers-color-scheme: dark)').matches)
           if (dark) document.documentElement.classList.add('dark')
-          // The palette family (talon by default, or the classic
-          // Gmail blue) is a second, orthogonal decision, set the same
-          // way and for the same reason: a class applied after mount
-          // would flash the default palette on every load.
-          if (localStorage.getItem('auspex:palette') === 'classic')
-            document.documentElement.setAttribute('data-palette', 'classic')
         } catch (e) { /* private mode: fall through to the light default */ }
       })()
     </script>
