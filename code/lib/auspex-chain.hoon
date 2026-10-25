@@ -596,6 +596,28 @@
 ++  max-to       100          ::  recipients per message
 ++  max-copies   4            ::  copies (same id, distinct sig) per message
 ++  max-threads  10.000       ::  distinct threads this ship will hold
+::  +max-pool-threads and the four below: the mail store's QUOTAS.
+::
+::    max-threads is one number for the whole ship, so one sender could
+::    fill it with junk first contacts, and nothing bounded mail bytes at
+::    all. So every stored copy is charged to a payer (+payer). That is
+::    its signed author when this ship holds it %verified, and one shared
+::    pool otherwise, since an unverified `from` is a claim anyone can
+::    make. A thread is charged to the payer of its root copy. A sender
+::    fills only its own share, and each share past the pool costs an
+::    Azimuth point. Points are cheap for a star's owner, so the ceiling
+::    is what keeps the loom up.
+::
+::    The owner's own mail is exempt from the per-payer quotas and counts
+::    toward the ceiling. Full means refused, never evicted, because
+::    eviction would let junk flush genuine mail out of the pool. These
+::    are receiver-local, like the blob budget, and not published.
+::
+++  max-pool-threads    1.000          ::  threads rooted in an unverified copy
+++  max-author-threads  200            ::  threads one signed author roots
+++  max-pool-bytes      268.435.456    ::  mail no signature pays for (256 MiB)
+++  max-author-bytes    33.554.432     ::  mail one signed author pays for (32 MiB)
+++  max-mail-bytes      1.073.741.824  ::  all mail, the owner's too (1 GiB)
 ::  +max-depth: the deepest ancestry a thread may hold.
 ::
 ::    Depth is not free and is NOT off the read path. A message is
@@ -1233,22 +1255,24 @@
 ::    state, so thread identity - the property an attacker most wants to
 ::    move - is testable without an agent.
 ::
-::    Not fixing, recorded rather than dropped: the `hits` scan below is
-::    O(total stored messages) with a `sham` per message, on the only
-::    externally reachable poke. Bounded by max-threads/max-chain, but
-::    large. Upgrade path: a (map [msg-id @ux] thread-id) index in state.
-::    This is a performance concern, not an authenticity one.
+::    `threads` is each held thread's copy NAMES, not its copies. Every
+::    stored copy's grub name is its +slot, (sham [id sig]), and has been
+::    since the first layout, the flat one included. So a name match is
+::    an [id sig] match, and finding the thread clams and hashes nothing
+::    stored. Only the incoming chain is hashed. The scan is still one
+::    set lookup per stored copy, on the only externally reachable poke.
+::    The larger upgrade is a (map [msg-id @ux] thread-id) index in
+::    state, which this does not need.
 ::
 ++  thread-key
-  |=  [threads=(map thread-id thread) c=chain]
+  |=  [threads=(map thread-id (list @ta)) c=chain]
   ^-  thread-id
   =/  keys
-    (~(gas in *(set [msg-id @ux])) (turn c |=(m=msg [(id unsigned.m) sig.m])))
+    (~(gas in *(set @ta)) (turn c |=(m=msg (slot (id unsigned.m) sig.m))))
   =/  hits
     %+  skim  ~(tap by threads)
-    |=  [t=thread-id th=thread]
-    %+  lien  chain.th
-    |=(o=msg (~(has in keys) [(id unsigned.o) sig.o]))
+    |=  [t=thread-id ns=(list @ta)]
+    (lien ns |=(n=@ta (~(has in keys) n)))
   ::  not fixing: a chain touching two existing threads conflates them here,
   ::  and p.i.hits picks whichever comes first in map-traversal order. This
   ::  predates +thread-key (the same pattern already existed in +send's own
@@ -2540,20 +2564,6 @@
   |=(s=stored-msg [[(id unsigned.msg.s) sig.msg.s] verdict.s])
 ::
 ::
-::  +key-threads: every thread as the bare, UNSORTED copies +thread-key
-::  compares. It asks one question - is this [id sig] held - so the sort
-::  and dedupe of +chain-of, and participants and last-sent, were paid
-::  on every delivery for fields nothing read.
-::
-++  key-threads
-  |=  loaded=(map thread-id (map path stored-msg))
-  ^-  (map thread-id thread)
-  %-  ~(run by loaded)
-  |=  ss=(map path stored-msg)
-  ^-  thread
-  [(turn ~(val by ss) |=(s=stored-msg msg.s)) ~ *@da]
-::
-::
 ::  +group-ids: which thread holds each of these message ids.
 ::
 ::    ONE PASS over what was read, shared by %read and %unread so the two
@@ -3075,6 +3085,139 @@
   ?.  (fits-depth new max-depth)                `'chain too deep'
   ?.  ?|(known (lth threads max-threads))       `'too many threads'
   ~
+::
+::  +quota-refusal: what a delivery would leave a thread holding, against
+::  the quotas (see +max-pool-threads).
+::
+::    `loaded` is every thread the ship holds, with `rid` as it stands,
+::    and `want` is what `rid` would hold once this delivery is stored.
+::    Only GROWTH is refused. A bucket already past its cap, from before
+::    the quotas or from the owner's own mail at the ceiling, never blocks
+::    mail that does not add to it. A thread already held is never
+::    refused for a thread quota, as with max-threads. The owner's own
+::    mail meets only the ceiling.
+::
+::    It weighs every stored copy, which costs the caller a clam of the
+::    whole store, so a caller asks only when the delivery would change
+::    the thread. Nothing here hashes a body. The one hash is of a flat
+::    copy's small [id sig], see +tally.
+::
+++  quota-refusal
+  |=  $:  our=ship
+          loaded=(map thread-id (map path stored-msg))
+          rid=thread-id
+          want=(map path stored-msg)
+      ==
+  ^-  (unit @t)
+  =/  was  (tally rid (~(gut by loaded) rid ~))
+  =/  now  (tally rid want)
+  ::  everything else the ship holds, by payer, in bytes and in threads
+  =/  rest=[bytes=(map (unit ship) @ud) roots=(map (unit ship) @ud)]
+    %+  roll  ~(tap by (~(del by loaded) rid))
+    |=  $:  [t=thread-id ss=(map path stored-msg)]
+            acc=[bytes=(map (unit ship) @ud) roots=(map (unit ship) @ud)]
+        ==
+    =/  y  (tally t ss)
+    [(plus bytes.acc bytes.y) (charge roots.acc root.y 1)]
+  =/  pool=?  ?=(~ root.now)
+  ?:  ?&  !(~(has by loaded) rid)
+          !=(`our root.now)
+          %+  gte  (~(gut by roots.rest) root.now 0)
+          ?:(pool max-pool-threads max-author-threads)
+      ==
+    `?:(pool 'too many unverified threads' 'too many threads from one sender')
+  =/  over=(list (unit ship))
+    %+  skim  ~(tap in ~(key by bytes.now))
+    |=  p=(unit ship)
+    =/  more=@ud  (~(gut by bytes.now) p 0)
+    ?&  !=(`our p)
+        (gth more (~(gut by bytes.was) p 0))
+        %+  gth  (add more (~(gut by bytes.rest) p 0))
+        ?~(p max-pool-bytes max-author-bytes)
+    ==
+  ?^  over  `?~(i.over 'unverified mail over quota' 'sender over quota')
+  =/  more=@ud  (roll ~(val by bytes.now) add)
+  ?.  ?&  (gth more (roll ~(val by bytes.was) add))
+          (gth (add more (roll ~(val by bytes.rest) add)) max-mail-bytes)
+      ==
+    ~
+  `'mail store full'
+::
+::  +payer: who a stored copy is charged to. Its signed author when held
+::  %verified, and the pool, ~, for anything else.
+++  payer
+  |=  s=stored-msg
+  ^-  (unit ship)
+  ?.(?=(%verified verdict.s) ~ `from.unsigned.msg.s)
+::
+::  +weight: the loom bytes one stored copy costs, estimated.
+::
+::    The text is counted at its length. The rest is counted from the
+::    stored shape on vere's 32-bit loom, where a cell costs 24 bytes with
+::    its allocation box and an indirect atom 20 bytes plus its data. A
+::    copy is a dozen cells and three wide atoms (sig, sent and prev).
+::    Its grub adds a map node, its name and the file's wrapper, and its
+::    message's directory about as much again. That comes to about
+::    1.200, so 1.280 is fixed. A recipient is a set node of two cells
+::    and a ship, so 64. An attachment is four cells and a hash besides
+::    its name and mime, so 192. The estimate errs high, since the fixed
+::    part is what a flood of tiny messages meets.
+::
+++  weight
+  |=  m=msg
+  ^-  @ud
+  =*  u  unsigned.m
+  ;:  add
+    1.280
+    (met 3 subj.u)
+    (met 3 body.u)
+    (met 3 body-mime.u)
+    (mul 64 ~(wyt in to.u))
+    %+  roll  attachments.u
+    |=([a=attachment n=@ud] :(add n 192 (met 3 name.a) (met 3 mime.a)))
+  ==
+::
+::  +tally: one thread's weight by payer, and who pays for the thread.
+::
+::    The thread's payer is its root copy's. A root copy in the tree sits
+::    at msg/<tid>/<slot>, so its path says so. A flat copy from before
+::    the tree has a one-segment path and is a root copy when its name
+::    is the root's +slot under its own sig. Every copy of one id shares
+::    `from`, so any %verified root copy names the author, and a thread
+::    with none is the pool's. A copy left at two paths by an
+::    interrupted re-place counts twice until the next write, which errs
+::    toward refusing.
+::
+++  tally
+  |=  [t=thread-id ss=(map path stored-msg)]
+  ^-  [bytes=(map (unit ship) @ud) root=(unit ship)]
+  =/  seg=@ta  (scot %uv t)
+  %+  roll  ~(tap by ss)
+  |=  $:  [pk=path s=stored-msg]
+          acc=[bytes=(map (unit ship) @ud) root=(unit ship)]
+      ==
+  =/  p=(unit ship)  (payer s)
+  =.  bytes.acc  (charge bytes.acc p (weight msg.s))
+  ?~  p  acc
+  =/  top=?
+    ?+  pk  |
+      [@ @ ~]  =(seg i.pk)
+      [@ ~]    =(i.pk (slot t sig.msg.s))
+    ==
+  ?.(top acc acc(root p))
+::
+::  +charge: add `n` to one payer's count
+++  charge
+  |=  [a=(map (unit ship) @ud) p=(unit ship) n=@ud]
+  ^-  (map (unit ship) @ud)
+  (~(put by a) p (add n (~(gut by a) p 0)))
+::
+::  +plus: two tallies added payer by payer
+++  plus
+  |=  [a=(map (unit ship) @ud) b=(map (unit ship) @ud)]
+  ^-  (map (unit ship) @ud)
+  %-  ~(urn by (~(uni by a) b))
+  |=([p=(unit ship) *] (add (~(gut by a) p 0) (~(gut by b) p 0)))
 ::
 ::  +compose-refusal: what a send is refused for before it reads anything
 ++  compose-refusal

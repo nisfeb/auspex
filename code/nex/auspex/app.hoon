@@ -805,29 +805,63 @@
 ::
 ::  +read-threads: every stored thread, as copy maps keyed by TREE PATH.
 ::
-::    One deep peek of /mail/thread rather than a walk per thread. This is
-::    the O(total stored messages) read the spec already records against
-::    +thread-key, now paid on the tree instead of on agent state; the
-::    upgrade path is the same, a [msg-id sig] -> thread-id index grub.
+::    One deep peek of /mail/thread rather than a walk per thread, and a
+::    clam of every stored copy. +deliver no longer pays that on every
+::    poke. It reads the balls with +read-kids and clams only what it
+::    needs. The upgrade path is a [msg-id sig] -> thread-id index grub.
 ::
 ++  read-threads
   |=  root=@ud
   =/  m  (fiber:fiber:nexus ,(map thread-id:uc (map path stored-msg:uc)))
   ^-  form:m
+  ;<  ks=(map thread-id:uc ball:tarball)  bind:m  (read-kids root)
+  (pure:m (~(run by ks) collect-slots))
+::
+::  +read-kids: every stored thread's ball, read and NOT clammed
+::
+++  read-kids
+  |=  root=@ud
+  =/  m  (fiber:fiber:nexus ,(map thread-id:uc ball:tarball))
+  ^-  form:m
   ;<  vw=view:nexus  bind:m  (peek:io (rv root thread-dir) ~)
   ?.  ?=([%ball *] vw)  (pure:m ~)
-  (pure:m (collect-threads ball.vw))
+  (pure:m (thread-kids ball.vw))
 ::
-++  collect-threads
+++  thread-kids
   |=  b=ball:tarball
-  ^-  (map thread-id:uc (map path stored-msg:uc))
-  %-  ~(gas by *(map thread-id:uc (map path stored-msg:uc)))
+  ^-  (map thread-id:uc ball:tarball)
+  %-  ~(gas by *(map thread-id:uc ball:tarball))
   %+  murn  ~(tap by dir.b)
   |=  [seg=@ta kid=ball:tarball]
-  ^-  (unit [thread-id:uc (map path stored-msg:uc)])
+  ^-  (unit [thread-id:uc ball:tarball])
   =/  t=(unit @uv)  (slaw %uv seg)
   ?~  t  ~
-  `[u.t (collect-slots kid)]
+  `[u.t kid]
+::
+::  +slot-names: one thread's copy NAMES, off the tree and never clammed.
+::
+::    Every file at every depth under msg/, so a flat copy from before
+::    the tree is read exactly as a placed one. A boom is skipped, as
+::    +walk-node skips it. A %0 or %1 grub, which +read-stored refuses,
+::    is named here, but its name hashes an older shape and no delivered
+::    chain can match it. This is what +deliver's +thread-key reads.
+::
+++  slot-names
+  |=  kid=ball:tarball
+  ^-  (list @ta)
+  =/  sub=(unit ball:tarball)  (~(get by dir.kid) %msg)
+  ?~  sub  ~
+  =|  out=(list @ta)
+  =/  todo=(list ball:tarball)  ~[u.sub]
+  |-  ^-  (list @ta)
+  ?~  todo  out
+  =*  b  i.todo
+  =/  here=(list @ta)
+    ?~  fil.b  ~
+    %+  murn  ~(tap by contents.u.fil.b)
+    |=  [nm=@ta c=[=sang:tarball gain=? bang=(unit tang)]]
+    ?:((is-boom:tarball sang.c) ~ `nm)
+  $(todo (weld ~(val by dir.b) t.todo), out (weld here out))
 ::
 ::  +collect-slots: one thread's copies, each under its own tree path.
 ::
@@ -900,7 +934,6 @@
   $(kids t.kids, here [(~(uni by ss.here) ss.k) (add lost.here lost.k)])
 ++  chain-of  chain-of:uc
 ++  verdicts-of  verdicts-of:uc
-++  key-threads  key-threads:uc
 ::
 ::  ── the trace grub ──────────────────────────────────────────────────
 ::
@@ -1665,15 +1698,19 @@
   ::  deliberately does not attempt.
   =/  bad=(unit @t)  (incoming-refusal:uc c)
   ?^  bad  (reject root u.bad)
-  ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
+  ::  THE THREADS AS READ, NOT CLAMMED. Finding the thread needs only
+  ::  each copy's name (see +slot-names), so the one thread it names is
+  ::  the only one clammed here, and nothing stored is hashed.
+  ;<  kids=(map thread-id:uc ball:tarball)  bind:m  (read-kids root)
   ::  thread identity is never (root:uc c). `c` is attacker-controlled and
   ::  unsorted, so the head-as-supplied is not a stable identity.
   ::  +thread-key crashes on a first-contact chain with no unique prev=~
   ::  root, which is hostile input reaching the writer, so: mule.
-  =/  rk  (mule |.((thread-key:uc (key-threads loaded) c)))
+  =/  rk  (mule |.((thread-key:uc (~(run by kids) slot-names) c)))
   ?:  ?=(%| -.rk)  (reject root 'no unique root')
   =/  rid=thread-id:uc  p.rk
-  =/  ss=(map path stored-msg:uc)  (~(gut by loaded) rid ~)
+  =/  kid=(unit ball:tarball)  (~(get by kids) rid)
+  =/  ss=(map path stored-msg:uc)  ?~(kid ~ (collect-slots u.kid))
   =/  held=(map [msg-id:uc @ux] verdict:uc)  (verdicts-of ss)
   =/  todo=chain:uc  (unsettled:uc held c)
   ;<  keys=(map [ship @ud] (unit pass))  bind:m  (delivery-keys root todo)
@@ -1690,7 +1727,7 @@
   ::  because some unrelated thread filled the cap. Only a brand-new
   ::  thread id is capped.
   ::  all three are +admit-refusal's, in this order
-  =/  over=(unit @t)  (admit-refusal:uc new (~(has by loaded) rid) ~(wyt by loaded))
+  =/  over=(unit @t)  (admit-refusal:uc new ?=(^ kid) ~(wyt by kids))
   ?^  over  (reject root u.over)
   ::  fold this poke's verdicts into the stored ones BEFORE pruning:
   ::  +prune needs a verdict for every message in `new`, including ones
@@ -1699,8 +1736,18 @@
   ::  with larger sigs cannot shed a keyless signer's genuine copy.
   =/  vs2  (freeze:uc held vs)
   =/  pruned=chain:uc  (prune:uc new vs2 ~(key by held) max-copies:uc)
+  =/  want=(map path stored-msg:uc)  (want-slots pruned vs2)
+  ::  THE QUOTAS, on the pruned thread, since only that says exactly
+  ::  what would grow. A delivery that leaves the thread as it is grows
+  ::  nothing and skips them, and with them the one clam of every stored
+  ::  copy they cost. See +quota-refusal.
+  ;<  our=@p  bind:m  bowl-our
+  =/  full=(unit @t)
+    ?:  =(want ss)  ~
+    (quota-refusal:uc our (~(run by kids) collect-slots) rid want)
+  ?^  full  (reject root u.full)
   ;<  ~  bind:m  (ensure-thread root rid)
-  ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
+  ;<  wrote=?  bind:m  (sync-slots root rid ss want)
   ;<  fresh=?  bind:m  (mark-direct root rid)
   ::  A REDELIVERY THAT WROTE NOTHING CHANGES NOTHING, and must not
   ::  look like it did. Delivery is granted to the `public` usergroup,
@@ -3501,10 +3548,10 @@
 ::    ONE deep peek of /mail/thread, walked three times - once for the
 ::    message grubs, once for the meta leaves and once for the copies
 ::    this build cannot read. The alternative, a peek per thread, is a
-::    dart per row on the surface a user hits first. This is the same
-::    O(total stored messages) read the writer already pays and that the
-::    spec already records against +thread-key; the upgrade path is the
-::    same summary grub.
+::    dart per row on the surface a user hits first. This is an
+::    O(total stored messages) read, the one the writer pays only for a
+::    delivery that would store something (see +quota-refusal). The
+::    upgrade path is a summary grub.
 ::
 ::    A VIEW IS A PREDICATE OVER THAT ONE WALK, NOT A STORED SET. Inbox,
 ::    Sent, Archived and each label are the same listing filtered

@@ -446,14 +446,15 @@
 ::  once a thread exists, its id is immutable. A poke that carries one
 ::  message we already hold plus a brand-new prev=~ message - the shape
 ::  that would otherwise migrate an established conversation onto an
-::  attacker-chosen id - files into the thread we already have.
+::  attacker-chosen id - files into the thread we already have. A held
+::  thread is the names of its copies, each one's +slot.
 ++  test-thread-key-established-thread-is-immutable
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  evil
     (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'hi' 'new root' ~2020.1.1 ~)
   =/  tid  (id:auspex unsigned.a)
-  =/  stored=(map thread-id:sur thread:sur)
-    (malt ~[[tid `thread:sur`[~[a] (participants:auspex ~[a]) ~2026.1.1]]])
+  =/  stored=(map thread-id:sur (list @ta))
+    (malt ~[[tid ~[(slot:auspex tid sig.a)]]])
   ;:  weld
     (expect-eq !>(tid) !>((thread-key:auspex stored ~[evil a])))
     (expect-eq !>(tid) !>((thread-key:auspex stored ~[a evil])))
@@ -2083,6 +2084,74 @@
     (expect-eq !>(`(unit @t)``'too many threads') !>((admit-refusal:auspex ok | max-threads:auspex)))
     (expect-eq !>(`(unit @t)`~) !>((admit-refusal:auspex ok | (dec max-threads:auspex))))
     (expect-eq !>(`(unit @t)`~) !>((admit-refusal:auspex ok & max-threads:auspex)))
+  ==
+::
+::  one root as a delivery stores it, laid out by +want-slots so the
+::  thread has a real root copy. (+st puts every copy where a root goes.)
+++  as-root
+  |=  [x=msg:sur v=verdict:sur]
+  ^-  [rid=thread-id:sur want=(map path stored-msg:sur)]
+  =/  i  (id:auspex unsigned.x)
+  [i (want-slots:auspex ~[x] (my ~[[[i sig.x] v]]))]
+::  n threads, each one root from `who` held at verdict `v`
+++  quota-store
+  |=  [n=@ud who=ship v=verdict:sur]
+  ^-  (map thread-id:sur (map path stored-msg:sur))
+  (malt (turn (gulf 1 n) |=(i=@ud (as-root (um who (scot %ud i) ~) v))))
+::
+::  the quotas: the pool's thread cap, a signed author's own share (a
+::  flat root counting toward it), a known thread, a sender over its
+::  bytes, the owner exempt, and the ceiling, which only growth meets
+++  test-quota-refusal
+  =/  q
+    |=  $:  l=(map thread-id:sur (map path stored-msg:sur))
+            n=[rid=thread-id:sur want=(map path stored-msg:sur)]
+        ==
+    (quota-refusal:auspex ~zod l rid.n want.n)
+  =/  pool  (quota-store max-pool-threads:auspex ~bus %unverified)
+  =/  x1  (um ~bus '1' ~)
+  =/  r1  (um ~bus 'reply' `(id:auspex unsigned.x1))
+  =/  stranger  (as-root (um ~bus 'new' ~) %unverified)
+  =/  signed  (as-root (um ~nec 'new' ~) %verified)
+  ::  one author's share, one root short, and a flat root of its own
+  =/  most  (quota-store (dec max-author-threads:auspex) ~nec %verified)
+  =/  f  (um ~nec 'flat' ~)
+  =/  flat
+    |=  v=verdict:sur
+    %+  ~(put by most)  (id:auspex unsigned.f)
+    (my ~[[/(slot:auspex (id:auspex unsigned.f) sig.f) [%2 f v]]])
+  ::  a held copy 655 bytes under the author quota, and a reply past it
+  =/  big  `@t`(dec (bex (mul 8 (sub max-author-bytes:auspex 2.000))))
+  =/  heavy
+    |=  [who=ship v=verdict:sur]
+    =/  b  (um who big ~)
+    =/  m  (um who 'more' `(id:auspex unsigned.b))
+    =/  h  (as-root b %verified)
+    =/  vs  (my ~[[[rid.h sig.b] %verified] [[(id:auspex unsigned.m) sig.m] v]])
+    (quota-refusal:auspex ~zod (my ~[h]) rid.h (want-slots:auspex ~[b m] vs))
+  ::  32 of the owner's copies sharing one 32 MiB body, past the ceiling
+  =/  o  (um ~zod `@t`(dec (bex (mul 8 max-author-bytes:auspex))) ~)
+  =/  fill=(map path stored-msg:sur)
+    %-  malt
+    %+  turn  (gulf 1 32)
+    |=(i=@ud [/a/(scot %ud i)/b [%2 o(subj.unsigned (scot %ud i)) %verified]])
+  =/  full  (my ~[[0v1 fill]])
+  ;:  weld
+    (expect-eq !>(`(unit @t)``'too many unverified threads') !>((q pool stranger)))
+    (expect-eq !>(`(unit @t)`~) !>((q (~(del by pool) (id:auspex unsigned.x1)) stranger)))
+    (expect-eq !>(`(unit @t)`~) !>((q pool signed)))
+    %+  expect-eq  !>(`(unit @t)`~)
+    !>((q pool [(id:auspex unsigned.x1) (want-slots:auspex ~[x1 r1] ~)]))
+    (expect-eq !>(`(unit @t)``'too many threads from one sender') !>((q (flat %verified) signed)))
+    (expect-eq !>(`(unit @t)`~) !>((q (flat %unverified) signed)))
+    (expect-eq !>(`(unit @t)`~) !>((q most signed)))
+    (expect-eq !>(`(unit @t)`~) !>((q (flat %verified) stranger)))
+    (expect-eq !>(`(unit @t)``'sender over quota') !>((heavy ~nec %verified)))
+    (expect-eq !>(`(unit @t)`~) !>((heavy ~nec %unverified)))
+    (expect-eq !>(`(unit @t)`~) !>((heavy ~zod %verified)))
+    (expect-eq !>(`(unit @t)``'mail store full') !>((q full signed)))
+    (expect-eq !>(`(unit @t)``'mail store full') !>((q full (as-root (um ~zod 'mine' ~) %verified))))
+    (expect-eq !>(`(unit @t)`~) !>((q full [0v1 fill])))
   ==
 ::
 ::  what a send is refused for before it reads anything

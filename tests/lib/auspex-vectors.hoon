@@ -339,7 +339,7 @@
   %+  weld  (chain-case 'two-branch-tree' c ~[[~zod 1] [~nec 1] [~bud 1]])
   ;:  weld
     %+  expect-eq
-      !>  `@ux`(thread-key:auspex *(map thread-id:sur thread:sur) c)
+      !>  `@ux`(thread-key:auspex *(map thread-id:sur (list @ta)) c)
       !>  (jux (jget k 'thread_key'))
     (expect-eq !>(`@ux`i-root) !>((jux (jget k 'root_id'))))
     (expect-eq !>((distinct-ids:auspex c)) !>((jnum (jget k 'distinct_ids'))))
@@ -379,7 +379,7 @@
 ++  test-vectors-orphan-chain
   =/  c=chain:sur  ~[m-orphan]
   =/  k  (case-by 'orphan-chain')
-  =/  rk  (mule |.((thread-key:auspex *(map thread-id:sur thread:sur) c)))
+  =/  rk  (mule |.((thread-key:auspex *(map thread-id:sur (list @ta)) c)))
   %+  weld  (chain-case 'orphan-chain' c ~[[~zod 1]])
   ;:  weld
     (expect-eq !>(?=(%| -.rk)) !>((jbool (jget k 'thread_key_refused'))))

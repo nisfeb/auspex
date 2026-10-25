@@ -51,11 +51,11 @@ lacks it, so they stop at `-find.cric`. The ship run is the verdict.
 ## Ship tests
 
 ```sh
-scripts/hoon-test-kit/hoon-test.sh ~/fleet/piers/nep               # all four suites, 215 tests, ~27 s
+scripts/hoon-test-kit/hoon-test.sh ~/fleet/piers/nep               # all four suites, 216 tests, ~27 s
 scripts/hoon-test-kit/hoon-test.sh ~/fleet/piers/nep auspex-chain  # one suite
 ```
 
-chain 128, web 53, vectors 15, fibers 19. The kit finds vere in
+chain 129, web 53, vectors 15, fibers 19. The kit finds vere in
 `~/software`, so `VERE` need not be set. On a fresh set (golden, or a
 rebuilt pier) make the test desk once: `|new-desk %auspex-test` and
 `|mount %auspex-test` in the dojo, then

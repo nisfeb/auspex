@@ -560,9 +560,13 @@ to verify that message.
 
 ```hoon
 ++  thread-key
-  |=  [threads=(map thread-id thread) c=chain]
+  |=  [threads=(map thread-id (list @ta)) c=chain]
   ^-  thread-id
 ```
+
+`threads` is each held thread's copy names. The reference stores every copy
+under its `+slot`, `(scot %uv (sham [id sig]))`, so a name is an `[id sig]`
+and finding the thread reads no stored copy.
 
 Thread identity is derived by `+thread-key` and by nothing else. The rules:
 
@@ -810,6 +814,31 @@ bytes only ever enter through a **local** decision — an upload, a fetch the
 owner asked for, or a download rule the owner set — never because a delivered
 chain named them, since a chain carries metadata alone.
 
+**The mail quotas** are receiver-local too, not published, and change nothing
+on the wire. Every stored copy is charged to a **payer**, which is its signed
+author when the receiver holds it `%verified` and one shared pool for anything
+else, since an unverified `from` is a claim anyone can make. A thread is charged
+to the payer of its root copy. A delivery is refused whole when it would grow a
+payer past its share, or the store past its ceiling:
+
+| quota | value | what it bounds |
+|---|---|---|
+| `max-pool-threads` | 1.000 | threads whose root copy is not held `%verified` |
+| `max-author-threads` | 200 | threads one signed author roots |
+| `max-pool-bytes` | 268.435.456 | bytes of copies not held `%verified` |
+| `max-author-bytes` | 33.554.432 | bytes of one signed author's copies |
+| `max-mail-bytes` | 1.073.741.824 | bytes of all mail, the receiver's own included |
+
+Bytes are `+weight`'s estimate of what a stored copy costs the loom, which is
+its text plus a fixed 1.280, 64 a recipient and 192 an attachment. The
+receiver's own mail is exempt from the four per-payer quotas. Only growth is
+refused, so a share already past its cap blocks nothing that does not add to
+it, and a thread already held is never refused for a thread quota. Full means
+refused and never evicted, because eviction would let junk flush genuine mail
+out of the pool. Without the key road every copy is unverified, so the pool's
+two quotas bound everything the ship receives. A key costs an Azimuth point, and
+points are cheap for a star's owner, so the ceiling is what protects the loom.
+
 **Field widths** are each type's own width, not numbers a peer publishes. A mold
 clams an atom of any width, and a copy is stored whole whatever its verdict, so
 without them one `sig` or `hash` could carry megabytes. The `sent` floor is
@@ -894,7 +923,12 @@ Nothing is written before every signature in the incoming chain has a verdict.
    the stored ones **before** pruning, because `+prune` needs a verdict for
    every message in the merged chain, including ones stored by an earlier poke
    that this one did not carry. Then `+prune` at `max-copies`, with the
-   `[id sig]` of the copies the thread already held as `old`.
+   `[id sig]` of the copies the thread already held as `old`. Then, unless
+   the pruned thread is exactly what is stored, the reference checks its own
+   quotas ([§4.6](#46-the-caps)) with `+quota-refusal` against every thread
+   held. Its refusals are 'too many unverified threads', 'too many threads from
+   one sender', 'unverified mail over quota', 'sender over quota' and 'mail
+   store full'.
 
 9. **Store.** Write the pruned chain, one grub per `[id sig]`, each carrying its
    own verdict. A redelivery that writes nothing MUST be reported as no change.
@@ -1704,7 +1738,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  128 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  129 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  53 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  19 tests: the nexus's own fibers
@@ -1714,7 +1748,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **128 tests**, the discovery ones among them
+be diffed; **129 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1813,6 +1847,7 @@ be diffed; **128 tests**, the discovery ones among them
 | Every signed atom is held to its type's width, each bound admits its own edge, and a `sent` before ~1970.1.1 is refused. | `test-incoming-refusal-caps-widths` |
 | The cell budget admits the largest chain the other caps admit, is exact at its edge, and refuses a shared tree without walking it. | `test-the-cell-budget-admits-the-largest-legal-chain` |
 | Merged with its thread, a chain is refused past max-chain distinct ids or max-depth, and a new thread past max-threads; a thread already held is never refused for the thread cap. | `test-admit-refusal` |
+| A delivery that would grow a payer past its quota, or the store past its ceiling, is refused. A thread already held passes the thread quotas, a flat root counts for its author, the owner meets only the ceiling, and a delivery that grows nothing is never refused. | `test-quota-refusal` |
 | A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
 | The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |
 | A reply belongs to the thread holding what it answers, and may answer it only if some copy is not forged. | `test-a-reply-finds-its-thread-and-an-honest-copy` |
