@@ -226,18 +226,6 @@ export default function ThreadView({
     return () => { cancelled = true }
   }, [id, updatedAt])
 
-  if (loadError) {
-    return <p className="p-3 text-danger">{loadError}</p>
-  }
-  if (notFound) {
-    return <p className="p-3 text-ink-faint">This conversation no longer exists.</p>
-  }
-  //  Was `null`: a blank pane, which on a slow read is indistinguishable
-  //  from a thread that failed to open. `t` survives a navigation, so
-  //  this is the FIRST thread only — every later one keeps the previous
-  //  conversation on screen until its own arrives.
-  if (!t) return <Loading what="Opening" />
-
   const onDelete = async () => {
     // Deleting drops evidence: the signed chain is the artifact, and a
     // forged message in it is proof of an attempt. Worth a confirm.
@@ -254,6 +242,37 @@ export default function ThreadView({
       setSendError('Could not delete this conversation.')
     }
   }
+
+  // A THREAD THAT WILL NOT LOAD STILL OFFERS DELETE. One the ship cannot
+  // serve, such as a copy stored before intake refused a field it could
+  // not render, fails the same way on every open, and Delete is the only
+  // thing left that can act on it.
+  if (loadError) {
+    return (
+      <div className="p-3">
+        <div className="mb-3 flex items-center gap-2">
+          <p className="min-w-0 text-danger">{loadError}</p>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Remove this conversation from this ship. Other ships keep their own copies."
+            className="btn btn-danger btn-outline ml-auto shrink-0"
+          >
+            Delete
+          </button>
+        </div>
+        {sendError && <p className="mt-2 text-danger">{sendError}</p>}
+      </div>
+    )
+  }
+  if (notFound) {
+    return <p className="p-3 text-ink-faint">This conversation no longer exists.</p>
+  }
+  //  Was `null`: a blank pane, which on a slow read is indistinguishable
+  //  from a thread that failed to open. `t` survives a navigation, so
+  //  this is the FIRST thread only — every later one keeps the previous
+  //  conversation on screen until its own arrives.
+  if (!t) return <Loading what="Opening" />
 
   // FILING CONTROLS. Every one of these is local state: a label, an
   // archive flag and a read mark never travel, are never signed, and no
