@@ -772,6 +772,14 @@ async function handleSend(tab, details) {
     return refuse('Signed out of the ship. Reconnect in the Auspex options; '
       + 'your message is still in the compose window.')
   }
+  //  AN AUSPEX IDENTITY THAT IS NOT THIS SHIP'S, such as one an earlier
+  //  connect to another ship left behind. The ship signs as itself
+  //  whatever From says, so the message would go out under a name the
+  //  composer did not show.
+  if (identity.email.toLowerCase() !== shipToAddress(state.ship).toLowerCase()) {
+    return refuse(`${identity.email} is not the connected ship. `
+      + `Send as ${shipToAddress(state.ship)}.`)
+  }
 
   //  RECIPIENTS. Every one must be a ship, and a recipient this extension
   //  cannot carry is a refusal naming it — never a silent drop from a

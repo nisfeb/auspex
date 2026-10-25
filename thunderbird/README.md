@@ -144,7 +144,7 @@ message per auspex message:
 | `X-Auspex-Copies` | when several stored copies share one id |
 | `X-Auspex-Body-Mime` | the signed `body-mime`, reported and never obeyed |
 | body | `text/plain; charset=utf-8`, base64, the signed bytes verbatim |
-| attachments | `application/octet-stream`, sanitised filename, base64 |
+| attachments | `application/octet-stream`, base64, the filename cut to printable ASCII without separators or quotes (at most 128 characters), or the hash when nothing, or only dots, is left |
 
 Threads branch — a message names its parent and two messages naming the same
 parent are a branch — and `References` is exactly what makes Thunderbird's
@@ -217,7 +217,7 @@ that copies an auspex `Message-ID` changes nothing on the ship.
 
 ## Sending
 
-Only a send from the auspex identity (`~ship@auspex.urbit`, the one this extension creates) is intercepted. `compose.onBeforeSend` fires for every account in the profile, so a send from any other identity, such as an ordinary IMAP/SMTP account, is left untouched for Thunderbird's own delivery.
+Only a send from the auspex identity (`~ship@auspex.urbit`, the one this extension creates) is intercepted. `compose.onBeforeSend` fires for every account in the profile, so a send from any other identity, such as an ordinary IMAP/SMTP account, is left untouched for Thunderbird's own delivery. A send from an auspex identity for a different ship, such as one left by an earlier connect, is refused, because the ship signs as itself whatever From says.
 
 An auspex send is intercepted and always cancelled, because a successful auspex send is one this extension already made over HTTP and Thunderbird must not also try to deliver it. On success the compose window closes and a sync runs so the message appears in `Auspex/Sent`. **On failure the window stays open with everything in it.** Nothing is lost and nothing is claimed sent.
 
