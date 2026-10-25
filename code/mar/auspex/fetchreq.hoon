@@ -18,11 +18,13 @@
   ++  noun  n
   ++  json
     ^-  ^json
-    =/  res  (mule |.(;;(fetch-req:uc n)))
-    ?:  ?=(%| -.res)  [%s 'unreadable']
+    ::  the nexus's own ladder, which reads a %0 request as one with no
+    ::  size
+    =/  res  (fetch-req-from-noun:uc n)
+    ?~  res  [%s 'unreadable']
     %-  pairs:enjs:format
-    :~  ['hash' [%s (scot %uv hash.p.res)]]
-        ['from' [%s (scot %p from.p.res)]]
+    :~  ['hash' [%s (scot %uv hash.u.res)]]
+        ['from' [%s (scot %p from.u.res)]]
     ==
   --
 ++  grab

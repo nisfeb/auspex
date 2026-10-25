@@ -1071,9 +1071,9 @@
   ::  source check is what makes that harmless. The hash is re-checked
   ::  in +take-blob regardless.
   ?:  ?=(%blob-in kind)
-    =/  res  (mule |.(~|(%auspex-bad-blob-in ;;(blob-in:uc q.q.sage))))
-    ?:  ?=(%| -.res)  (reject root 'malformed blob-in')
-    (take-blob root p.res)
+    =/  res  (blob-in-from-noun:uc q.q.sage)
+    ?~  res  (reject root 'malformed blob-in')
+    (take-blob root u.res)
   ::  a probe fiber's answer. Local-only for the same reason a fetch
   ::  fiber's is, and by the same check: the blot has a path prefix,
   ::  which the agent-facing surface and a dojo poke cannot name, but a
@@ -1100,7 +1100,7 @@
     %send           (do-send root to.a subject.a body.a prev.a refs.a)
     %read           (do-mark root ids.a tid.a %read &)
     %delete-thread  (do-delete root thread-id.a)
-    %fetch-blob     (do-fetch-blob root hash.a from.a)
+    %fetch-blob     (do-fetch-blob root hash.a from.a ~)
   ::  %forget-peer drops one discovery record so the next send re-probes.
   ::  %.n like every other local-state action: no message appeared, none
   ::  changed, and the tab that asked for it is the only one waiting.
@@ -2290,8 +2290,12 @@
 ::    `who` is a hint about where to look and nothing more - any ship
 ::    holding the bytes may serve them, and the hash proves them.
 ::
+::    `size` is the signed size when the download rules chose the file
+::    by it (+queue-fetches), and ~ when the owner asked. The bytes must
+::    then be exactly that long. See +blob-refusal.
+::
 ++  do-fetch-blob
-  |=  [root=@ud h=@uv who=ship]
+  |=  [root=@ud h=@uv who=ship size=(unit @ud)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
@@ -2304,7 +2308,7 @@
   ::  spawning a second fiber to race the first.
   =/  id=@ta  (scot %uv (sham [h who]))
   ;<  ~  bind:m
-    (put-file (rf root /fetch id) [/auspex %fetchreq] [%0 h who])
+    (put-file (rf root /fetch id) [/auspex %fetchreq] `fetch-req:uc`[%1 h who size])
   ::  %.n, AND +take-blob ANSWERS %.n TOO: neither queueing the fetch
   ::  nor the bytes arriving moves /beacon/rev, so nothing on this path
   ::  ever bumps it. A queued request is not something any reader
@@ -2322,11 +2326,11 @@
 ::  recursion by arm name, for the ;< reason stated at +mark-read-loop.
 ::
 ++  queue-fetches
-  |=  [root=@ud xs=(list [h=@uv who=ship])]
+  |=  [root=@ud xs=(list [h=@uv who=ship size=@ud])]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
-  ;<  *  bind:m  (do-fetch-blob root h.i.xs who.i.xs)
+  ;<  *  bind:m  (do-fetch-blob root h.i.xs who.i.xs `size.i.xs)
   (queue-fetches root t.xs)
 ::
 ::  +run-fetch: the ephemeral fetch fiber. Runs OFF the writer.
@@ -2342,14 +2346,24 @@
 ::    the fiber, and there is no reason to leave that hostage to a later
 ::    move of the path.
 ::
+::    The state is read as a noun and through the ladder, never with
+::    get-state-as on the type. That clams with no mule, so a request
+::    laid by an older build would crash this fiber, and +rise-wait would
+::    park it waiting for a poke nobody sends. One that reads as no
+::    request at all is answered as a miss, so the writer culls it.
+::
 ++  run-fetch
   |=  [root=@ud id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  rq=fetch-req:uc  bind:m  (get-state-as:io ,fetch-req:uc)
-  ;<  got=(unit octs)  bind:m  (fetch-keen root from.rq hash.rq)
+  ;<  n=*  bind:m  (get-state-as:io ,*)
+  =/  rq=(unit fetch-req:uc)  (fetch-req-from-noun:uc n)
+  ?~  rq
+    %+  poke:io  (rf root / %'main.sig')
+    [[/auspex %blob-in] `blob-in:uc`[%1 id 0v0 ~ ~]]
+  ;<  got=(unit octs)  bind:m  (fetch-keen root from.u.rq hash.u.rq)
   %+  poke:io  (rf root / %'main.sig')
-  [[/auspex %blob-in] [%0 id hash.rq got]]
+  [[/auspex %blob-in] `blob-in:uc`[%1 id hash.u.rq size.u.rq got]]
 ::
 ::  +take-blob: the writer's half of a fetch. Local only.
 ::
@@ -2368,10 +2382,12 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (rf root /fetch id.b))
-  =/  bad=(unit @t)  (blob-refusal:uc res.b hash.b)
+  ::  The bytes have already landed whole by now. A keen answer reaches
+  ::  this ship at whatever size its publisher chose, and nothing here
+  ::  can measure it first. So these checks bound what is STORED, never
+  ::  what a publisher can send. Bounding that needs ames and vere.
+  =/  bad=(unit @t)  (blob-refusal:uc res.b hash.b size.b)
   ?^  bad  (reject root u.bad)
-  ::  (the size bounds what a hostile publisher can hand back before it
-  ::  is measured; see +blob-refusal)
   ?>  ?=(^ res.b)
   ;<  room=?  bind:m  (make-room root p.u.res.b)
   ?.  room

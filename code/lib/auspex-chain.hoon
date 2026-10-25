@@ -326,14 +326,41 @@
 ::    about where to look and confers nothing: the hash is what proves
 ::    the bytes.
 ::
-+$  fetch-req  [%0 hash=@uv from=ship]
+::    `size` is the signed size, for a fetch the download rules started
+::    on the strength of it, and ~ for one the owner asked for. The
+::    rules let a stranger's file in by its size, so the bytes that land
+::    must be that size (+blob-refusal). Version 1. A %0 request has no
+::    size, and it can outlive a reload, so +fetch-req-from-noun reads it
+::    as a request with size ~.
+::
++$  fetch-req  [%1 hash=@uv from=ship size=(unit @ud)]
++$  fetch-req-0  [%0 hash=@uv from=ship]
+::
+++  fetch-req-from-noun
+  |=  n=*
+  ^-  (unit fetch-req)
+  =/  r1  (mole |.(;;(fetch-req n)))
+  ?^  r1  r1
+  =/  r0  (mole |.(;;(fetch-req-0 n)))
+  ?~(r0 ~ `[%1 hash.u.r0 from.u.r0 ~])
 ::
 ::  $blob-in: a fetch fiber's answer, poked back at the writer.
 ::
 ::    ~ for a miss, so the writer culls the request grub either way and
 ::    a failed fetch leaves nothing behind. A wire format, never stored.
+::    It carries the request's `size` back. A %0 answer from a fiber
+::    that keened before an upgrade still reads, with size ~.
 ::
-+$  blob-in  [%0 id=@ta hash=@uv res=(unit octs)]
++$  blob-in  [%1 id=@ta hash=@uv size=(unit @ud) res=(unit octs)]
++$  blob-in-0  [%0 id=@ta hash=@uv res=(unit octs)]
+::
+++  blob-in-from-noun
+  |=  n=*
+  ^-  (unit blob-in)
+  =/  b1  (mole |.(;;(blob-in n)))
+  ?^  b1  b1
+  =/  b0  (mole |.(;;(blob-in-0 n)))
+  ?~(b0 ~ `[%1 id.u.b0 hash.u.b0 ~ res.u.b0])
 ::
 ::  the tree's persisted shapes. Every one of these is read back through
 ::  ;; against a NOUN-marc vase, newest shape first, so a later version
@@ -877,8 +904,10 @@
 ::    Only a %verified message's, because the allow list names ships and
 ::    an unverified `from` is anyone's claim. Keyed on the SIGNED author,
 ::    never on whoever delivered the chain. A blocked ship never; an
-::    allowed one up to max-blob; anyone else up to `auto-size`, which is
-::    0 unless the owner set it.
+::    allowed one up to max-blob; anyone else up to `auto-size`, and not
+::    at all while `auto-size` is 0, which it is unless the owner set it.
+::    The size is the sender's claim, so "up to 0" would still have let
+::    any stranger in with a file that claimed to weigh nothing.
 ::
 ::    `held` is what the store already weighs. Automatic downloads stop
 ::    at three quarters of the budget, so they cannot fill the store and
@@ -893,18 +922,20 @@
   ^-  ?
   ?&  ?=(%verified v)
       !(~(has in block.s) author)
-      (lte size ?:((~(has in allow.s) author) max-blob auto-size.s))
+      ?:  (~(has in allow.s) author)  (lte size max-blob)
+      &(!=(0 auto-size.s) (lte size auto-size.s))
       (lte (add held size) (div (mul budget.s 3) 4))
   ==
 ::
 ::  +auto-picks: which attachments in `c` download on their own, and
 ::  from whom - each one's signed author. `held` is the store's weight
 ::  now, and every pick adds its size before the next is weighed, so
-::  one delivery cannot pass the automatic share between them.
+::  one delivery cannot pass the automatic share between them. Each pick
+::  carries its signed size, which the bytes must then match.
 ::
 ++  auto-picks
   |=  [s=settings c=chain vs=(map [msg-id @ux] verdict) held=@ud]
-  ^-  (list [h=@uv who=ship])
+  ^-  (list [h=@uv who=ship size=@ud])
   =/  cands=(list [h=@uv who=ship v=verdict size=@ud])
     %-  zing
     %+  turn  c
@@ -912,15 +943,15 @@
     =/  v=verdict  (~(gut by vs) [(id unsigned.m) sig.m] %unverified)
     %+  turn  attachments.unsigned.m
     |=(a=attachment [hash.a from.unsigned.m v size.a])
-  =|  out=(list [h=@uv who=ship])
-  |-  ^-  (list [h=@uv who=ship])
+  =|  out=(list [h=@uv who=ship size=@ud])
+  |-  ^-  (list [h=@uv who=ship size=@ud])
   ?~  cands  (flop out)
   ?.  (auto-fetch s who.i.cands v.i.cands size.i.cands held)
     $(cands t.cands)
   %=  $
     cands  t.cands
     held   (add held size.i.cands)
-    out    [[h.i.cands who.i.cands] out]
+    out    [[h.i.cands who.i.cands size.i.cands] out]
   ==
 ::
 ::  +settings-ok: may these settings be stored?
@@ -3112,14 +3143,16 @@
 ::  A miss, a claimed size past max-blob, a claimed size SHORT of the
 ::  bytes that arrived (the atom carries more than its octs says, so the
 ::  address the sender computed is not the one they would re-measure
-::  to), or bytes that do not hash to the address they were fetched
-::  under. In that order.
+::  to), a length other than the signed size the fetch was started on,
+::  or bytes that do not hash to the address they were fetched under. In
+::  that order. `size` is ~ for a fetch the owner asked for by hand.
 ++  blob-refusal
-  |=  [res=(unit octs) hash=@uv]
+  |=  [res=(unit octs) hash=@uv size=(unit @ud)]
   ^-  (unit @t)
   ?~  res                             `'blob fetch missed'
   ?.  (lte p.u.res max-blob)           `'blob too large'
   ?.  (gte p.u.res (met 3 q.u.res))    `'blob malformed'
+  ?.  |(?=(~ size) =(u.size p.u.res))  `'blob size mismatch'
   ?.  (blob-ok u.res hash)             `'blob hash mismatch'
   ~
 ::

@@ -1559,7 +1559,7 @@
   !>((unsettled:auspex held ~[a b c d]))
 ::
 ::  +auto-fetch: the allow list is what lets bytes in; a stranger only
-::  under auto-size, which is 0 until the owner sets it; never a
+::  under auto-size, which is 0 and off until the owner sets it; never a
 ::  blocked ship, never an unverified message, never past 3/4 budget.
 ++  test-auto-fetch-rules
   =/  s=settings:sur
@@ -1570,6 +1570,10 @@
     (expect-eq !>(|) !>((auto-fetch:auspex s ~zod %unverified 1 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s ~zod %forged 1 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s ~nec %verified 1 0)))
+    ::  auto-size 0 is off, so a stranger's file claiming 0 bytes stays
+    ::  out, while an allowed ship's still comes in
+    (expect-eq !>(|) !>((auto-fetch:auspex s ~nec %verified 0 0)))
+    (expect-eq !>(&) !>((auto-fetch:auspex s ~zod %verified 0 0)))
     (expect-eq !>(&) !>((auto-fetch:auspex s(auto-size 10) ~nec %verified 10 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size 10) ~nec %verified 11 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size big) ~bus %verified 1 0)))
@@ -1618,9 +1622,10 @@
   =/  s=settings:sur  [%0 0 (sy ~[~zod ~bus]) ~ 40]
   ;:  weld
     ::  ~bus is allowed but its message did not verify
-    (expect-eq !>(~[[0v1 ~zod] [0v2 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 0)))
+    ::  and each pick carries the signed size, which the bytes must match
+    (expect-eq !>(~[[0v1 ~zod 10] [0v2 ~zod 10]]) !>((auto-picks:auspex s ~[a b] vs 0)))
     ::  3/4 of 40 is 30: 15 held leaves room for one of the two
-    (expect-eq !>(~[[0v1 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 15)))
+    (expect-eq !>(~[[0v1 ~zod 10]]) !>((auto-picks:auspex s ~[a b] vs 15)))
   ==
 ::
 ::  ── what the nexus renders ──────────────────────────────────────────
@@ -2123,25 +2128,47 @@
   ==
 ::
 ::  fetched bytes are stored only if they arrived, fit, carry no more
-::  than their size says, and hash to the address they were asked for
+::  than their size says, match the signed size a rule fetched them on,
+::  and hash to the address they were asked for
 ++  test-blob-refusal
   =/  ok=octs  [5 'hello']
   =/  h  (blob-hash:auspex ok)
   =/  big=octs  [+(max-blob:auspex) 0]
   ;:  weld
-    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h)))
-    (expect-eq !>(`(unit @t)``'blob fetch missed') !>((blob-refusal:auspex ~ h)))
-    (expect-eq !>(`(unit @t)``'blob too large') !>((blob-refusal:auspex `big (blob-hash:auspex big))))
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h ~)))
+    (expect-eq !>(`(unit @t)``'blob fetch missed') !>((blob-refusal:auspex ~ h ~)))
+    (expect-eq !>(`(unit @t)``'blob too large') !>((blob-refusal:auspex `big (blob-hash:auspex big) ~)))
     ::  exactly max-blob is not too large
     =/  cap=octs  [max-blob:auspex 0]
-    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `cap (blob-hash:auspex cap))))
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `cap (blob-hash:auspex cap) ~)))
     ::  a size short of the bytes is malformed; a size past them is only
     ::  trailing zeroes, and fine
     =/  short=octs  [4 'hello']
-    (expect-eq !>(`(unit @t)``'blob malformed') !>((blob-refusal:auspex `short (blob-hash:auspex short))))
+    (expect-eq !>(`(unit @t)``'blob malformed') !>((blob-refusal:auspex `short (blob-hash:auspex short) ~)))
     =/  long=octs  [6 'hello']
-    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `long (blob-hash:auspex long))))
-    (expect-eq !>(`(unit @t)``'blob hash mismatch') !>((blob-refusal:auspex `ok 0v1)))
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `long (blob-hash:auspex long) ~)))
+    (expect-eq !>(`(unit @t)``'blob hash mismatch') !>((blob-refusal:auspex `ok 0v1 ~)))
+    ::  a fetch the download rules started on a signed size must bring
+    ::  exactly that many bytes, and the size is checked before the hash
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h `5)))
+    (expect-eq !>(`(unit @t)``'blob size mismatch') !>((blob-refusal:auspex `ok h `0)))
+    (expect-eq !>(`(unit @t)``'blob size mismatch') !>((blob-refusal:auspex `ok 0v1 `0)))
+  ==
+::
+::  a fetch request and a fetch answer from before the signed size read
+::  as ones with no size, so an upgrade strands neither
+++  test-the-fetch-ladders-read-version-0
+  ;:  weld
+    %+  expect-eq  !>(`(unit fetch-req:sur)``[%1 0v1 ~zod ~])
+    !>((fetch-req-from-noun:auspex [%0 0v1 ~zod]))
+    %+  expect-eq  !>(`(unit fetch-req:sur)``[%1 0v1 ~zod `5])
+    !>((fetch-req-from-noun:auspex [%1 0v1 ~zod `5]))
+    (expect-eq !>(`(unit fetch-req:sur)`~) !>((fetch-req-from-noun:auspex [%2 0v1])))
+    %+  expect-eq  !>(`(unit blob-in:sur)``[%1 ~.a 0v1 ~ `[5 'hello']])
+    !>((blob-in-from-noun:auspex [%0 ~.a 0v1 `[5 'hello']]))
+    %+  expect-eq  !>(`(unit blob-in:sur)``[%1 ~.a 0v1 `5 ~])
+    !>((blob-in-from-noun:auspex [%1 ~.a 0v1 `5 ~]))
+    (expect-eq !>(`(unit blob-in:sur)`~) !>((blob-in-from-noun:auspex 0)))
   ==
 ::
 ::  a label change: nothing, a new set, or a refusal past the cap, which

@@ -1057,17 +1057,26 @@ fetches without being asked SHOULD do so only for a message whose verdict is
 the chain: an unverified `from` is anyone's claim, and the bytes a fetch
 receives are logged before they can be measured, so a sender's claimed `size`
 bounds only an honest sender. The reference receiver fetches on request, and on
-its own only under the owner's rules: ships the owner allowed, up to `max-blob`;
-other ships up to a size the owner sets, 0 by default; blocked ships never.
+its own only under the owner's rules. Ships the owner allowed are fetched up to
+`max-blob`, and other ships up to a size the owner sets. That size is 0 by
+default, and 0 turns other ships off, since a claim of 0 bytes is as easy to
+sign as any other. Blocked ships are never fetched. A fetch a rule started
+carries the attachment's signed size, and the reference refuses bytes of any
+other length. A fetch the owner asked for carries no size.
 
 **On arrival, the bytes MUST be re-hashed.** The reference receiver, in order:
 
 ```
-?~  res.b                              → discard: the fetch missed
-?.  (lte p.u.res.b max-blob:uc)        → discard: 'blob too large'
-?.  (gte p.u.res.b (met 3 q.u.res.b))  → discard: 'blob malformed'
-?.  (blob-ok:uc u.res.b hash.b)        → discard: 'blob hash mismatch'
+?~  res.b                                  → discard: the fetch missed
+?.  (lte p.u.res.b max-blob:uc)            → discard: 'blob too large'
+?.  (gte p.u.res.b (met 3 q.u.res.b))      → discard: 'blob malformed'
+?.  |(?=(~ size.b) =(u.size.b p.u.res.b))  → discard: 'blob size mismatch'
+?.  (blob-ok:uc u.res.b hash.b)            → discard: 'blob hash mismatch'
 ```
+
+These bound what is **stored**, not what arrives. A remote-scry answer has
+already landed whole, at whatever size its publisher chose, before any of them
+runs.
 
 **A blob whose contents do not hash to the address it was fetched under MUST be
 discarded**, without comment and without being held against the sender. The ship
@@ -1672,7 +1681,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  123 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  124 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
@@ -1682,7 +1691,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **123 tests**, the discovery ones among them
+be diffed; **124 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1729,8 +1738,8 @@ be diffed; **123 tests**, the discovery ones among them
 | `name` and `mime` refuse control bytes at the boundary. | `test-text-ok-refuses-control-bytes` |
 | The send route checks a ref's count, `name` and `mime` before reading any blob. | `test-refs-ok-checks-all-but-size` |
 | Eviction takes unreferenced blobs, oldest first; a referenced blob is never evicted. | `test-unreferenced-is-oldest-first` |
-| Automatic download needs a `%verified` message from an unblocked author: an allowed one up to `max-blob`, anyone else up to `auto-size`, and never past 3/4 of the budget. | `test-auto-fetch-rules` |
-| Automatic download decides per attachment by the signed author, counting the running weight, so two files that each fit do not both fit past the share. | `test-auto-picks` |
+| Automatic download needs a `%verified` message from an unblocked author: an allowed one up to `max-blob`, anyone else up to `auto-size` and not at all while it is 0, and never past 3/4 of the budget. | `test-auto-fetch-rules` |
+| Automatic download decides per attachment by the signed author, counting the running weight, so two files that each fit do not both fit past the share. Each pick carries its signed size. | `test-auto-picks` |
 | Settings: the budget holds at least one largest file and at most `max-budget`, each list holds at most `max-listed`, and no ship is on both. | `test-settings-ok-bounds` |
 | `+shed-for` refuses rather than half-evicting when the store cannot be made to fit. | `test-shed-for-refuses-rather-than-half-evicting` |
 | Swapping an attachment breaks the signature. | `test-swapped-attachment-is-forged` |
@@ -1787,7 +1796,8 @@ be diffed; **123 tests**, the discovery ones among them
 | Storing a thread writes only new or changed slots and culls only what is no longer wanted, outermost directories first. | `test-slot-plan` |
 | The writer takes a chain from anyone, and an action, blob or probe result only from this ship. | `test-the-writer-sorts-pokes-and-sources` |
 | /proto is published when unbound or changed; discovery keeps the best valid answer; a fresh peer record is trusted without asking again. | `test-discovery-decisions` |
-| Fetched bytes are stored only if they arrived, fit max-blob, carry no more than their declared size, and hash to their address. | `test-blob-refusal` |
+| Fetched bytes are stored only if they arrived, fit max-blob, carry no more than their declared size, match the signed size a rule fetched them on, and hash to their address. | `test-blob-refusal` |
+| A fetch request or answer from before the signed size reads as one with no size. | `test-the-fetch-ladders-read-version-0` |
 | A label change is a no-op, a new set, or refused past max-labels, and a thread past the cap may still lose one. | `test-relabel` |
 | A mailing list never holds our own ship nor more than max-to members, and only a new list is refused at max-lists. | `test-list-rules` |
 | Marking adds to the read or fold set; unmarking takes away. | `test-marks` |
