@@ -27,12 +27,10 @@ const BASE = '/apps/auspex'
 // fetch handler normalises rather than precaching two copies.
 const SHELL_URLS = [`${BASE}/`, `${BASE}/app.js`, `${BASE}/manifest.json`]
 
-// No icon URL in that list, because there is no icon URL: the manifest
-// carries its icon as a data: URI. auspex has no unauthenticated route
-// and never gains one, so an icon fetched over HTTP would be a fetch
-// browsers make without credentials against a route that answers 403 —
-// and the only other copy of the same grub is under /grubbery/, which
-// this worker is forbidden to intercept (see below).
+// No icon URL in that list. The icons are not part of the build, so the
+// version stamp below never changes when they do, and a precached copy
+// would outlive every redeploy. The browser fetches them itself at
+// install time, with the session cookie.
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {

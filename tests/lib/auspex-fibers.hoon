@@ -99,6 +99,23 @@
   =/  t  (call & %'POST' url '')
   (expect !>(!(lien (peeks:ft t) |=(r=road:tarball =(r road)))))
 ::
+::  the manifest's PNG icons are decoded from their cords on the way out,
+::  so each answers 200 with a body that opens with the PNG signature
+++  test-each-png-icon-route-answers-a-png
+  %-  zing
+  %+  turn
+    ^-  (list @t)
+    :~  '/apps/auspex/icon-192.png'
+        '/apps/auspex/icon-512.png'
+        '/apps/auspex/icon-maskable.png'
+    ==
+  |=  url=@t
+  =/  res  (status:ft (call & %'GET' url ''))
+  ;:  weld
+    (expect-eq !>(200) !>(code.res))
+    (expect-eq !>(0x474e.5089) !>((end [3 4] body.res)))
+  ==
+::
 ::  whoami asks the ship who it is, then reads what it can sign with
 ++  test-whoami-reads-our-ship-and-caps
   =/  t  (call & %'GET' '/apps/auspex/api/whoami' '')

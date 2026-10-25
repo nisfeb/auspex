@@ -5,12 +5,12 @@
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `1159dd82b25c` is stamped by vite.config.ts at copy time. It is
+// `cebfa27b092a` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = '1159dd82b25c'
+const VERSION = 'cebfa27b092a'
 const SHELL = `auspex-shell-${VERSION}`
 // NOT versioned, unlike the shell. Mail is not part of the build: a
 // deploy that changes one line of CSS has nothing to say about the
@@ -27,12 +27,10 @@ const BASE = '/apps/auspex'
 // fetch handler normalises rather than precaching two copies.
 const SHELL_URLS = [`${BASE}/`, `${BASE}/app.js`, `${BASE}/manifest.json`]
 
-// No icon URL in that list, because there is no icon URL: the manifest
-// carries its icon as a data: URI. auspex has no unauthenticated route
-// and never gains one, so an icon fetched over HTTP would be a fetch
-// browsers make without credentials against a route that answers 403 —
-// and the only other copy of the same grub is under /grubbery/, which
-// this worker is forbidden to intercept (see below).
+// No icon URL in that list. The icons are not part of the build, so the
+// version stamp below never changes when they do, and a precached copy
+// would outlive every redeploy. The browser fetches them itself at
+// install time, with the session cookie.
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {

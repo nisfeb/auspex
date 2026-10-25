@@ -10,10 +10,17 @@
          behind the owner gate — and a manifest is fetched anonymously by
          default, so without this attribute the browser's own fetch of it
          comes back 403 and the install silently degrades to a bookmark. The
-         icon the manifest names is served by the nexus from its own root
-         grub (/apps/auspex/icon.svg), which is the same route the launcher
-         tile pulls, so there is one icon and not two copies to drift. -->
+         icons the manifest names are served by the nexus: its own root grub
+         (/apps/auspex/icon.svg), the same route the launcher tile pulls, and
+         PNG renders of that one drawing, so nothing else draws the icon. -->
     <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
+    <!-- The tab's icon and iOS's home-screen icon. Without the first the
+         browser asks the ship for /favicon.ico and shows the ship's icon.
+         iOS ignores the manifest's icons and wants an opaque square, which
+         the maskable one is. Absolute paths, because neither file is in
+         public/ for vite to rewrite. The nexus serves both. -->
+    <link rel="icon" href="/apps/auspex/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apps/auspex/icon-maskable.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Auspex</title>
     <!-- THE PALETTE IS DECIDED BEFORE THE FIRST PAINT, not after mount.
