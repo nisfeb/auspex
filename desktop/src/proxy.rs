@@ -171,7 +171,17 @@ fn ship_from_whoami(body: &str) -> Option<String> {
         .ok()?
         .get("ship")?
         .as_str()
+        .filter(|s| is_patp(s))
         .map(str::to_string)
+}
+
+/// Shaped like an @p: a `~`, then lowercase letters and dashes, 57
+/// characters at most (a comet). The connection page shows this name, so
+/// whatever the ship or its cookie says is checked before it gets there.
+fn is_patp(s: &str) -> bool {
+    s.len() <= 57
+        && s.strip_prefix('~')
+            .is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'))
 }
 
 /// Post the +code to the ship's own login form and keep the session it hands
@@ -231,10 +241,7 @@ pub fn cookie_from_set_cookie(raw: &str) -> Option<String> {
 pub fn ship_from_cookie(cookie: &str) -> Option<String> {
     let name = cookie.split('=').next()?;
     let ship = name.strip_prefix("urbauth-")?;
-    if ship.len() < 2 || !ship.starts_with('~') {
-        return None;
-    }
-    Some(ship.to_string())
+    is_patp(ship).then(|| ship.to_string())
 }
 
 /// Write the session where every outbound request reads it from.
@@ -978,6 +985,26 @@ mod tests {
         );
         assert_eq!(ship_from_cookie("urbauth-=0v1.2"), None, "a nameless ship is not one");
         assert_eq!(ship_from_cookie("session=0v1.2"), None);
+        // the name reaches the connection page, so markup is not a name
+        assert_eq!(ship_from_cookie("urbauth-~<img src=x onerror=alert(1)>=0v1"), None);
+    }
+
+    #[test]
+    fn whoami_names_a_ship_or_nothing() {
+        // The connection page wrote this name as HTML. A ship (or whatever
+        // answers at its URL) could run script in the manager page, which
+        // holds every shell command (security audit run-1).
+        let hostile = r#"{"ship":"<img src=x onerror=\"window.__TAURI__.core.invoke('set_theme',{dark:true})\">"}"#;
+        assert_eq!(ship_from_whoami(hostile), None);
+        assert_eq!(ship_from_whoami(r#"{"ship":"~sampel-palnet"}"#).as_deref(), Some("~sampel-palnet"));
+        // a comet is the longest @p there is, and one more character is not one
+        let comet = "~dozzod-dozzod-dozzod-dozzod--dozzod-dozzod-dozzod-dozzod";
+        assert_eq!(comet.len(), 57);
+        assert!(is_patp(comet));
+        assert!(!is_patp(&format!("{comet}a")));
+        for bad in ["", "~", "zod", "~Zod", "~zod ", "~zod\n", "~zød"] {
+            assert!(!is_patp(bad), "{bad:?}");
+        }
     }
 
     #[test]

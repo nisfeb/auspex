@@ -457,6 +457,27 @@ mod tests {
         assert!(!openable("mailto:a@b\u{0}c"));
     }
 
+    #[test]
+    fn the_manager_writes_only_its_own_markup() {
+        // Every innerHTML in the connection page is a plain string literal.
+        // Anything the ship said goes in with append or textContent, as text
+        // (security audit run-1: the whoami name was written as HTML).
+        let html = include_str!("../ui/manager.html");
+        let sinks: Vec<&str> = html.lines().filter(|l| l.contains("innerHTML")).collect();
+        assert!(!sinks.is_empty(), "the page has no innerHTML at all, so this test reads nothing");
+        for line in sinks {
+            let lit = line
+                .split_once("innerHTML")
+                .and_then(|(_, r)| r.trim_start().strip_prefix('='))
+                .and_then(|r| r.trim().strip_prefix('\''))
+                .and_then(|r| r.strip_suffix("';"));
+            assert!(lit.is_some_and(|l| !l.contains('\'')), "not a plain literal: {line}");
+        }
+        // the shell's CSP blocks style attributes, so one would silently
+        // do nothing
+        assert!(!html.contains(" style="), "use a class: the CSP blocks style attributes");
+    }
+
     fn url(s: &str) -> tauri::Url {
         s.parse().unwrap()
     }
