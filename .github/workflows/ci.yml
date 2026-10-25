@@ -11,6 +11,11 @@ on:
     branches: [master]
   workflow_call:
 
+# Called from release.yml, this cannot widen the caller's token, and it
+# asks for nothing beyond reading the code.
+permissions:
+  contents: read
+
 # Keyed by the WORKFLOW as well as the ref. Called from release.yml,
 # `github.workflow` is the caller's name, so a release dispatched on master
 # and a push to master are two groups: neither can cancel the other's run.
@@ -19,11 +24,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A tag name is a pointer its owner can move, so every `uses:` names a
+  # commit, and every workflow sets its own token permissions rather than
+  # taking the repository default. Local `./` workflows are ours already.
+  workflows:
+    name: workflows — actions pinned, permissions set
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: every uses is a full SHA, every workflow has permissions
+        run: |
+          shopt -s nullglob
+          fail=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            grep -q '^permissions:' "$f" || { echo "::error file=$f::no top-level permissions:"; fail=1; }
+            while IFS= read -r hit; do
+              echo "::error file=$f::not pinned to a commit SHA: $hit"; fail=1
+            done < <(grep -nE '^[[:space:]-]*uses:' "$f" |
+                     grep -vE 'uses:[[:space:]]*(\./|[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$))')
+          done
+          exit $fail
+
   desktop:
     name: desktop — cargo test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       # tauri pulls the webkit stack in at COMPILE time, so the deps are
       # needed even though every test here is pure logic (the SSE frame
       # classifier, the inbox diff, config round-trip, the URL normaliser,
@@ -40,10 +70,12 @@ jobs:
       # where this script comes from.
       - name: tauri commands are registered everywhere
         run: node scripts/desktop-commands.mjs
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
       # the tauri tree is several minutes of compile; without a cache every
-      # PR pays it in full (the release matrix already caches the same way)
-      - uses: Swatinem/rust-cache@v2
+      # PR pays it in full. Release builds skip it on purpose (release.yml)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: desktop -> target
       - name: cargo test
@@ -61,8 +93,10 @@ jobs:
     name: web client — the served artifact is current
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       # The client is SERVED BY THE SHIP out of the overlay, so the built
@@ -83,8 +117,10 @@ jobs:
     name: thunderbird add-on — node --test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       # No dependencies: the add-on is plain ES modules and node:test. One of

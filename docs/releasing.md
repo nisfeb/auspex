@@ -53,6 +53,14 @@ never sees it, no desk ever pulls, and everything looks fine.
 A `git push` to `master` reaches ricsul **on its own within about 15 minutes**.
 There is no staging state for a desk app: pushing is deploying, on a timer.
 
+Because a push is a release, CI must never push to master. The workflows'
+token is read-only except in release.yml's create-release and build jobs,
+every `uses:` is pinned to a commit SHA (ci.yml fails on one that is not), and
+dependabot (`.github/dependabot.yml`) moves the pins weekly. A master ruleset
+that restricts updates, with an admin bypass and no GitHub Actions bypass,
+blocks the workflow token from pushing to master. The owner applies it in the
+repository settings; it is not in this repo.
+
 To make it immediate instead of waiting for the poll:
 
 ```sh

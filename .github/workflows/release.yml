@@ -13,8 +13,11 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# Read-only by default. Only the jobs that create the release or upload
+# assets into it (create-release, build) get contents: write. Every `uses:`
+# is pinned to a commit SHA (ci.yml checks), and dependabot moves the pins.
 permissions:
-  contents: write        # needed to create the release and upload assets
+  contents: read
 
 jobs:
   # A tag that disagrees with the version tauri stamps into the bundles would
@@ -25,7 +28,9 @@ jobs:
     name: tag matches tauri.conf.json
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       # a step condition, not a job one: a skipped job skips everything that
       # needs it, and a release dispatched by hand has no tag to check
       - name: tag matches tauri.conf.json
@@ -57,6 +62,8 @@ jobs:
   create-release:
     needs: [version, verify]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write    # creates the draft release
     outputs:
       release_id: ${{ steps.mk.outputs.id }}
     steps:
@@ -76,6 +83,10 @@ jobs:
           and never bundled here.
 
           All builds are unsigned; on macOS, right-click → Open the first time.
+
+          Each platform's `SHA256SUMS-*.txt` lists its files. To check a
+          download came from this repository's release workflow, run
+          `gh attestation verify <file> -R nisfeb/auspex`.
           BODY
           )
           #  reuse an existing draft for this tag rather than adding another,
@@ -99,6 +110,10 @@ jobs:
     needs: create-release
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write      # tauri-action uploads the bundles into the release
+      id-token: write      # the provenance attestation's signing identity
+      attestations: write  # and storing it on the repository
     strategy:
       fail-fast: false     # one platform failing should not hide the others
       matrix:
@@ -126,16 +141,26 @@ jobs:
             label: windows-x86_64 (msi + nsis)
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
-
-      - name: rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
+
+      # v1 (master), not the stable branch: stable is regenerated on top
+      # of master every time master moves, so a SHA on it is orphaned
+      # within weeks. v1 needs the toolchain named.
+      - name: rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop -> target
+      # No rust-cache here. Push-to-master CI runs npm and test code in
+      # the default-branch cache scope, which a tag build restores from,
+      # so a release built from a cache could link whatever that code left
+      # there (security audit run-1). A release builds clean, and slower.
+      # The lockfile must be current, so cargo cannot resolve anew.
+      - name: lockfile is current
+        run: cargo fetch --locked --manifest-path desktop/Cargo.toml
 
       - name: linux build deps
         if: runner.os == 'Linux'
@@ -145,7 +170,8 @@ jobs:
             librsvg2-dev libsoup-3.0-dev libxdo-dev libssl-dev pkg-config file
 
       - name: build and upload
-        uses: tauri-apps/tauri-action@v0
+        id: tauri
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No APPLE_* vars here on purpose. `${{ secrets.X }}` for a secret
@@ -169,3 +195,38 @@ jobs:
           # It stays a DRAFT until a human publishes it: a release is
           # outward-facing and irreversible once people have the URL.
           releaseId: ${{ needs.create-release.outputs.release_id }}
+
+      # SHA-256 sums of what this job built, attached to the release, and a
+      # signed build provenance attestation for each file. Anyone can check
+      # a download with `gh attestation verify <file> -R nisfeb/auspex`.
+      # Hashed in node, not shasum as lattice does: Windows has no shasum,
+      # and tauri's Windows paths use backslashes, which dirname cannot split.
+      - name: checksums
+        id: sums
+        shell: bash          # Windows would default to pwsh
+        env:
+          PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RID: ${{ needs.create-release.outputs.release_id }}
+          LABEL: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          sums="$RUNNER_TEMP/SHA256SUMS-$LABEL.txt"
+          node -e '
+            const fs = require("fs"), path = require("path"), crypto = require("crypto")
+            for (const p of JSON.parse(process.env.PATHS)) {
+              if (!fs.statSync(p, { throwIfNoEntry: false })?.isFile()) continue
+              const h = crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex")
+              console.log(`${h}  ${path.basename(p)}`)
+            }' > "$sums"
+          cat "$sums"
+          [ -s "$sums" ] || { echo "::error::no bundle files to sum" >&2; exit 1; }
+          gh api -X POST -H 'content-type: text/plain' \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=$(basename "$sums")" \
+            --input "$sums" > /dev/null
+          echo "file=$sums" >> "$GITHUB_OUTPUT"
+
+      - name: provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: ${{ steps.sums.outputs.file }}
