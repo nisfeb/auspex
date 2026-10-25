@@ -39,10 +39,16 @@ returns to it from the client; `close` or Escape goes back.
 
 The workspace webview talks to the ship through a **localhost bridge**. Every
 request is relayed by the app with the session attached Rust-side, so the
-webview itself holds no cookies and webkit cookie policies (which vary by build
+webview itself holds no session and webkit cookie policies (which vary by build
 and silently drop cookies on cross-site flows and service-worker fetches) can
 never unauthenticate a view. That matters more here than it does in lattice:
 the auspex client is a PWA and its service worker mediates every fetch.
+
+The one cookie the webview does hold is the bridge's own: a random token made
+at launch and handed to the workspace window as an HttpOnly cookie on the
+bridge origin. The bridge answers anything without it with a 403 and never
+relays it, so a page in a browser, or another local program, cannot reach the
+ship through the bridge with your session.
 
 The bridge listens on a fixed port — **26600**, or the next free one in a
 16-wide range. Deliberate and load-bearing, not cosmetic: the port is part of

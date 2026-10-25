@@ -20,6 +20,9 @@ serde_json = "1"
 #  reads the beacon through the same agent. rustls, no json/cookie features:
 #  the cookie is ours to attach and the json is serde's to parse.
 ureq = { version = "2", default-features = false, features = ["tls"] }
+#  the bridge token's randomness, from the OS on every target the bundles
+#  ship for. Already in the tree through tauri, at this version.
+getrandom = "0.3.4"
 
 [dev-dependencies]
 # property tests only. Never in a release build.

@@ -10,9 +10,14 @@
 //! here, by posting the +code to `/~/login` ourselves, and kept at
 //! `config::cookie_file()` rather than in a path a CLI shares.
 //!
-//! ponytail: bound to 127.0.0.1 with same-user trust. Any local process
-//! could relay through it, but the same user can already read the cookie
-//! file it injects. Add a token handshake if multi-user hosts ever matter.
+//! Loopback is not a boundary. Any page in any browser on this machine can
+//! aim requests at 127.0.0.1, and so can another account or a same-user app
+//! sandboxed away from the cookie file. So the bridge relays only a request
+//! that carries this launch's token: 256 random bits, handed to the
+//! workspace webview once as an HttpOnly cookie on the bridge origin (see
+//! `bootstrap_url`). Anything else gets a 403 and the ship never sees it.
+//! Every auspex route is owner-only, so a request without the session has
+//! nothing to relay to (security audit run-1).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -341,12 +346,66 @@ pub fn agent() -> &'static ureq::Agent {
 ///
 /// NB: accept-encoding is deliberately NOT dropped. It rides through so the
 /// ship can gzip and the webview decodes, which matters on every WAN load.
+///
+/// `origin` goes too. Every relayed request carries the bridge token, so the
+/// bridge has already told its own webview from any other page. The ship's
+/// cross-site gate compares Origin with Host, and Host is the ship's own by
+/// the time the request arrives, so `http://127.0.0.1:26600` would read as
+/// another site and refuse every write the workspace makes.
 fn drop_request_header(lower_name: &str) -> bool {
     matches!(
         lower_name,
-        "host" | "connection" | "cookie" | "content-length"
+        "host" | "connection" | "cookie" | "content-length" | "origin"
             | "upgrade" | "keep-alive" | "proxy-connection" | "transfer-encoding"
     )
+}
+
+/// The cookie that carries this launch's bridge token.
+const TOKEN_COOKIE: &str = "auspex-bridge";
+/// Where the workspace's first navigation lands to pick up the token.
+const BOOT_PATH: &str = "/.auspex-bridge/start";
+
+/// This launch's bridge token: 32 bytes from the OS, hex. Made once, never
+/// written to disk, gone when the app exits. getrandom rather than a read of
+/// /dev/urandom, which does not exist on Windows.
+pub fn token() -> &'static str {
+    static T: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let mut b = [0u8; 32];
+        getrandom::fill(&mut b).expect("no OS randomness for the bridge token");
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    })
+}
+
+/// The url the workspace opens first: the bridge sets the token cookie and
+/// redirects to `to`, a path on the bridge. Only open_workspace calls it.
+/// It carries the token, so it is never logged.
+pub fn bootstrap_url(local: &str, to: &str) -> String {
+    format!("{local}{BOOT_PATH}?k={}&to={to}", token())
+}
+
+/// Compare without stopping at the first difference.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Does this Cookie header carry this launch's token?
+fn has_token(cookie: Option<&str>) -> bool {
+    cookie.is_some_and(|c| {
+        c.split(';').any(|kv| {
+            kv.trim()
+                .strip_prefix(TOKEN_COOKIE)
+                .and_then(|v| v.strip_prefix('='))
+                .is_some_and(|v| same_secret(v.as_bytes(), token().as_bytes()))
+        })
+    })
+}
+
+/// A redirect target the bootstrap will accept: a plain path on the bridge.
+fn plain_path(to: &str) -> bool {
+    to.starts_with('/')
+        && !to.starts_with("//")
+        && to.bytes().all(|b| b.is_ascii_alphanumeric() || b"/_.-".contains(&b))
 }
 
 /// One request off the wire, already filtered, ready to relay. An empty body
@@ -358,18 +417,32 @@ struct Incoming {
     body: Vec<u8>,
 }
 
-/// Read one request. None is a request we will not serve: no request line at
-/// all, or a body that stopped short of what its Content-Length promised.
+/// What to do with one request off the wire.
+enum Request {
+    /// relay it to the ship, with the session
+    Relay(Incoming),
+    /// the workspace's first navigation: set the token cookie, go here
+    Bootstrap(String),
+    /// answer with this status line and never contact the ship
+    Refuse(&'static str),
+    /// say nothing: no request line, or a body cut short
+    Drop,
+}
+
+/// Read one request. Drop is a request we will not serve at all: no request
+/// line, or a body that stopped short of what its Content-Length promised.
+/// Refuse is one without this launch's token, answered before its body is
+/// read and never relayed.
 ///
 /// Split from serve so the interesting inputs (a lying Content-Length, a
 /// truncated body, a header line with no colon) can be fed in as bytes.
-fn read_request(reader: &mut impl BufRead) -> std::io::Result<Option<Incoming>> {
+fn read_request(reader: &mut impl BufRead) -> std::io::Result<Request> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
     let mut parts = line.split_whitespace();
     let (method, target) = match (parts.next(), parts.next()) {
         (Some(m), Some(t)) => (m.to_string(), t.to_string()),
-        _ => return Ok(None),
+        _ => return Ok(Request::Drop),
     };
     // Origin-form only. The upstream URL is `ship + target`, so a target
     // that does not start with '/' (an absolute URI, or `@evil.com/x`,
@@ -377,7 +450,7 @@ fn read_request(reader: &mut impl BufRead) -> std::io::Result<Option<Incoming>> 
     // session cookie somewhere other than the configured ship. No browser
     // emits such a target to a same-origin server; a raw local client can.
     if !target.starts_with('/') {
-        return Ok(None);
+        return Ok(Request::Drop);
     }
     // headers: keep what the page sent except hop-by-hop, host and cookies.
     // Accept-Encoding passes THROUGH. ureq (no gzip feature) hands us the
@@ -386,6 +459,8 @@ fn read_request(reader: &mut impl BufRead) -> std::io::Result<Option<Incoming>> 
     // which is a real tax on app.js vs a plain browser.
     let mut headers: Vec<(String, String)> = Vec::new();
     let mut content_len = 0usize;
+    // cookie is never relayed, but the bridge token rides in it
+    let mut cookie = None;
     loop {
         let mut h = String::new();
         reader.read_line(&mut h)?;
@@ -399,10 +474,29 @@ fn read_request(reader: &mut impl BufRead) -> std::io::Result<Option<Incoming>> 
         if kl == "content-length" {
             content_len = v.parse().unwrap_or(0);
         }
+        if kl == "cookie" {
+            cookie = Some(v.to_string());
+        }
         if drop_request_header(&kl) {
             continue;
         }
         headers.push((k.to_string(), v.to_string()));
+    }
+    // the first navigation has no cookie yet. The token in its query is
+    // the proof, and it is only ever turned into the cookie, never relayed.
+    if let Some(q) = target.strip_prefix(BOOT_PATH).and_then(|r| r.strip_prefix('?')) {
+        let arg = |name: &str| {
+            q.split('&').find_map(|kv| kv.strip_prefix(name).and_then(|v| v.strip_prefix('=')))
+        };
+        return Ok(match (arg("k"), arg("to")) {
+            (Some(k), Some(to)) if method == "GET"
+                && same_secret(k.as_bytes(), token().as_bytes())
+                && plain_path(to) => Request::Bootstrap(to.to_string()),
+            _ => Request::Refuse("403 Forbidden"),
+        });
+    }
+    if !has_token(cookie.as_deref()) {
+        return Ok(Request::Refuse("403 Forbidden"));
     }
     // allocate as bytes actually arrive, never what the header claims: a
     // request lying "Content-Length: 10^18" was an instant OOM abort via
@@ -411,10 +505,26 @@ fn read_request(reader: &mut impl BufRead) -> std::io::Result<Option<Incoming>> 
     if content_len > 0 {
         (&mut *reader).take(content_len as u64).read_to_end(&mut body)?;
         if body.len() < content_len {
-            return Ok(None); // truncated body: drop it, same as a failed read_exact
+            return Ok(Request::Drop); // truncated body: same as a failed read_exact
         }
     }
-    Ok(Some(Incoming { method, target, headers, body }))
+    Ok(Request::Relay(Incoming { method, target, headers, body }))
+}
+
+/// Answer `status` with no ship involved, then close. The client may still
+/// be sending a request we never read. Closing on unread bytes makes the
+/// kernel send a reset, which can eat the reply, so half-close and drain a
+/// bounded amount first.
+fn refuse(mut c: TcpStream, reader: &mut impl Read, status: &str) -> std::io::Result<()> {
+    write!(
+        c,
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{status}",
+        status.len()
+    )?;
+    c.shutdown(std::net::Shutdown::Write).ok();
+    c.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok();
+    let _ = std::io::copy(&mut reader.take(1 << 20), &mut std::io::sink());
+    Ok(())
 }
 
 /// Status line, filtered headers, then the body as it arrives.
@@ -445,7 +555,25 @@ fn relay_response(c: &mut TcpStream, resp: ureq::Response) -> std::io::Result<()
 fn serve(client: TcpStream, ship: &str) -> std::io::Result<()> {
     client.set_nodelay(true).ok();
     let mut reader = BufReader::new(client.try_clone()?);
-    let Some(req) = read_request(&mut reader)? else { return Ok(()) };
+    let req = match read_request(&mut reader)? {
+        Request::Relay(req) => req,
+        Request::Refuse(status) => {
+            crate::commands::dlog(&format!("bridge: refused {status}"));
+            return refuse(client, &mut reader, status);
+        }
+        Request::Drop => return Ok(()),
+        Request::Bootstrap(to) => {
+            crate::commands::dlog("bridge: workspace token handed over");
+            let mut c = client;
+            return write!(
+                c,
+                "HTTP/1.1 302 Found\r\nLocation: {to}\r\n\
+                 Set-Cookie: {TOKEN_COOKIE}={}; Path=/; HttpOnly; SameSite=Strict\r\n\
+                 Cache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                token()
+            );
+        }
+    };
     crate::commands::dlog(&format!("bridge: {} {}", req.method, req.target));
 
     let mut out = agent().request(&req.method, &format!("{ship}{}", req.target));
@@ -488,6 +616,9 @@ mod tests {
                   "keep-alive", "proxy-connection", "transfer-encoding"] {
             assert!(drop_request_header(h), "{h} must not be relayed");
         }
+        // the bridge's own origin is not the ship's, and the ship's
+        // cross-site gate would refuse every write that carried it
+        assert!(drop_request_header("origin"));
         // accept-encoding MUST ride through. The ship gzips and the webview
         // decodes. Dropping it made every WAN transfer identity-encoded.
         assert!(!drop_request_header("accept-encoding"));
@@ -504,12 +635,103 @@ mod tests {
         // `ship + target` is the upstream URL. A target that does not start
         // with '/' would carry the session cookie to a different host:
         // `@evil.com/x` url-parses as userinfo + host evil.com.
-        for bad in ["GET @evil.com/x HTTP/1.1\r\n\r\n", "GET http://evil.com/ HTTP/1.1\r\n\r\n"] {
-            let mut r = std::io::Cursor::new(bad.as_bytes());
-            assert!(read_request(&mut r).unwrap().is_none(), "{bad:?} must be refused");
+        let read = |req: String| read_request(&mut std::io::Cursor::new(req.into_bytes())).unwrap();
+        let tok = token_cookie();
+        for bad in ["@evil.com/x", "http://evil.com/"] {
+            let req = read(format!("GET {bad} HTTP/1.1\r\n{tok}\r\n"));
+            assert!(matches!(req, Request::Drop), "{bad:?} must be refused");
         }
-        let mut r = std::io::Cursor::new(b"GET /apps/auspex/ HTTP/1.1\r\n\r\n".as_ref());
-        assert!(read_request(&mut r).unwrap().is_some());
+        let req = read(format!("GET /apps/auspex/ HTTP/1.1\r\n{tok}\r\n"));
+        assert!(matches!(req, Request::Relay(_)));
+        // and without the token even a good target goes nowhere
+        let req = read("GET /apps/auspex/ HTTP/1.1\r\n\r\n".to_string());
+        assert!(matches!(req, Request::Refuse("403 Forbidden")));
+    }
+
+    /// The Cookie line the workspace sends once the bootstrap has run.
+    fn token_cookie() -> String {
+        format!("cookie: {TOKEN_COOKIE}={}\r\n", token())
+    }
+
+    #[test]
+    fn only_this_launchs_token_counts() {
+        // the token only counts by exact value, under its own name
+        let tok = token();
+        assert_eq!(tok.len(), 64, "256 bits, hex");
+        assert_eq!(tok, token(), "one token per launch");
+        assert!(has_token(Some(&format!("a=b; {TOKEN_COOKIE}={tok}"))));
+        assert!(!has_token(Some(&format!("{TOKEN_COOKIE}={}", &tok[1..]))));
+        assert!(!has_token(Some(&format!("{TOKEN_COOKIE}x={tok}"))));
+        assert!(!has_token(Some(&format!("{TOKEN_COOKIE}={tok}0"))));
+        assert!(!has_token(Some("")));
+        assert!(!has_token(None));
+    }
+
+    #[test]
+    fn a_request_without_the_token_never_reaches_the_ship() {
+        // Any page in any browser can aim at 127.0.0.1, and so can another
+        // account or a sandboxed app. Before the token, each of these was
+        // relayed with the owner's session attached (security audit run-1).
+        let ship = Stub::new(|_| (200, "relayed".to_string()));
+        let host = format!("host: 127.0.0.1:{PORT_BASE}\r\n");
+        for req in [
+            // curl, or any other local process
+            format!("GET /apps/auspex/api/whoami HTTP/1.1\r\n{host}\r\n"),
+            // a cross-site form POST from a page in a browser
+            format!(
+                "POST /apps/auspex/api/send HTTP/1.1\r\n{host}origin: https://evil.example\r\n\
+                 content-type: text/plain\r\ncontent-length: 2\r\n\r\nhi"
+            ),
+            // a token that is nearly right is not the token
+            format!(
+                "GET /apps/auspex/ HTTP/1.1\r\n{host}cookie: {TOKEN_COOKIE}={}\r\n\r\n",
+                &token()[1..]
+            ),
+        ] {
+            let back = String::from_utf8_lossy(&through_bridge(req.as_bytes(), &ship.base)).into_owned();
+            assert!(back.starts_with("HTTP/1.1 403 Forbidden"), "{req}: {back}");
+        }
+        assert!(ship.requests().is_empty(), "a request without the token reached the ship");
+    }
+
+    #[test]
+    fn the_bootstrap_hands_over_the_token_and_nothing_else() {
+        let ship = Stub::new(|_| (200, "relayed".to_string()));
+        let get = |target: &str| {
+            String::from_utf8_lossy(&through_bridge(
+                format!("GET {target} HTTP/1.1\r\nhost: 127.0.0.1:{PORT_BASE}\r\n\r\n").as_bytes(),
+                &ship.base,
+            ))
+            .into_owned()
+        };
+        let ok = get(&bootstrap_url("", "/apps/auspex/"));
+        assert!(ok.starts_with("HTTP/1.1 302 Found"), "{ok}");
+        assert!(ok.contains("\r\nLocation: /apps/auspex/\r\n"), "{ok}");
+        assert!(
+            ok.contains(&format!("Set-Cookie: {TOKEN_COOKIE}={}; Path=/; HttpOnly; SameSite=Strict", token())),
+            "{ok}"
+        );
+        // a wrong token, or a redirect off the bridge, gets nothing
+        for bad in [
+            format!("{BOOT_PATH}?k=00&to=/apps/auspex/"),
+            format!("{BOOT_PATH}?to=/apps/auspex/"),
+            format!("{BOOT_PATH}?k={}&to=//evil.example/", token()),
+            format!("{BOOT_PATH}?k={}&to=https://evil.example/", token()),
+            format!("{BOOT_PATH}?k={}&to=/a%0d%0aSet-Cookie:x", token()),
+        ] {
+            let back = get(&bad);
+            assert!(back.starts_with("HTTP/1.1 403 Forbidden"), "{bad}: {back}");
+            assert!(!back.contains("Set-Cookie"), "{bad}");
+        }
+        // only a GET, the navigation the workspace makes
+        let post = String::from_utf8_lossy(&through_bridge(
+            format!("POST {} HTTP/1.1\r\n\r\n", bootstrap_url("", "/apps/auspex/")).as_bytes(),
+            &ship.base,
+        ))
+        .into_owned();
+        assert!(post.starts_with("HTTP/1.1 403 Forbidden"), "{post}");
+        // and the ship never saw any of it
+        assert_eq!(ship.requests().len(), 0);
     }
 
     #[cfg(unix)]
@@ -580,7 +802,7 @@ mod tests {
     fn get_through_bridge(base: &str, path: &str) -> String {
         let addr = base.trim_start_matches("http://").to_string();
         let mut c = TcpStream::connect(addr).unwrap();
-        write!(c, "GET {path} HTTP/1.1\r\nhost: bridge\r\n\r\n").unwrap();
+        write!(c, "GET {path} HTTP/1.1\r\nhost: bridge\r\n{}\r\n", token_cookie()).unwrap();
         c.shutdown(std::net::Shutdown::Write).ok();
         let mut out = String::new();
         c.read_to_string(&mut out).unwrap();
@@ -596,10 +818,14 @@ mod tests {
         with_session(Some("urbauth-~wex=0v1.session"));
         let ship = Stub::new(|_| (200, "sent".to_string()));
         let body = r#"{"to":["~feb"],"subject":"hi","body":"bytes that must survive the hop","prev":null}"#;
+        // the token rides in the webview's Cookie header beside whatever
+        // else the page holds, and Origin is what the webview's fetch sends
         let req = format!(
             "POST /apps/auspex/api/send HTTP/1.1\r\nhost: 127.0.0.1:{PORT_BASE}\r\n\
-             cookie: webview-junk=1\r\ncontent-length: {}\r\n\
+             cookie: webview-junk=1; {TOKEN_COOKIE}={}\r\ncontent-length: {}\r\n\
+             origin: http://127.0.0.1:{PORT_BASE}\r\n\
              x-auspex-probe: keep-me\r\naccept-encoding: gzip\r\n\r\n{body}",
+            token(),
             body.len()
         );
         let back = through_bridge(req.as_bytes(), &ship.base);
@@ -621,6 +847,10 @@ mod tests {
             "the webview's cookie was relayed: {}",
             seen.header_blob()
         );
+        // ...nor the bridge token, which is the bridge's business only
+        assert!(!seen.header_blob().contains(token()), "the bridge token was relayed");
+        // ...nor the bridge's origin, which the ship would read as another site
+        assert_eq!(seen.header("origin"), None);
 
         // and the ship's answer comes back, status line and body
         let back = String::from_utf8_lossy(&back);
@@ -634,7 +864,8 @@ mod tests {
         // half-written message posted to the ship as a complete one
         let ship = Stub::new(|_| (200, "should not happen".to_string()));
         let back = through_bridge(
-            b"POST /apps/auspex/api/send HTTP/1.1\r\ncontent-length: 64\r\n\r\nhalf",
+            format!("POST /apps/auspex/api/send HTTP/1.1\r\n{}content-length: 64\r\n\r\nhalf", token_cookie())
+                .as_bytes(),
             &ship.base,
         );
         assert!(ship.requests().is_empty(), "a truncated body reached the ship");
@@ -645,8 +876,8 @@ mod tests {
     fn an_unreachable_ship_is_a_502_and_not_a_hang() {
         // the client's own error handling depends on failure arriving FAST
         // and looking like a failure, not like an empty success
-        let back = String::from_utf8_lossy(&poke_bridge(b"GET /apps/auspex/app.js HTTP/1.1\r\n\r\n"))
-            .into_owned();
+        let req = format!("GET /apps/auspex/app.js HTTP/1.1\r\n{}\r\n", token_cookie());
+        let back = String::from_utf8_lossy(&poke_bridge(req.as_bytes())).into_owned();
         assert!(back.starts_with("HTTP/1.1 502 Bad Gateway"), "{back}");
     }
 
@@ -797,7 +1028,8 @@ mod tests {
         // "Content-Length: 10^18" with no body was an instant OOM abort
         #[test]
         fn a_lying_content_length_cannot_oom(len in any::<u64>()) {
-            let req = format!("POST /x HTTP/1.1\r\ncontent-length: {len}\r\n\r\nhi");
+            // with the token, or the 403 would answer before the length is read
+            let req = format!("POST /x HTTP/1.1\r\n{}content-length: {len}\r\n\r\nhi", token_cookie());
             poke_bridge(req.as_bytes());
         }
 
