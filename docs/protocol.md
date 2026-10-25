@@ -1515,7 +1515,11 @@ Specifically:
   mark-read, and there MUST NOT be one: a filter that could suppress a message
   would let an attacker who learns your rules hide the evidence of their own
   forgery. Archiving is not suppression — an archived thread is one view away,
-  still counted, still searchable, and new mail un-archives it.
+  still counted, still searchable, and new mail un-archives it. **A sender
+  condition needs that sender's signature.** A rule naming a ship MUST fire only
+  on a copy the receiver holds `%verified` as that ship's, never on a forged or
+  unverified claim of `from`, so a rule naming a moon or comet waits until its
+  mail verifies. A subject condition is about the text and needs no signature.
 - **A mailing list name never travels.** The name is a local key; what a
   recipient sees in `to` is ships, always, exactly as if they had been typed one
   at a time.
@@ -1653,7 +1657,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **120 tests**, the discovery ones among them
+be diffed; **122 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1761,7 +1765,8 @@ be diffed; **120 tests**, the discovery ones among them
 | Marking adds to the read or fold set; unmarking takes away. | `test-marks` |
 | Storing a thread counts as a change when it writes or culls anything, and a redelivery that does neither is no change. | `test-plan-writes` |
 | Discovery reads a peer's /proto up to and including its last case. | `test-discovery-reads-every-case-it-promises` |
-| Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
+| Sent is the threads holding a copy we signed, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
+| A copy claiming to be ours counts for Sent only when held `%verified`, and a forged or unverified claim stays out. | `test-sent-needs-our-signature` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |
 | A draft is checked against the same send caps, at save time. | `test-draft-ok-applies-the-send-caps` |
@@ -1769,6 +1774,7 @@ be diffed; **120 tests**, the discovery ones among them
 | An empty subject is not a condition. | `test-an-empty-subject-is-not-a-condition` |
 | A rule ANDs across the conditions it actually sets. | `test-rule-matches-and-across-its-conditions` |
 | Rules compose additively: labels union, archive ORs, nothing is removed. | `test-apply-rules-composes-additively` |
+| A sender condition fires only on a copy held `%verified` as that sender's, and a subject condition needs no signature. | `test-a-sender-rule-needs-the-sender-signature` |
 | A filter cannot suppress a forged message. | structural: `+apply-rules` answers labels and an archive flag and nothing that reaches the chain (`test-apply-rules-composes-additively`) |
 | A sender picks the **highest** common version, not the first. | `test-common-version-picks-the-highest` |
 | Nothing in common answers `~`, and `~` is a refusal rather than a fallback. | `test-common-version-answers-none` |

@@ -1111,10 +1111,29 @@
 ++  test-sent-is-threads-we-authored
   =/  mine   (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
   =/  yours  (forge ~palnet-sampel ~ 'a' 'b' ~2026.1.1 ~)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet ~palnet-sampel]) ~[mine yours]))
   ;:  weld
-    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine])))
-    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours])))
-    (expect !>(!(in-sent:auspex ~sampel-palnet ~)))
+    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine] vs)))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours] vs)))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~ vs)))
+  ==
+::
+::  SENT IS WHAT WE SIGNED, NOT WHAT CLAIMS US. Any ship can poke us a
+::  copy saying from=our. A forged one and an unverified one both stay
+::  out of Sent, and the same copy is in once we hold it %verified.
+++  test-sent-needs-our-signature
+  =/  us    ~sampel-palnet
+  =/  mine  (forge us ~ 'a' 'b' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel us 'a' 'lie' ~2026.1.2)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[us]) ~[mine liar]))
+  ;:  weld
+    ::  the fixture is what it says, one verified and one forged
+    (expect-eq !>(%verified) !>((~(got by vs) [(id:auspex unsigned.mine) sig.mine])))
+    (expect-eq !>(%forged) !>((~(got by vs) [(id:auspex unsigned.liar) sig.liar])))
+    (expect !>((in-sent:auspex us ~[mine] vs)))
+    (expect !>(!(in-sent:auspex us ~[liar] vs)))
+    ::  no verdict held is %unverified, and that is not ours either
+    (expect !>(!(in-sent:auspex us ~[mine] ~)))
   ==
 ::
 ++  test-page-slices-without-losing-the-total
@@ -1221,15 +1240,16 @@
 ++  test-apply-rules-composes-additively
   =/  m  (forge ~sampel-palnet ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
   =/  c=chain:sur  ~[m]
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) c))
   =/  r1=rule:sur  [%0 0v1 `~sampel-palnet ~ (sy ~[%work]) |]
   =/  r2=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) &]
   =/  r3=rule:sur  [%0 0v3 `~palnet-sampel ~ (sy ~[%never]) &]
-  =/  got  (apply-rules:auspex ~[r1 r2 r3] c)
+  =/  got  (apply-rules:auspex ~[r1 r2 r3] c vs)
   ::  no rule fires: no labels, and NOT archived. A bare ? bunts to %.y,
   ::  so an accumulator-shaped fold here would archive everything the
   ::  moment no rule matched.
-  =/  quiet  (apply-rules:auspex ~[r3] c)
-  =/  none   (apply-rules:auspex ~ c)
+  =/  quiet  (apply-rules:auspex ~[r3] c vs)
+  =/  none   (apply-rules:auspex ~ c vs)
   ;:  weld
     ::  the two matching rules' labels union; the non-matching one adds
     ::  nothing
@@ -1240,6 +1260,27 @@
     (expect-eq !>(*(set @tas)) !>(add.quiet))
     ::  and with no rules at all
     (expect !>(!archive.none))
+  ==
+::
+::  A SENDER RULE NEEDS THE SENDER'S SIGNATURE. Anyone can claim
+::  from=~sampel-palnet, so a rule naming ~sampel-palnet fires on its
+::  verified copy and on nothing else. It skips a forgery, and the real
+::  copy too while no verdict is held for it. A subject rule is about
+::  the text and still fires on the forgery.
+++  test-a-sender-rule-needs-the-sender-signature
+  =/  who   ~sampel-palnet
+  =/  real  (forge who ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel who 'Quarterly Invoice' 'b' ~2026.1.2)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[who]) ~[real liar]))
+  =/  by-who=rule:sur   [%0 0v1 `who ~ (sy ~[%work]) &]
+  =/  by-subj=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) |]
+  ;:  weld
+    ::  the fixture is what it says, and the liar really reads %forged
+    (expect-eq !>(%forged) !>((~(got by vs) [(id:auspex unsigned.liar) sig.liar])))
+    (expect-eq !>([(sy ~[%work]) &]) !>((apply-rules:auspex ~[by-who] ~[real] vs)))
+    (expect-eq !>([*(set @tas) |]) !>((apply-rules:auspex ~[by-who] ~[liar] vs)))
+    (expect-eq !>([*(set @tas) |]) !>((apply-rules:auspex ~[by-who] ~[real] ~)))
+    (expect-eq !>([(sy ~[%money]) |]) !>((apply-rules:auspex ~[by-subj] ~[liar] vs)))
   ==
 ::
 
@@ -1735,7 +1776,10 @@
   =/  them  ~palnet-sampel
   =/  ours   (forge us (sy ~[them]) 'mine' 'b' ~2026.1.1 ~)
   =/  reply  (forge them (sy ~[us]) 'theirs' 'c' ~2026.1.2 ~)
-  =/  mk  |=([c=chain:sur mt=meta:sur] `row:sur`[(malt (turn c |=(m=msg:sur (st m %verified)))) c ~ 0 mt])
+  =/  mk
+    |=  [c=chain:sur mt=meta:sur]
+    =/  ss  (malt (turn c |=(m=msg:sur (st m %verified))))
+    `row:sur`[ss c (verdicts-of:auspex ss) 0 mt]
   =/  sent   (mk ~[ours] *meta:sur)
   =/  got    (mk ~[reply] *meta:sur)
   =/  arch   (mk ~[reply] m0(archived &))

@@ -1529,6 +1529,10 @@
 ::    on disk with every verdict already set, and all a rule can reach
 ::    is a label and a flag.
 ::
+::    `vs` is those verdicts, every copy in `c` included, because a rule
+::    naming a sender fires only on a copy that sender signed
+::    (+rule-hits). A claim of from=~bus is not mail from ~bus.
+::
 ::    UN-ARCHIVE ON NEW MAIL. Without it, archiving a thread would make
 ::    every later message in it vanish silently, which is mail loss
 ::    wearing the costume of a feature. Only actual new content
@@ -1542,11 +1546,16 @@
 ::    rules are then applied over, not something applied after them.
 ::
 ++  file-arrival
-  |=  [root=@ud t=thread-id:uc c=chain:uc wrote=?]
+  |=  $:  root=@ud
+          t=thread-id:uc
+          c=chain:uc
+          vs=(map [msg-id:uc @ux] verdict:uc)
+          wrote=?
+      ==
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
-  =/  got  (apply-rules:uc rs c)
+  =/  got  (apply-rules:uc rs c vs)
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ::  the label bound refuses the ADDITION, never the delivery: a rule
   ::  that would push a thread past the cap simply does not add. Nacking
@@ -1689,7 +1698,7 @@
   ::  because by this point the chain is already on disk with its
   ::  verdicts and a $rule has no field that reaches it. See
   ::  +file-arrival.
-  ;<  ~  bind:m  (file-arrival root rid c wrote)
+  ;<  ~  bind:m  (file-arrival root rid c vs2 wrote)
   ;<  ~  bind:m  (note root 'deliver' & (scot %uv rid))
   ::  THE OWNER'S DOWNLOAD RULES, over the copies this delivery checked
   ::  (`todo`): a copy settled earlier was offered its downloads when it
