@@ -1048,6 +1048,11 @@
   ::  participants: the signatures are the authority, not the courier.
   =/  kind  (poke-kind:uc p.sage)
   ?:  ?=(%chain kind)
+    ::  counted before the clam, because the clam is the walk a shared
+    ::  subtree multiplies. Not in the marc, where a refusal fails and
+    ::  restarts the writer. See +max-cells.
+    ?.  (cells-within:uc q.q.sage max-cells:uc)
+      (reject root 'chain too large')
     =/  res  (mule |.(~|(%auspex-bad-chain ;;(chain:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed chain')
     (deliver root p.res)

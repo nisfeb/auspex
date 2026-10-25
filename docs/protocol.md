@@ -753,6 +753,7 @@ trustworthy, and trimming a signed field would forge.
 | `max-body` | 100.000 | `+fits-bodies` | bytes per body |
 | `max-subj` | 1.000 | `+fits-subjects` | bytes per subject |
 | `max-to` | 100 | `+fits-recipients` | recipients per message |
+| `max-cells` | 512.000 | receiver's own check, `+cells-within` | cells in one delivered noun, counted before it is clammed |
 | field widths | 64 bytes of `sig`, 32 bits of `life`, 128 bits of a ship, an id or a `hash`, 64 bits of `size`, and a `sent` from ~1970.1.1 within 128 bits | `+fits-fields` | the width of every signed atom |
 | `max-mime` | 128 | `+fits-body-mimes` (→ `+text-ok`) | bytes of `body-mime`, and of an attachment `mime` |
 | `max-attach` | 16 | `+fits-attachments` (→ `+attach-ok`) | attachments per message |
@@ -803,6 +804,14 @@ there because a JSON renderer cannot write a time before the Unix epoch, and a
 stored copy that cannot render leaves its whole thread unreadable. A forwarded
 chain that carries one such copy is refused whole, like any other cap.
 
+**`max-cells` (512.000)** is 512 cells for each of `max-chain` messages, also
+not published. A jammed noun shares repeated subtrees, so a few hundred bytes on
+the wire can cue into a tree of millions of nodes, and the clam walks it as a
+tree before any cap above can count anything. A receiver MUST count the cells
+before it clams, and the count MUST stop at the budget. The largest chain every
+other cap admits holds 275 cells a message, so the budget refuses no legal
+chain.
+
 ### 4.7 Orphans and cycles
 
 An **orphan** is a message whose `prev` names an id not present in the chain.
@@ -829,8 +838,10 @@ load-bearing and an implementation MUST follow it: **cap, then verify, then
 resolve identity, then merge, then prune, then store, then the beacon.**
 Nothing is written before every signature in the incoming chain has a verdict.
 
-1. **Decode.** Clam the poked noun into `$chain` inside a `mule`. A malformed
-   payload MUST be refused as a clean branch, not as a crash — see
+1. **Decode.** Refuse a noun of more than `max-cells` cells ('chain too
+   large'), counted with `+cells-within` before anything else walks it. Then
+   clam the poked noun into `$chain` inside a `mule`. A malformed payload MUST
+   be refused as a clean branch, not as a crash — see
    [§6.4](#64-ack-and-nack). An empty chain is a silent no-op.
 
 2. **Cap checks, in this order**, each a whole-chain refusal:
@@ -1223,7 +1234,10 @@ ten-tuple of atoms **in the order written above**. A version-1 nexus publishes
   lists are walked whole: this noun is published by a stranger into a namespace
   anyone may write to, so an unbounded length walk is work an attacker chooses
   the size of. A protocol that has had sixty-four incompatible versions has a
-  different problem than this bound.
+  different problem than this bound. Each version MUST also fit 4 bytes, and a
+  reader MUST refuse a publication with a wider one. A refusal renders the
+  peer's versions in decimal, and that render costs the square of an atom's
+  width.
 
 The marc is a noun passthrough (`mar/auspex/proto.hoon`). A typed marc would
 re-validate the stored grub against the live type on every read, so adding a
@@ -1658,7 +1672,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  122 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  123 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
@@ -1668,7 +1682,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **122 tests**, the discovery ones among them
+be diffed; **123 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1764,6 +1778,7 @@ be diffed; **122 tests**, the discovery ones among them
 | A fiber's crash record reads back as written, in milliseconds; a record of the wrong shape is no record. | `test-the-crash-record-reads-back-as-written` |
 | A delivered chain is refused for the first cap it breaks, in a fixed order: length, bodies, subjects, recipients, field widths, attachments, body mime, depth, signers. | `test-incoming-refusal-names-the-first-cap-broken` |
 | Every signed atom is held to its type's width, each bound admits its own edge, and a `sent` before ~1970.1.1 is refused. | `test-incoming-refusal-caps-widths` |
+| The cell budget admits the largest chain the other caps admit, is exact at its edge, and refuses a shared tree without walking it. | `test-the-cell-budget-admits-the-largest-legal-chain` |
 | Merged with its thread, a chain is refused past max-chain distinct ids or max-depth, and a new thread past max-threads; a thread already held is never refused for the thread cap. | `test-admit-refusal` |
 | A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
 | The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |
@@ -1798,7 +1813,7 @@ be diffed; **122 tests**, the discovery ones among them
 | The proto spur and its keen path mirror each other, empty segment included. | `test-proto-paths-mirror-each-other` |
 | The pending queue appends, never dedupes, and drains oldest first; the remainder keeps its order. | `test-the-pending-queue-drains-in-order` |
 | A record that refuses expires in an hour, not a day; a remembered silence is not a refusal. | `test-a-refusing-record-expires-sooner` |
-| `+proto-ok` bounds its walk before measuring, and refuses lists that disagree in length. | `test-proto-ok-bounds-the-walk` |
+| `+proto-ok` bounds its walk before measuring, refuses lists that disagree in length, and refuses a version wider than 4 bytes. | `test-proto-ok-bounds-the-walk` |
 
 ---
 

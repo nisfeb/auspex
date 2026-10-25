@@ -634,6 +634,26 @@
 ::
 ++  max-signers  128          ::  distinct [ship life] pairs per chain
 ::
+::  +max-cells: the most cells a delivered noun may hold, counted before
+::  it is clammed.
+::
+::    The clam is the first thing that walks a delivered chain, and it
+::    walks the noun as a tree. A jammed noun shares repeated subtrees,
+::    so a few hundred bytes on the wire can cue into a tree of millions
+::    of nodes, every one walked by the clam and again by the counts
+::    after it, on the ship's single serialisation point for mail. Every
+::    cap above counts parts of a chain already clammed, so none of them
+::    can stop this. The count is +cells-within, which stops one cell
+::    past the budget however large the tree is.
+::
+::    512 cells a message. The largest chain every other cap admits
+::    holds 275 a message (100 recipients at 2 cells a node, 16
+::    attachments at 4, and 11 for the message itself), so this refuses
+::    no legal chain, and -test pins that. It is not a cap a peer
+::    publishes, because no honest sender comes near it.
+::
+++  max-cells    (mul max-chain 512)
+::
 ::  the attachment limits.
 ::
 ::    max-blob is what ONE remote-scry answer carries safely, because a
@@ -1437,6 +1457,23 @@
   %+  skip  c
   |=(m=msg (settled (~(gut by held) [(id unsigned.m) sig.m] %unverified)))
 ::
+::  +cells-within: does the noun hold at most `b` cells?
+::
+::    Counted as a tree, the way a clam walks it, so a shared subtree
+::    counts once for every place it appears. Iterative, and it stops at
+::    the first cell past `b`, so the work is bounded by the budget and
+::    never by the noun. See +max-cells.
+::
+++  cells-within
+  |=  [n=* b=@ud]
+  ^-  ?
+  =/  todo=(list *)  ~[n]
+  |-  ^-  ?
+  ?~  todo  &
+  ?@  i.todo  $(todo t.todo)
+  ?:  =(0 b)  |
+  $(b (dec b), todo [-.i.todo +.i.todo t.todo])
+::
 ::  the input caps, as predicates. The agent wraps each in its own tall ~|
 ::  and ?>, since the label is what tells a nacked poke apart from any
 ::  other crash; keeping the arithmetic here keeps it testable.
@@ -2061,6 +2098,11 @@
 ::    has had sixty-four incompatible versions has a different problem -
 ::    and far below where the walk costs anything.
 ::
+::    Each version is held to 4 bytes too. A refusal renders the peer's
+::    versions in decimal (+no-version-error), and the cost of that
+::    grows with the square of an atom's width, so one huge version was
+::    a render the stranger sized. No ladder needs a version past 2^32.
+::
 ++  proto-ok
   |=  p=proto
   ^-  ?
@@ -2068,6 +2110,7 @@
       (lte (lent (scag 65 `(list @ud)`versions.p)) 64)
       (lte (lent (scag 65 `(list @tas)`marks.p)) 64)
       =((lent versions.p) (lent marks.p))
+      (levy `(list @ud)`versions.p |=(v=@ud (lte (met 3 v) 4)))
   ==
 ::
 ::  +common-version: the HIGHEST version both ships speak, ~ for none.

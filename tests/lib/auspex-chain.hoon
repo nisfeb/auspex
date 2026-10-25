@@ -1426,6 +1426,9 @@
     (expect !>((proto-ok:auspex [%auspex ok64 (turn ok64 |=(* %a)) our-caps:auspex])))
     (expect !>(!(proto-ok:auspex [%auspex ~[1] ~[%a %b] our-caps:auspex])))
     (expect !>(!(proto-ok:auspex [%auspex ~ ~ our-caps:auspex])))
+    ::  and each version fits 4 bytes, since a refusal renders them all
+    (expect !>((proto-ok:auspex [%auspex ~[(dec (bex 32))] ~[%a] our-caps:auspex])))
+    (expect !>(!(proto-ok:auspex [%auspex ~[(bex 32)] ~[%a] our-caps:auspex])))
   ==
 ::
 ::  the two version refusals, as the user reads them. Ship name first,
@@ -1963,6 +1966,35 @@
     (expect-eq !>(`(unit @t)`~) !>((in ok(attachments.unsigned ~[att]))))
     (expect-eq !>(wide) !>((in ok(attachments.unsigned ~[att(hash `@uv`(bex 128))]))))
     (expect-eq !>(wide) !>((in ok(attachments.unsigned ~[att(size (bex 64))]))))
+  ==
+::
+::  the cell budget refuses no chain the caps admit, and is exact at its
+::  edge. The largest legal chain fits, with every message at max-to
+::  recipients and max-attach attachments, and one cell past the budget
+::  does not.
+++  test-the-cell-budget-admits-the-largest-legal-chain
+  =/  to=(set ship)  (sy (turn (gulf 1 max-to:auspex) |=(i=@ `@p`i)))
+  =/  as=(list attachment:sur)  (reap max-attach:auspex ['a' 1 'text/plain' 0v1])
+  =/  top=msg:sur  [[~zod 1 to 's' '0' '' ~2026.1.1 ~ as] 0x0]
+  =/  r=msg-id:sur  (id:auspex unsigned.top)
+  =/  c=chain:sur
+    :-  top
+    %+  turn  (gulf 1 (dec max-chain:auspex))
+    |=(i=@ud top(body.unsigned (scot %ud i), prev.unsigned `r))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((incoming-refusal:auspex c)))
+    (expect !>((cells-within:auspex c max-cells:auspex)))
+    (expect !>((cells-within:auspex (reap max-cells:auspex 0) max-cells:auspex)))
+    (expect !>(!(cells-within:auspex (reap +(max-cells:auspex) 0) max-cells:auspex)))
+    ::  and a noun of 30 shared cells that a clam would walk as 2^30 is
+    ::  refused at the budget, not walked
+    =/  dag=*
+      =|  d=@ud
+      |-  ^-  *
+      ?:  =(d 30)  ~
+      =/  s  $(d +(d))
+      [s s]
+    (expect !>(!(cells-within:auspex dag max-cells:auspex)))
   ==
 ::
 ::  merged with the thread: distinct ids, depth, and the thread cap, which
