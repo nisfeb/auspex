@@ -482,7 +482,9 @@ every other ship**.
 This is why `%unverified` outranks `%forged` in `+prune`
 ([§4.5](#45-prune)): an unranked fill would let junk copies evict the one
 genuine copy of a moon's message, leaving a user holding only forgeries of a
-message that was never forged.
+message that was never forged. The rank alone is not enough, because every copy
+of a moon's message reads `%unverified` and junk shares its rank. So within a
+rank `+prune` keeps the copies a receiver already held ahead of new ones.
 
 Signatures are already in the chain the day either fix lands. Comets are
 self-signing addresses, so a comet's signature is verifiable with no lookup at
@@ -697,7 +699,11 @@ two ships merging the same messages produce the same list.
 
 ```hoon
 ++  prune
-  |=  [c=chain vs=(map [msg-id @ux] verdict) max-copies=@ud]
+  |=  $:  c=chain
+          vs=(map [msg-id @ux] verdict)
+          old=(set [msg-id @ux])
+          max-copies=@ud
+      ==
   ^-  chain
 ```
 
@@ -719,6 +725,13 @@ never by rejecting.
 - The `%unverified` rank is not a nicety: every moon and comet message is
   `%unverified` in version 1, so an unranked fill lets `max-copies` junk copies
   evict the one genuine copy of a moon's message.
+- **Within one rank, a copy already held comes first.** `old` is the `[id sig]`
+  of every copy the thread held before this delivery. Copies of one id share a
+  rank whenever the receiver holds no key for their signer, and a signature is
+  an atom any courier chooses, so ordering a rank by `sig` would let junk with
+  larger signatures shed the genuine copy. A receiver MUST NOT shed a held copy
+  while a new copy of the same rank remains. This orders copies inside a rank
+  and MUST NOT lift a copy above a better verdict.
 - A verdict missing from the map defaults to `%unverified`
   (`(~(gut by vs) [i sig.m] %unverified)`).
 
@@ -880,7 +893,8 @@ Nothing is written before every signature in the incoming chain has a verdict.
 8. **Freeze verdicts, then prune.** `+freeze` folds this poke's verdicts into
    the stored ones **before** pruning, because `+prune` needs a verdict for
    every message in the merged chain, including ones stored by an earlier poke
-   that this one did not carry. Then `+prune` at `max-copies`.
+   that this one did not carry. Then `+prune` at `max-copies`, with the
+   `[id sig]` of the copies the thread already held as `old`.
 
 9. **Store.** Write the pruned chain, one grub per `[id sig]`, each carrying its
    own verdict. A redelivery that writes nothing MUST be reported as no change.
@@ -1553,7 +1567,11 @@ Specifically:
   mark-read, and there MUST NOT be one: a filter that could suppress a message
   would let an attacker who learns your rules hide the evidence of their own
   forgery. Archiving is not suppression — an archived thread is one view away,
-  still counted, still searchable, and new mail un-archives it.
+  still counted, still searchable, and new mail un-archives it. **A sender
+  condition needs that sender's signature.** A rule naming a ship MUST fire only
+  on a copy the receiver holds `%verified` as that ship's, never on a forged or
+  unverified claim of `from`, so a rule naming a moon or comet waits until its
+  mail verifies. A subject condition is about the text and needs no signature.
 - **A mailing list name never travels.** The name is a local key; what a
   recipient sees in `to` is ships, always, exactly as if they had been typed one
   at a time.
@@ -1681,7 +1699,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  124 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  128 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
@@ -1691,7 +1709,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **124 tests**, the discovery ones among them
+be diffed; **128 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1721,6 +1739,7 @@ be diffed; **124 tests**, the discovery ones among them
 | `+prune` never sheds a `%verified` copy, in either input order. | `test-prune-never-sheds-a-verified` |
 | The fill bucket ranks `%unverified` above `%forged`, in either input order. | `test-prune-prefers-unverified-over-forged` |
 | The whole ranking: `%verified`, then `%unverified`, then `%forged`. | `test-prune-ranks-verified-then-unverified-then-forged` |
+| Within a rank a copy already held outlasts new ones, so junk with larger sigs cannot shed a keyless signer's genuine copy, and a held copy never beats a better verdict. | `test-prune-keeps-the-held-copy-of-a-keyless-signer` |
 | Thread identity comes from content, never from the order of the supplied list. | `test-thread-key-from-content-not-list-order` |
 | Thread identity never derives from `sent`; a backdated reply still resolves to its root. | `test-thread-key-ignores-sent` |
 | An established thread's id is immutable; a new `prev=~` message cannot migrate it. | `test-thread-key-established-thread-is-immutable` |
@@ -1792,6 +1811,7 @@ be diffed; **124 tests**, the discovery ones among them
 | A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
 | The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |
 | A reply belongs to the thread holding what it answers, and may answer it only if some copy is not forged. | `test-a-reply-finds-its-thread-and-an-honest-copy` |
+| When several threads hold what a reply answers, the reply joins the one whose id is the root that message's ancestry reaches, never one a copy was planted into, whatever the map order. | `test-a-reply-ignores-a-copy-replanted-under-another-root` |
 | New mail un-archives its thread unless a rule archives it; mail that wrote nothing only adds a rule's archive; rule labels join up to max-labels, or none do. | `test-filing` |
 | Storing a thread writes only new or changed slots and culls only what is no longer wanted, outermost directories first. | `test-slot-plan` |
 | The writer takes a chain from anyone, and an action, blob or probe result only from this ship. | `test-the-writer-sorts-pokes-and-sources` |
@@ -1803,7 +1823,8 @@ be diffed; **124 tests**, the discovery ones among them
 | Marking adds to the read or fold set; unmarking takes away. | `test-marks` |
 | Storing a thread counts as a change when it writes or culls anything, and a redelivery that does neither is no change. | `test-plan-writes` |
 | Discovery reads a peer's /proto up to and including its last case. | `test-discovery-reads-every-case-it-promises` |
-| Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
+| Sent is the threads holding a copy we signed, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
+| A copy claiming to be ours counts for Sent only when held `%verified`, and a forged or unverified claim stays out. | `test-sent-needs-our-signature` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |
 | A draft is checked against the same send caps, at save time. | `test-draft-ok-applies-the-send-caps` |
@@ -1811,6 +1832,7 @@ be diffed; **124 tests**, the discovery ones among them
 | An empty subject is not a condition. | `test-an-empty-subject-is-not-a-condition` |
 | A rule ANDs across the conditions it actually sets. | `test-rule-matches-and-across-its-conditions` |
 | Rules compose additively: labels union, archive ORs, nothing is removed. | `test-apply-rules-composes-additively` |
+| A sender condition fires only on a copy held `%verified` as that sender's, and a subject condition needs no signature. | `test-a-sender-rule-needs-the-sender-signature` |
 | A filter cannot suppress a forged message. | structural: `+apply-rules` answers labels and an archive flag and nothing that reaches the chain (`test-apply-rules-composes-additively`) |
 | A sender picks the **highest** common version, not the first. | `test-common-version-picks-the-highest` |
 | Nothing in common answers `~`, and `~` is a refusal rather than a fallback. | `test-common-version-answers-none` |

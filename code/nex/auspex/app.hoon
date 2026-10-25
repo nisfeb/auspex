@@ -1205,11 +1205,16 @@
     (reject root 'bad attachment')
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
-  ::  message's full contents, so it names exactly one message and
-  ::  therefore exactly one chain.
+  ::  message's full contents, so it names exactly one message, but not
+  ::  one thread. Any ship that knows the message can file a re-signed
+  ::  copy of it under a root of its own. +thread-holding prefers the
+  ::  thread rooted where prev's ancestry ends, which only the genuine
+  ::  thread can be.
   ::
   ::  ponytail: a walk of every thread per reply, the one writer walk left
   ::  on the send path; a [msg-id -> thread-id] index grub retires it.
+  ::  Such an index must name the thread an id's ancestry roots in, not
+  ::  whichever thread last stored a copy, or the plant wins again.
   =/  tid=(unit thread-id:uc)  ?~(prev ~ (thread-holding:uc loaded u.prev))
   ?:  &(?=(^ prev) ?=(~ tid))
     (reject root 'unknown prev')
@@ -1251,12 +1256,14 @@
   ::  (all three are +sent-refusal's, in this order)
   =/  big=(unit @t)  (sent-refusal:uc new)
   ?^  big  (reject root u.big)
-  ::  the thread is already resolved: `tid` came from `prev`, which names
-  ::  exactly one message, and a compose is by definition a new root.
+  ::  the thread is already resolved: `tid` came from `prev` through
+  ::  +thread-holding, and a compose is by definition a new root.
   ::  Re-deriving it with +thread-key here would be slower AND wrong -
   ::  it returns the first map-traversal match, so a coincidental [id sig]
   ::  overlap with another thread would file this send into that thread.
-  ::  Nothing here is attacker-supplied, so no identity fixing is needed.
+  ::  That pick is open to attack. A remote ship may plant a copy of
+  ::  `prev` under a root of its own, and +thread-holding is what picks
+  ::  the genuine thread over it.
   =/  rid=thread-id:uc  ?^(tid u.tid (id:uc u))
   ;<  ~  bind:m  (ensure-thread root rid)
   ::  where this message sits in the tree: its own ancestry, root first.
@@ -1534,6 +1541,10 @@
 ::    on disk with every verdict already set, and all a rule can reach
 ::    is a label and a flag.
 ::
+::    `vs` is those verdicts, every copy in `c` included, because a rule
+::    naming a sender fires only on a copy that sender signed
+::    (+rule-hits). A claim of from=~bus is not mail from ~bus.
+::
 ::    UN-ARCHIVE ON NEW MAIL. Without it, archiving a thread would make
 ::    every later message in it vanish silently, which is mail loss
 ::    wearing the costume of a feature. Only actual new content
@@ -1547,11 +1558,16 @@
 ::    rules are then applied over, not something applied after them.
 ::
 ++  file-arrival
-  |=  [root=@ud t=thread-id:uc c=chain:uc wrote=?]
+  |=  $:  root=@ud
+          t=thread-id:uc
+          c=chain:uc
+          vs=(map [msg-id:uc @ux] verdict:uc)
+          wrote=?
+      ==
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
-  =/  got  (apply-rules:uc rs c)
+  =/  got  (apply-rules:uc rs c vs)
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ::  the label bound refuses the ADDITION, never the delivery: a rule
   ::  that would push a thread past the cap simply does not add. Nacking
@@ -1676,8 +1692,10 @@
   ::  fold this poke's verdicts into the stored ones BEFORE pruning:
   ::  +prune needs a verdict for every message in `new`, including ones
   ::  stored by an earlier poke that this one did not carry.
+  ::  and the copies already held win a tie inside one verdict, so junk
+  ::  with larger sigs cannot shed a keyless signer's genuine copy.
   =/  vs2  (freeze:uc held vs)
-  =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
+  =/  pruned=chain:uc  (prune:uc new vs2 ~(key by held) max-copies:uc)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
   ;<  fresh=?  bind:m  (mark-direct root rid)
@@ -1696,7 +1714,7 @@
   ::  because by this point the chain is already on disk with its
   ::  verdicts and a $rule has no field that reaches it. See
   ::  +file-arrival.
-  ;<  ~  bind:m  (file-arrival root rid c wrote)
+  ;<  ~  bind:m  (file-arrival root rid c vs2 wrote)
   ;<  ~  bind:m  (note root 'deliver' & (scot %uv rid))
   ::  THE OWNER'S DOWNLOAD RULES, over the copies this delivery checked
   ::  (`todo`): a copy settled earlier was offered its downloads when it

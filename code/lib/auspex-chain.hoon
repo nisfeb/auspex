@@ -1173,11 +1173,24 @@
 ::    re-ships the whole accumulated chain, that corrupted chain is then
 ::    what gets forwarded onward.
 ::
-::    Pure: `vs` and `max-copies` arrive as arguments so this is testable
-::    without an agent.
+::    WITHIN A RANK, A COPY ALREADY HELD COMES FIRST. The rank alone
+::    does not save that moon's message. Its copies are all %unverified,
+::    so they used to compete on sig order, and the sig is an atom any
+::    courier picks. Four copies with larger sigs shed the genuine one.
+::    Nothing about a signature is out of an attacker's reach, but
+::    incumbency is. `old` is the [id sig] of every copy the thread held
+::    before this poke, and it orders copies inside a rank. It never
+::    lifts a copy above a better verdict.
+::
+::    Pure: `vs`, `old` and `max-copies` arrive as arguments so this is
+::    testable without an agent.
 ::
 ++  prune
-  |=  [c=chain vs=(map [msg-id @ux] verdict) max-copies=@ud]
+  |=  $:  c=chain
+          vs=(map [msg-id @ux] verdict)
+          old=(set [msg-id @ux])
+          max-copies=@ud
+      ==
   ^-  chain
   =/  groups=(jar msg-id msg)
     %+  roll  c
@@ -1190,10 +1203,14 @@
     ^-  chain
     ?:  (lte (lent ms) max-copies)  ms
     =/  vd    |=(m=msg (~(gut by vs) [i sig.m] %unverified))
-    =/  good  (skim ms |=(m=msg =(%verified (vd m))))
-    =/  fill
-      %+  weld  (skim ms |=(m=msg =(%unverified (vd m))))
-                (skim ms |=(m=msg =(%forged (vd m))))
+    =/  held  |=(m=msg (~(has in old) [i sig.m]))
+    ::  one rank, the copies already held first
+    =/  rank
+      |=  v=verdict
+      =/  r  (skim ms |=(m=msg =(v (vd m))))
+      (weld (skim r held) (skip r held))
+    =/  good  (rank %verified)
+    =/  fill  (weld (rank %unverified) (rank %forged))
     =/  keep  (scag max-copies good)
     (weld keep (scag (sub max-copies (lent keep)) fill))
   ::  re-sort: grouping by id destroyed +merge's ordering
@@ -1770,16 +1787,36 @@
       !=(from.unsigned.m our)
   ==
 ::
+::  +signed-by: is this copy really by `who`?
+::
+::    `from` is a claim, and any ship can make it. A copy is by `who`
+::    only when it names `who` AND this ship holds it %verified. A
+::    forged copy is evidence against the claim, and an unverified one
+::    is a claim nobody has checked. Not called `by`, which would shadow
+::    the map door.
+::
+++  signed-by
+  |=  [vs=(map [msg-id @ux] verdict) who=ship m=msg]
+  ^-  ?
+  ?&  =(who from.unsigned.m)
+      =(%verified (~(gut by vs) [(id unsigned.m) sig.m] %unverified))
+  ==
+::
 ::  +in-sent: did we write any message in this thread?
 ::
 ::    A walk, not a stored set. Authorship is a signed field, so the
 ::    question is answerable from the chain itself and a second record
 ::    of it could only ever disagree with the first.
 ::
+::    Signed, not claimed. Any ship can poke us a copy that says
+::    from=our, so only a copy we hold %verified counts (+signed-by).
+::    Every send stores its copy %verified, so our own mail is
+::    unaffected.
+::
 ++  in-sent
-  |=  [our=ship c=chain]
+  |=  [our=ship c=chain vs=(map [msg-id @ux] verdict)]
   ^-  ?
-  (lien c |=(m=msg =(our from.unsigned.m)))
+  (lien c |=(m=msg (signed-by vs our m)))
 ::
 ::  +page: one page of a list, and nothing else.
 ::
@@ -1863,10 +1900,22 @@
 ::    message that prompted the delivery, and a rule about a sender is a
 ::    statement about the conversation they are in.
 ::
+::    A SENDER CONDITION NEEDS THAT SENDER'S SIGNATURE. A rule naming
+::    ~bus is the owner's statement about mail ~bus wrote, and anyone can
+::    claim from=~bus. So the copy must be %verified as ~bus's
+::    (+signed-by), and a rule naming a moon or comet waits until its
+::    mail verifies. The gate is here and not in +rule-matches, which
+::    has no verdicts to read. A subject condition is about the text
+::    and needs no signature.
+::
 ++  rule-hits
-  |=  [r=rule c=chain]
+  |=  [r=rule c=chain vs=(map [msg-id @ux] verdict)]
   ^-  ?
-  (lien c |=(m=msg (rule-matches r unsigned.m)))
+  %+  lien  c
+  |=  m=msg
+  ?&  (rule-matches r unsigned.m)
+      ?~(from.r & (signed-by vs u.from.r m))
+  ==
 ::
 ::  +apply-rules: what the matching rules ask for, together.
 ::
@@ -1882,9 +1931,9 @@
 ::    trap `archived` in $meta already carries a $~ for.
 ::
 ++  apply-rules
-  |=  [rs=(list rule) c=chain]
+  |=  [rs=(list rule) c=chain vs=(map [msg-id @ux] verdict)]
   ^-  [add=(set @tas) archive=?]
-  =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c)))
+  =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c vs)))
   :-  (~(gas in *(set @tas)) (zing (turn hits |=(r=rule ~(tap in add.r)))))
   (lien hits |=(r=rule archive.r))
 
@@ -2638,7 +2687,7 @@
   =/  c=chain  c.u.r
   ?&  ?+  view  |
         %inbox     (in-inbox our c archived.mt direct.mt)
-        %sent      (in-sent our c)
+        %sent      (in-sent our c vs.u.r)
         %archived  archived.mt
         %all       &
         %label     ?&((label-ok `@tas`lab) (~(has in labels.mt) `@tas`lab))
@@ -3050,6 +3099,14 @@
   ~
 ::
 ::  +thread-holding: the thread that holds a copy of this message
+::
+::    One id can sit in more than one thread. +thread-key files on
+::    [id sig], so a ship that knows a message can re-sign it under a
+::    root of its own and have the copy stored as that thread's orphan.
+::    Map order would then let it pick which thread a reply joins. So
+::    prefer the thread whose id is the root reached by walking `prev`
+::    up from `i`. Ids are content hashes, so only the genuine thread
+::    can be that one. When none is, the first hit answers as before.
 ++  thread-holding
   |=  [loaded=(map thread-id (map path stored-msg)) i=msg-id]
   ^-  (unit thread-id)
@@ -3058,6 +3115,12 @@
     |=  [t=thread-id ss=(map path stored-msg)]
     %+  lien  ~(val by ss)
     |=(s=stored-msg =((id unsigned.msg.s) i))
+  =/  home
+    %+  skim  hits
+    |=  [t=thread-id ss=(map path stored-msg)]
+    =/  ps  (prev-map (turn ~(val by ss) |=(s=stored-msg msg.s)))
+    =(t (snag 0 (ancestors ps i)))
+  ?^  home  `p.i.home
   ?~(hits ~ `p.i.hits)
 ::
 ::  +honest-copy: may a reply answer `prev`? Only if some copy of it is

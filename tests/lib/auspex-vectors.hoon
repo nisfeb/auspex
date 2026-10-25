@@ -356,8 +356,8 @@
   =/  k  (case-by 'same-id-pair')
   =/  merged  (merge:auspex ~ c)
   =/  vs  (malt (verify-chain:auspex (keys-of ~[[~zod 1]]) merged))
-  =/  pruned  (prune:auspex merged vs 1)
-  =/  flipped  (prune:auspex (merge:auspex ~ (flop c)) vs 1)
+  =/  pruned  (prune:auspex merged vs ~ 1)
+  =/  flipped  (prune:auspex (merge:auspex ~ (flop c)) vs ~ 1)
   %+  weld  (chain-case 'same-id-pair' c ~[[~zod 1]])
   ;:  weld
     (expect-eq !>((lent merged)) !>((jnum (jget k 'merge_kept'))))

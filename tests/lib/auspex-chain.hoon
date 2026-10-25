@@ -316,7 +316,7 @@
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
   =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
-  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs 4)))
+  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs ~ 4)))
 ::
 ::  a %verified copy is never shed, however many forged copies crowd it and
 ::  whatever order they arrive in. Both orders, same reason as above.
@@ -326,8 +326,8 @@
   =/  cs2  ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)]
   =/  vs   (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
   ;:  weld
-    (expect-eq !>(~[a]) !>((prune:auspex cs vs 1)))
-    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs vs ~ 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs ~ 1)))
   ==
 ::
 ::  the fill bucket ranks %unverified above %forged. This is not a nicety:
@@ -356,10 +356,10 @@
   ;:  weld
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs ~ 1)
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs ~ 1)
   ==
 ::
 ::  the whole ranking in one shot: %verified, then %unverified, then
@@ -378,8 +378,8 @@
         [[i sig.a] %verified]
     ==
   ::  both input orders, for the +add:ja reversal reason given above
-  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
-  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 2)
+  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs ~ 2)
+  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs ~ 2)
   ;:  weld
     (expect-eq !>(2) !>((lent one)))
     (expect !>((lien one |=(m=msg:sur =(sig.m sig.a)))))
@@ -387,6 +387,31 @@
     (expect-eq !>(2) !>((lent two)))
     (expect !>((lien two |=(m=msg:sur =(sig.m sig.a)))))
     (expect !>((lien two |=(m=msg:sur =(sig.m 0x1)))))
+  ==
+::
+::  A COPY ALREADY HELD OUTLASTS JUNK OF ITS OWN RANK. With no key for
+::  the signer every copy is %unverified, and a courier who knows the
+::  message pokes four copies whose sigs are larger than the genuine
+::  one. Sig order would keep the junk, so the held copy wins the tie
+::  instead, in both input orders. It never beats a better verdict.
+++  test-prune-keeps-the-held-copy-of-a-keyless-signer
+  =/  a     (um ~nec 'one' ~)
+  =/  i     (id:auspex unsigned.a)
+  =/  real  a(sig 0x1)
+  =/  all=chain:sur  ~[real a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x5)]
+  =/  vs=(map [msg-id:sur @ux] verdict:sur)
+    (malt (turn all |=(m=msg:sur [[i sig.m] %unverified])))
+  =/  old  (sy ~[[i sig.real]])
+  =/  has  |=(c=chain:sur (lien c |=(m=msg:sur =(sig.m sig.real))))
+  ;:  weld
+    ::  the attack is real. With nothing held, the genuine copy goes.
+    (expect !>(!(has (prune:auspex (merge:auspex ~ all) vs ~ 4))))
+    (expect !>((has (prune:auspex (merge:auspex ~ all) vs old 4))))
+    (expect !>((has (prune:auspex (flop all) vs old 4))))
+    (expect-eq !>(4) !>((lent (prune:auspex all vs old 4))))
+    ::  a held %forged copy still loses to a new %unverified one
+    %+  expect-eq  !>(~[a(sig 0x2)])
+    !>  (prune:auspex ~[real a(sig 0x2)] (~(put by vs) [i sig.real] %forged) old 1)
   ==
 ::
 ::  a thread's identity comes from CONTENT, never from the order of the
@@ -1111,10 +1136,29 @@
 ++  test-sent-is-threads-we-authored
   =/  mine   (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
   =/  yours  (forge ~palnet-sampel ~ 'a' 'b' ~2026.1.1 ~)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet ~palnet-sampel]) ~[mine yours]))
   ;:  weld
-    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine])))
-    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours])))
-    (expect !>(!(in-sent:auspex ~sampel-palnet ~)))
+    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine] vs)))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours] vs)))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~ vs)))
+  ==
+::
+::  SENT IS WHAT WE SIGNED, NOT WHAT CLAIMS US. Any ship can poke us a
+::  copy saying from=our. A forged one and an unverified one both stay
+::  out of Sent, and the same copy is in once we hold it %verified.
+++  test-sent-needs-our-signature
+  =/  us    ~sampel-palnet
+  =/  mine  (forge us ~ 'a' 'b' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel us 'a' 'lie' ~2026.1.2)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[us]) ~[mine liar]))
+  ;:  weld
+    ::  the fixture is what it says, one verified and one forged
+    (expect-eq !>(%verified) !>((~(got by vs) [(id:auspex unsigned.mine) sig.mine])))
+    (expect-eq !>(%forged) !>((~(got by vs) [(id:auspex unsigned.liar) sig.liar])))
+    (expect !>((in-sent:auspex us ~[mine] vs)))
+    (expect !>(!(in-sent:auspex us ~[liar] vs)))
+    ::  no verdict held is %unverified, and that is not ours either
+    (expect !>(!(in-sent:auspex us ~[mine] ~)))
   ==
 ::
 ++  test-page-slices-without-losing-the-total
@@ -1221,15 +1265,16 @@
 ++  test-apply-rules-composes-additively
   =/  m  (forge ~sampel-palnet ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
   =/  c=chain:sur  ~[m]
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) c))
   =/  r1=rule:sur  [%0 0v1 `~sampel-palnet ~ (sy ~[%work]) |]
   =/  r2=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) &]
   =/  r3=rule:sur  [%0 0v3 `~palnet-sampel ~ (sy ~[%never]) &]
-  =/  got  (apply-rules:auspex ~[r1 r2 r3] c)
+  =/  got  (apply-rules:auspex ~[r1 r2 r3] c vs)
   ::  no rule fires: no labels, and NOT archived. A bare ? bunts to %.y,
   ::  so an accumulator-shaped fold here would archive everything the
   ::  moment no rule matched.
-  =/  quiet  (apply-rules:auspex ~[r3] c)
-  =/  none   (apply-rules:auspex ~ c)
+  =/  quiet  (apply-rules:auspex ~[r3] c vs)
+  =/  none   (apply-rules:auspex ~ c vs)
   ;:  weld
     ::  the two matching rules' labels union; the non-matching one adds
     ::  nothing
@@ -1240,6 +1285,27 @@
     (expect-eq !>(*(set @tas)) !>(add.quiet))
     ::  and with no rules at all
     (expect !>(!archive.none))
+  ==
+::
+::  A SENDER RULE NEEDS THE SENDER'S SIGNATURE. Anyone can claim
+::  from=~sampel-palnet, so a rule naming ~sampel-palnet fires on its
+::  verified copy and on nothing else. It skips a forgery, and the real
+::  copy too while no verdict is held for it. A subject rule is about
+::  the text and still fires on the forgery.
+++  test-a-sender-rule-needs-the-sender-signature
+  =/  who   ~sampel-palnet
+  =/  real  (forge who ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel who 'Quarterly Invoice' 'b' ~2026.1.2)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[who]) ~[real liar]))
+  =/  by-who=rule:sur   [%0 0v1 `who ~ (sy ~[%work]) &]
+  =/  by-subj=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) |]
+  ;:  weld
+    ::  the fixture is what it says, and the liar really reads %forged
+    (expect-eq !>(%forged) !>((~(got by vs) [(id:auspex unsigned.liar) sig.liar])))
+    (expect-eq !>([(sy ~[%work]) &]) !>((apply-rules:auspex ~[by-who] ~[real] vs)))
+    (expect-eq !>([*(set @tas) |]) !>((apply-rules:auspex ~[by-who] ~[liar] vs)))
+    (expect-eq !>([*(set @tas) |]) !>((apply-rules:auspex ~[by-who] ~[real] ~)))
+    (expect-eq !>([(sy ~[%money]) |]) !>((apply-rules:auspex ~[by-subj] ~[liar] vs)))
   ==
 ::
 
@@ -1755,7 +1821,10 @@
   =/  them  ~palnet-sampel
   =/  ours   (forge us (sy ~[them]) 'mine' 'b' ~2026.1.1 ~)
   =/  reply  (forge them (sy ~[us]) 'theirs' 'c' ~2026.1.2 ~)
-  =/  mk  |=([c=chain:sur mt=meta:sur] `row:sur`[(malt (turn c |=(m=msg:sur (st m %verified)))) c ~ 0 mt])
+  =/  mk
+    |=  [c=chain:sur mt=meta:sur]
+    =/  ss  (malt (turn c |=(m=msg:sur (st m %verified))))
+    `row:sur`[ss c (verdicts-of:auspex ss) 0 mt]
   =/  sent   (mk ~[ours] *meta:sur)
   =/  got    (mk ~[reply] *meta:sur)
   =/  arch   (mk ~[reply] m0(archived &))
@@ -2053,6 +2122,39 @@
     (expect !>(!(honest-copy:auspex (malt ~[(st a %forged)]) `ia)))
     (expect !>((honest-copy:auspex (malt ~[(st a %forged) (st a(sig 0x1) %unverified)]) `ia)))
     (expect !>(!(honest-copy:auspex ss-a `0v99)))
+  ==
+::
+::  A REPLY IGNORES A COPY REPLANTED UNDER ANOTHER ROOT. ~bus knows
+::  ~zod's reply m, so it re-signs m under a root of its own, and the
+::  copy is stored as that thread's orphan. The plant's thread sorts
+::  first in map order, which used to decide the reply's thread. It
+::  loses to the thread whose root m's ancestry reaches, whether the
+::  planted copy reads forged or unverified.
+++  test-a-reply-ignores-a-copy-replanted-under-another-root
+  =/  r   (um ~nec 'root' ~)
+  =/  t1  (id:auspex unsigned.r)
+  =/  m   (um ~zod 'reply' `t1)
+  =/  i   (id:auspex unsigned.m)
+  ::  a body whose root's id sorts ahead of t1, as the guard below pins
+  =/  p   (um ~bus 'planted' ~)
+  =/  tp  (id:auspex unsigned.p)
+  =/  ss1  (malt ~[(st r %verified) (st m %verified)])
+  =/  with
+    |=  v=verdict:sur
+    ^-  (map thread-id:sur (map path stored-msg:sur))
+    (malt ~[[t1 ss1] [tp (malt ~[(st p %verified) (st m(sig 0x1) v)])]])
+  =/  forged      (with %forged)
+  =/  unverified  (with %unverified)
+  ;:  weld
+    ::  not vacuous, since the plant really is the first hit in map order
+    (expect-eq !>(tp) !>(p:(snag 0 ~(tap by forged))))
+    (expect-eq !>(tp) !>(p:(snag 0 ~(tap by unverified))))
+    (expect-eq !>(`(unit thread-id:sur)``t1) !>((thread-holding:auspex forged i)))
+    (expect-eq !>(`(unit thread-id:sur)``t1) !>((thread-holding:auspex unverified i)))
+    ::  so a reply may answer m. In the plant's thread every copy of m
+    ::  is forged, and the reply would be refused there.
+    (expect !>((honest-copy:auspex ss1 `i)))
+    (expect !>(!(honest-copy:auspex (~(got by forged) tp) `i)))
   ==
 ::
 ::  new mail un-archives unless a rule archives it; mail that wrote
