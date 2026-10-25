@@ -448,16 +448,19 @@ export default function App() {
             ‹ Back
           </button>
         ) : (
+          // The pane's name is inside the button, so tapping the word
+          // opens the drawer as well as tapping the glyph.
           <button
             type="button"
             onClick={() => { setNavOpen(true) }}
-            aria-label="Open the folder list"
-            className="btn"
+            title="Open the folder list"
+            className="btn min-w-0"
           >
-            ☰
+            <span aria-hidden="true">☰</span>
+            <span className="min-w-0 truncate text-ink-dim">{paneName}</span>
           </button>
         )}
-        <span className="min-w-0 truncate text-ink-dim">{paneName}</span>
+        {selected && <span className="min-w-0 truncate text-ink-dim">{paneName}</span>}
       </header>
 
       <div className="flex min-h-0 min-w-0 flex-1">
