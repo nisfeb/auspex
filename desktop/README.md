@@ -30,6 +30,11 @@ Enter your ship's URL and `+code` once. The app posts them to the ship's own
 stored. The ship's `@p` comes out of the session cookie's own name, so no
 extra request is made to learn it.
 
+A URL typed without a scheme gets `https://`, or `http://` when the host is
+this machine (`localhost`, `127.x.x.x`, `[::1]`). A typed `http://` is kept,
+for a ship on your own network, and the connection page warns that the
+`+code` and session then cross the network unencrypted.
+
 The connection page reports the live state — connected (and to which ship),
 signed out, or unreachable — from a real authenticated request to
 `/apps/auspex/api/whoami`, not from whether a URL is configured. It offers the

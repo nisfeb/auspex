@@ -27,6 +27,12 @@ pub struct Config {
 /// ADDED rather than refused: the placeholder shows one, but `localhost:8081`
 /// is what people actually type, and without a scheme `Url::parse` fails and
 /// the whole flow reports "cannot reach this ship" about a ship that is fine.
+///
+/// The scheme added is https unless the host is this machine. On plain http a
+/// remote host gets the +code, and then the session cookie, across the
+/// network in the clear (security audit run-1). Loopback has no network to
+/// cross, and a fake ship on `localhost:8081` speaks only http. A typed
+/// `http://` is kept as it is, because a ship on the LAN may have nothing else.
 pub fn normalise_url(raw: &str) -> String {
     let t = raw.trim().trim_end_matches(|c: char| c == '/' || c.is_whitespace());
     if t.is_empty() {
@@ -34,9 +40,29 @@ pub fn normalise_url(raw: &str) -> String {
     }
     if t.starts_with("http://") || t.starts_with("https://") {
         t.to_string()
-    } else {
+    } else if format!("http://{t}").parse().is_ok_and(|u| loopback(&u)) {
         format!("http://{t}")
+    } else {
+        format!("https://{t}")
     }
+}
+
+/// Is this URL's host this machine: localhost, 127.0.0.0/8 or [::1]? The
+/// parser has already turned `127.1` into `127.0.0.1` and any spelling of
+/// the IPv6 loopback into `[::1]`.
+fn loopback(u: &tauri::Url) -> bool {
+    let h = u.host_str().unwrap_or_default();
+    h == "localhost"
+        || h.trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// A ship URL whose +code and session cross the network unencrypted: plain
+/// http to another machine. The connection page warns about a saved one.
+pub fn cleartext_remote(url: &str) -> bool {
+    tauri::Url::parse(url).is_ok_and(|u| u.scheme() == "http" && !loopback(&u))
 }
 
 /// The stored URL comes back normalised, so every caller holds a base it can
@@ -184,17 +210,39 @@ mod tests {
         assert_eq!(normalise_url("  http://localhost:8081  "), "http://localhost:8081");
         assert_eq!(normalise_url("https://ship.example.com///"), "https://ship.example.com");
         // a bare host is the common paste, and refusing it reports a healthy
-        // ship as unreachable
+        // ship as unreachable. This machine gets http, which is all a fake
+        // ship speaks...
         assert_eq!(normalise_url("localhost:8081"), "http://localhost:8081");
-        assert_eq!(normalise_url("ship.example.com"), "http://ship.example.com");
+        assert_eq!(normalise_url("127.0.0.1:8080"), "http://127.0.0.1:8080");
+        assert_eq!(normalise_url("127.4.5.6"), "http://127.4.5.6");
+        assert_eq!(normalise_url("[::1]:8080"), "http://[::1]:8080");
+        // ...and anywhere else gets https, or the +code crosses the network
+        // in the clear (security audit run-1)
+        assert_eq!(normalise_url("ship.example.com"), "https://ship.example.com");
+        assert_eq!(normalise_url("192.168.1.5:8080"), "https://192.168.1.5:8080");
+        assert_eq!(normalise_url("localhost.example.com"), "https://localhost.example.com");
+        // a typed http is never refused or upgraded: a LAN ship may have no tls
+        assert_eq!(normalise_url("http://192.168.1.5:8080"), "http://192.168.1.5:8080");
         // https is never downgraded
         assert_eq!(normalise_url("https://ship.example.com"), "https://ship.example.com");
+        assert_eq!(normalise_url("https://localhost:8443"), "https://localhost:8443");
         // nothing typed is nothing configured, not "http://"
         assert_eq!(normalise_url("   "), "");
         assert_eq!(normalise_url("/"), "");
         // slashes and spaces mixed at the end all go, not one layer of each
         assert_eq!(normalise_url("localhost:8081/ /"), "http://localhost:8081");
         assert_eq!(normalise_url("/ /"), "");
+    }
+
+    #[test]
+    fn plain_http_is_flagged_only_off_this_machine() {
+        assert!(cleartext_remote("http://ship.example.com"));
+        assert!(cleartext_remote("http://192.168.1.5:8080"));
+        assert!(!cleartext_remote("https://ship.example.com"));
+        assert!(!cleartext_remote("http://localhost:8081"));
+        assert!(!cleartext_remote("http://127.0.0.1:8080"));
+        assert!(!cleartext_remote("http://[::1]:8080"));
+        assert!(!cleartext_remote(""), "no ship is nothing to warn about");
     }
 
     use proptest::prelude::*;

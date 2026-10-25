@@ -74,6 +74,9 @@
         <div id="conn-url" class="muted mono"></div>
       </div>
     </div>
+    <p id="cleartext" class="err" hidden>This ship is on plain http, so your
+    +code and session cross the network unencrypted. Use https:// unless the
+    ship is on a network you trust.</p>
     <div class="row actions">
       <button id="relog" hidden>reconnect</button>
       <button id="switch">change ship</button>
@@ -122,6 +125,7 @@
     const s = await invoke('connection_status');
     $('url').value = s.url || $('url').value;
     $('conn-url').textContent = s.url || '';
+    $('cleartext').hidden = !s.cleartext;
     const dot = $('dot'), ship = $('conn-ship');
     if (s.connected) {
       dot.className = 'dot on';

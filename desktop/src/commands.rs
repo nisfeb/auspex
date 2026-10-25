@@ -184,6 +184,8 @@ pub struct ConnStatus {
     /// set when we could not reach the ship at all (as opposed to being
     /// reachable but unauthenticated). The two need different advice
     pub error: Option<String>,
+    /// the saved URL is plain http to another machine, so the page warns
+    pub cleartext: bool,
 }
 
 /// What the connection page shows. A configured URL is NOT the same as being
@@ -194,8 +196,9 @@ pub struct ConnStatus {
 pub async fn connection_status(app: AppHandle) -> ConnStatus {
     let cfg = config::load(&app);
     if cfg.url.is_empty() {
-        return ConnStatus { url: String::new(), ship: None, connected: false, error: None };
+        return ConnStatus { url: String::new(), ship: None, connected: false, error: None, cleartext: false };
     }
+    let cleartext = config::cleartext_remote(&cfg.url);
     match crate::proxy::probe(&cfg.url) {
         Ok(Some(ship)) => {
             // whoami named the ship; fall back to the stored @p only if the
@@ -203,15 +206,15 @@ pub async fn connection_status(app: AppHandle) -> ConnStatus {
             let ship = if ship.is_empty() { cfg.ship.clone() } else { ship };
             dlog(&format!("status: connected to {ship}"));
             let ship = (!ship.is_empty()).then_some(ship);
-            ConnStatus { url: cfg.url, ship, connected: true, error: None }
+            ConnStatus { url: cfg.url, ship, connected: true, error: None, cleartext }
         }
         Ok(None) => {
             dlog("status: reachable but not authenticated");
-            ConnStatus { url: cfg.url, ship: None, connected: false, error: None }
+            ConnStatus { url: cfg.url, ship: None, connected: false, error: None, cleartext }
         }
         Err(e) => {
             dlog(&format!("status: unreachable: {e}"));
-            ConnStatus { url: cfg.url, ship: None, connected: false, error: Some(e) }
+            ConnStatus { url: cfg.url, ship: None, connected: false, error: Some(e), cleartext }
         }
     }
 }
