@@ -2048,6 +2048,39 @@
     (expect !>(!(honest-copy:auspex ss-a `0v99)))
   ==
 ::
+::  A REPLY IGNORES A COPY REPLANTED UNDER ANOTHER ROOT. ~bus knows
+::  ~zod's reply m, so it re-signs m under a root of its own, and the
+::  copy is stored as that thread's orphan. The plant's thread sorts
+::  first in map order, which used to decide the reply's thread. It
+::  loses to the thread whose root m's ancestry reaches, whether the
+::  planted copy reads forged or unverified.
+++  test-a-reply-ignores-a-copy-replanted-under-another-root
+  =/  r   (um ~nec 'root' ~)
+  =/  t1  (id:auspex unsigned.r)
+  =/  m   (um ~zod 'reply' `t1)
+  =/  i   (id:auspex unsigned.m)
+  ::  a body whose root's id sorts ahead of t1, as the guard below pins
+  =/  p   (um ~bus 'planted' ~)
+  =/  tp  (id:auspex unsigned.p)
+  =/  ss1  (malt ~[(st r %verified) (st m %verified)])
+  =/  with
+    |=  v=verdict:sur
+    ^-  (map thread-id:sur (map path stored-msg:sur))
+    (malt ~[[t1 ss1] [tp (malt ~[(st p %verified) (st m(sig 0x1) v)])]])
+  =/  forged      (with %forged)
+  =/  unverified  (with %unverified)
+  ;:  weld
+    ::  not vacuous, since the plant really is the first hit in map order
+    (expect-eq !>(tp) !>(p:(snag 0 ~(tap by forged))))
+    (expect-eq !>(tp) !>(p:(snag 0 ~(tap by unverified))))
+    (expect-eq !>(`(unit thread-id:sur)``t1) !>((thread-holding:auspex forged i)))
+    (expect-eq !>(`(unit thread-id:sur)``t1) !>((thread-holding:auspex unverified i)))
+    ::  so a reply may answer m. In the plant's thread every copy of m
+    ::  is forged, and the reply would be refused there.
+    (expect !>((honest-copy:auspex ss1 `i)))
+    (expect !>(!(honest-copy:auspex (~(got by forged) tp) `i)))
+  ==
+::
 ::  new mail un-archives unless a rule archives it; mail that wrote
 ::  nothing only adds a rule's archive; labels join up to the cap
 ++  test-filing

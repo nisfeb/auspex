@@ -2976,6 +2976,14 @@
   ~
 ::
 ::  +thread-holding: the thread that holds a copy of this message
+::
+::    One id can sit in more than one thread. +thread-key files on
+::    [id sig], so a ship that knows a message can re-sign it under a
+::    root of its own and have the copy stored as that thread's orphan.
+::    Map order would then let it pick which thread a reply joins. So
+::    prefer the thread whose id is the root reached by walking `prev`
+::    up from `i`. Ids are content hashes, so only the genuine thread
+::    can be that one. When none is, the first hit answers as before.
 ++  thread-holding
   |=  [loaded=(map thread-id (map path stored-msg)) i=msg-id]
   ^-  (unit thread-id)
@@ -2984,6 +2992,12 @@
     |=  [t=thread-id ss=(map path stored-msg)]
     %+  lien  ~(val by ss)
     |=(s=stored-msg =((id unsigned.msg.s) i))
+  =/  home
+    %+  skim  hits
+    |=  [t=thread-id ss=(map path stored-msg)]
+    =/  ps  (prev-map (turn ~(val by ss) |=(s=stored-msg msg.s)))
+    =(t (snag 0 (ancestors ps i)))
+  ?^  home  `p.i.home
   ?~(hits ~ `p.i.hits)
 ::
 ::  +honest-copy: may a reply answer `prev`? Only if some copy of it is

@@ -1200,11 +1200,16 @@
     (reject root 'bad attachment')
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
-  ::  message's full contents, so it names exactly one message and
-  ::  therefore exactly one chain.
+  ::  message's full contents, so it names exactly one message, but not
+  ::  one thread. Any ship that knows the message can file a re-signed
+  ::  copy of it under a root of its own. +thread-holding prefers the
+  ::  thread rooted where prev's ancestry ends, which only the genuine
+  ::  thread can be.
   ::
   ::  ponytail: a walk of every thread per reply, the one writer walk left
   ::  on the send path; a [msg-id -> thread-id] index grub retires it.
+  ::  Such an index must name the thread an id's ancestry roots in, not
+  ::  whichever thread last stored a copy, or the plant wins again.
   =/  tid=(unit thread-id:uc)  ?~(prev ~ (thread-holding:uc loaded u.prev))
   ?:  &(?=(^ prev) ?=(~ tid))
     (reject root 'unknown prev')
@@ -1246,12 +1251,14 @@
   ::  (all three are +sent-refusal's, in this order)
   =/  big=(unit @t)  (sent-refusal:uc new)
   ?^  big  (reject root u.big)
-  ::  the thread is already resolved: `tid` came from `prev`, which names
-  ::  exactly one message, and a compose is by definition a new root.
+  ::  the thread is already resolved: `tid` came from `prev` through
+  ::  +thread-holding, and a compose is by definition a new root.
   ::  Re-deriving it with +thread-key here would be slower AND wrong -
   ::  it returns the first map-traversal match, so a coincidental [id sig]
   ::  overlap with another thread would file this send into that thread.
-  ::  Nothing here is attacker-supplied, so no identity fixing is needed.
+  ::  That pick is open to attack. A remote ship may plant a copy of
+  ::  `prev` under a root of its own, and +thread-holding is what picks
+  ::  the genuine thread over it.
   =/  rid=thread-id:uc  ?^(tid u.tid (id:uc u))
   ;<  ~  bind:m  (ensure-thread root rid)
   ::  where this message sits in the tree: its own ancestry, root first.

@@ -1671,7 +1671,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **123 tests**, the discovery ones among them
+be diffed; **124 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1770,6 +1770,7 @@ be diffed; **123 tests**, the discovery ones among them
 | A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
 | The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |
 | A reply belongs to the thread holding what it answers, and may answer it only if some copy is not forged. | `test-a-reply-finds-its-thread-and-an-honest-copy` |
+| When several threads hold what a reply answers, the reply joins the one whose id is the root that message's ancestry reaches, never one a copy was planted into, whatever the map order. | `test-a-reply-ignores-a-copy-replanted-under-another-root` |
 | New mail un-archives its thread unless a rule archives it; mail that wrote nothing only adds a rule's archive; rule labels join up to max-labels, or none do. | `test-filing` |
 | Storing a thread writes only new or changed slots and culls only what is no longer wanted, outermost directories first. | `test-slot-plan` |
 | The writer takes a chain from anyone, and an action, blob or probe result only from this ship. | `test-the-writer-sorts-pokes-and-sources` |
