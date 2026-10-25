@@ -1696,8 +1696,17 @@
   ::  with larger sigs cannot shed a keyless signer's genuine copy.
   =/  vs2  (freeze:uc held vs)
   =/  pruned=chain:uc  (prune:uc new vs2 ~(key by held) max-copies:uc)
+  =/  want=(map path stored-msg:uc)  (want-slots pruned vs2)
+  ::  THE QUOTAS, on the pruned thread, since only that says exactly
+  ::  what would grow. A delivery that leaves the thread as it is grows
+  ::  nothing and skips them. See +quota-refusal.
+  ;<  our=@p  bind:m  bowl-our
+  =/  full=(unit @t)
+    ?:  =(want ss)  ~
+    (quota-refusal:uc our loaded rid want)
+  ?^  full  (reject root u.full)
   ;<  ~  bind:m  (ensure-thread root rid)
-  ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
+  ;<  wrote=?  bind:m  (sync-slots root rid ss want)
   ;<  fresh=?  bind:m  (mark-direct root rid)
   ::  A REDELIVERY THAT WROTE NOTHING CHANGES NOTHING, and must not
   ::  look like it did. Delivery is granted to the `public` usergroup,
