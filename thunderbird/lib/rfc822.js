@@ -104,7 +104,7 @@ function headerLine(name, value) {
 //  A filename, made safe. Mirrors the nexus's +safe-name deliberately:
 //  separators, quotes, backslashes, semicolons, control bytes and every
 //  byte above ASCII are dropped, it is capped at 128, and a name that
-//  survives as nothing becomes the hash. The signed `name` is a claim by
+//  survives as nothing, or as nothing but dots, becomes the hash. The signed `name` is a claim by
 //  whoever wrote the message and this is the only guard on it.
 function safeName(name, fallback) {
   const s = String(name ?? '')
@@ -112,20 +112,13 @@ function safeName(name, fallback) {
     .replace(/[\/\\";:<>|*?]/g, '')
     .trim()
     .slice(0, 128)
-  return s.length ? s : String(fallback ?? 'attachment')
+  return s.length && !/^\.+$/.test(s) ? s : String(fallback ?? 'attachment')
 }
 
-//  A filename for Content-Disposition. Sanitised first; if the ORIGINAL
-//  had non-ASCII worth keeping, an encoded word carries it, because a
-//  reader that cannot decode it still sees the sanitised ASCII form.
-function dispositionFilename(name, fallback) {
-  const safe = safeName(name, fallback)
-  const raw = String(name ?? '')
-  if (isAscii(raw) || !raw.trim()) return `"${safe}"`
-  //  the encoded word is unquoted: a quoted string is not a place an
-  //  encoded word is decoded in, per RFC 2047 §5.
-  return encodeWords(raw.replace(/[\r\n\0"]/g, '')).join(' ')
-}
+//  A filename for Content-Disposition, which is safeName, quoted, always.
+//  A name in a non-Latin script comes out shorter or as the hash, as it
+//  does from the nexus's +safe-name and the web client's download.
+const dispositionFilename = (name, fallback) => `"${safeName(name, fallback)}"`
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -152,7 +145,7 @@ const messageId = (id) => `<${id}@${DOMAIN}>`
 //  what a reply to a non-auspex message looks like on the send path.
 function idFromMessageId(header) {
   if (typeof header !== 'string') return null
-  const m = /<?([^<>@\s]+)@auspex\.urbit>?/.exec(header.trim())
+  const m = /^<?([^<>@\s]+)@auspex\.urbit>?$/.exec(header.trim())
   return m ? m[1] : null
 }
 

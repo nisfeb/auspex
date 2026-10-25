@@ -14,7 +14,7 @@ the wire on auspex's behalf.
 
 ```
 npm test          # the four pure libs
-npm run build     # → dist/auspex-thunderbird-0.1.1.zip
+npm run build     # → dist/auspex-thunderbird-0.1.4.zip
 ```
 
 Then in Thunderbird: **Add-ons and Themes → the gear → Install Add-on From
@@ -144,7 +144,7 @@ message per auspex message:
 | `X-Auspex-Copies` | when several stored copies share one id |
 | `X-Auspex-Body-Mime` | the signed `body-mime`, reported and never obeyed |
 | body | `text/plain; charset=utf-8`, base64, the signed bytes verbatim |
-| attachments | `application/octet-stream`, sanitised filename, base64 |
+| attachments | `application/octet-stream`, base64, the filename cut to printable ASCII without separators or quotes (at most 128 characters), or the hash when nothing, or only dots, is left |
 
 Threads branch — a message names its parent and two messages naming the same
 parent are a branch — and `References` is exactly what makes Thunderbird's
@@ -196,8 +196,10 @@ because they are *not* invented here — they are ordinary labels the web
 client shows and edits like any other.
 
 **Folders.** A message goes to exactly one folder, chosen once at import and
-never moved: archived thread → `Archived`, otherwise written by you → `Sent`,
-otherwise → `Inbox`. Archiving a thread in the web client later does *not*
+never moved: archived thread → `Archived`, otherwise written by you and
+verified → `Sent`, otherwise → `Inbox`. A copy that only claims you as its
+author, unverified or forged, goes to `Inbox`. Mail an earlier version filed
+in `Sent` that way stays where it is. Archiving a thread in the web client later does *not*
 move the messages already mirrored — the alternative is either moving mail
 behind your back or holding two copies of it.
 
@@ -209,11 +211,13 @@ direction a flag is written locally *only* when it actually differs from
 what is there. That is what stops the two sides echoing a mark back and
 forth forever — `messages.update` fires `messages.onUpdated` whether or not
 it changed anything, so a blind write would put the whole mirror through the
-relay on every change the ship reports.
+relay on every change the ship reports. Only a message in the `Auspex`
+folders that the mirror imported is relayed. Mail elsewhere in the profile
+that copies an auspex `Message-ID` changes nothing on the ship.
 
 ## Sending
 
-Only a send from the auspex identity (`~ship@auspex.urbit`, the one this extension creates) is intercepted. `compose.onBeforeSend` fires for every account in the profile, so a send from any other identity, such as an ordinary IMAP/SMTP account, is left untouched for Thunderbird's own delivery.
+Only a send from the auspex identity (`~ship@auspex.urbit`, the one this extension creates) is intercepted. `compose.onBeforeSend` fires for every account in the profile, so a send from any other identity, such as an ordinary IMAP/SMTP account, is left untouched for Thunderbird's own delivery. A send from an auspex identity for a different ship, such as one left by an earlier connect, is refused, because the ship signs as itself whatever From says.
 
 An auspex send is intercepted and always cancelled, because a successful auspex send is one this extension already made over HTTP and Thunderbird must not also try to deliver it. On success the compose window closes and a sync runs so the message appears in `Auspex/Sent`. **On failure the window stays open with everything in it.** Nothing is lost and nothing is claimed sent.
 
@@ -225,9 +229,9 @@ Refused, with the reason in a notification:
   and a Bcc would silently become a visible one. Put everyone in To, or send
   twice;
 - more than 16 attachments, or one over 16 MiB (16777216 bytes; the file is named);
-- a reply to (or forward of) a message whose verdict is **forged**: every
-  copy the ship holds is forged, and the ship will not chain a message onto
-  one;
+- a reply to (or forward of) a message whose verdict is **forged**. No copy
+  of it the ship held at the last sync of its thread was genuine, and the
+  ship will not chain a message onto it;
 - being signed out.
 
 A send the ship accepts but does not carry to every recipient (a peer's
@@ -236,7 +240,8 @@ each one it skipped and why.
 
 `prev` — which message this one answers, and so where it hangs in the tree —
 is taken from the message the composer was opened from (reply or forward). A
-fresh compose has `prev: null` and starts a thread.
+fresh compose has `prev: null` and starts a thread, and so does a reply to a
+message outside the `Auspex` folders, including one dragged out of them.
 
 **The HTML ceiling.** Auspex carries a signed plain-text body. If you compose
 in HTML, the body is reduced to text by the browser's own HTML parser (its
@@ -260,6 +265,18 @@ unverified message is not an unverified thread. It reaches you three ways —
 the `[FORGED] ` subject prefix (which is what the list pane shows, where
 there is no room for a badge), the `X-Auspex-Verdict` header, and a toolbar
 button on the open message reading `✓`, `○` or `FORGED`.
+
+The button shows a verdict only for a message the mirror imported that is
+still in one of the `Auspex` folders. Any email can carry an
+`X-Auspex-Verdict` header, so everything else, an opened `.eml` included,
+reads "not a mirrored message". So does mirrored mail after a disconnect,
+until you connect again.
+
+A verdict can change after import. When a genuine copy of a message
+mirrored as forged reaches the ship later, the next sync of its thread moves
+the button and the reply check to the new verdict. The `[FORGED] ` prefix
+and the `X-Auspex-Verdict` header stay as imported, because a message is
+imported once.
 
 ## Ceilings, in one list
 

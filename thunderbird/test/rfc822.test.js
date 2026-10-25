@@ -130,6 +130,9 @@ test('a Message-ID that is not ours reads back as null', () => {
   assert.equal(idFromMessageId('<abc@example.com>'), null)
   assert.equal(idFromMessageId(''), null)
   assert.equal(idFromMessageId(undefined), null)
+  assert.equal(idFromMessageId('aaa@x@auspex.urbit'), null)          // ours only at the end
+  assert.equal(idFromMessageId('<0v1.m@auspex.urbit> junk'), null)
+  assert.equal(idFromMessageId('0v1.m@auspex.urbit'), '0v1.m')
 })
 
 test('a hostile subject cannot inject a header', () => {
@@ -167,7 +170,12 @@ test('safeName falls back to the hash, and caps at 128', () => {
   assert.equal(safeName('ééé', '0vhash'), '0vhash') // all non-ASCII dropped
   assert.equal(safeName('a'.repeat(400), '0vh').length, 128)
   assert.equal(dispositionFilename('plain.txt', '0vh'), '"plain.txt"')
-  assert.match(dispositionFilename('résumé.pdf', '0vh'), /^=\?utf-8\?B\?/)
+  assert.equal(dispositionFilename('résumé.pdf', '0vh'), '"rsum.pdf"')
+  assert.equal(dispositionFilename('../../é/passwd.html', '0vh'), '"....passwd.html"')
+  assert.equal(dispositionFilename('invoice\u202efdp.exe', '0vh'), '"invoicefdp.exe"')
+  assert.equal(dispositionFilename('é' + 'a'.repeat(128), '0vh'), `"${'a'.repeat(128)}"`)
+  assert.equal(dispositionFilename('..', '0vh'), '"0vh"')
+  assert.equal(dispositionFilename('é.é', '0vh'), '"0vh"')               // dots once the rest is gone
 })
 
 test('an unfetched attachment becomes a permanent placeholder', () => {

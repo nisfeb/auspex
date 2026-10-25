@@ -14,7 +14,7 @@ import {
 import { buildMessage, idFromMessageId, notFetchedNote } from './lib/rfc822.js'
 import {
   threadsToFetch, snapshotOf, planThread, readStateOps,
-  flagsFor, flagUpdate, flagOps,
+  flagsFor, flagUpdate, flagOps, mirrored, refreshVerdicts,
 } from './lib/sync.js'
 
 const PARENT = 'Auspex'
@@ -47,11 +47,15 @@ const DEFAULTS = {
   lastSync: 0,
   folders: {},              // name → MailFolderId
   snapshot: {},             // threadId → {last, count, archived, labels}
-  imported: {},             // auspex msg id → {tbId, folder, read, flagged, junk}
+  imported: {},             // auspex msg id → {tbId, folder, verdict, read, flagged, junk}
   counts: { messages: 0, threads: 0 },
 }
 
 const getState = async () => ({ ...DEFAULTS, ...(await browser.storage.local.get()) })
+
+//  The mirror's folders alone, for the per-event checks. One key, not the
+//  whole of storage per message displayed or flag clicked.
+const mirrorFolders = async () => (await browser.storage.local.get('folders')).folders || {}
 
 //  `imported`, HELD IN MEMORY and shared by the sync and the relay.
 //
@@ -243,6 +247,7 @@ async function importOne(item, folders, imported, flags, files) {
   imported[msg.id] = {
     tbId: header.id,
     folder: item.folder,
+    verdict: msg.verdict,
     read: !!msg.read,
     flagged: flags.flagged,
     junk: flags.junk,
@@ -267,16 +272,24 @@ async function importOne(item, folders, imported, flags, files) {
 //    restart and nothing at all afterwards. A message the mirror recorded
 //    with no id at all — the duplicate-Message-ID case below — is found
 //    the same way.
+//
+//    IN THE RECORD'S OWN FOLDER, both ways. A Message-ID is the sender's
+//    to choose, and a lookup across the profile could repoint the record
+//    at a message in some other account that names the same id.
+//    Thunderbird keeps one message per Message-ID in a folder, so inside
+//    that folder the name is unambiguous.
 async function headerFor(auspexId, rec) {
+  const want = setup && setup.folders[rec.folder]
+  const inFolder = (h) => !!(h && h.folder && h.folder.id === want)
   if (rec.tbId !== null && rec.tbId !== undefined) {
     try {
       const h = await browser.messages.get(rec.tbId)
-      if (h && idFromMessageId(h.headerMessageId) === auspexId) return h
+      if (inFolder(h) && idFromMessageId(h.headerMessageId) === auspexId) return h
     } catch { /* gone from under that id: look it up by name */ }
   }
   try {
     const found = await browser.messages.query({ headerMessageId: `${auspexId}@${DOMAIN}` })
-    const h = (found.messages || [])[0]
+    const h = (found.messages || []).find(inFolder)
     if (!h) return null
     rec.tbId = h.id
     return h
@@ -357,6 +370,7 @@ async function syncNow() {
         throw e
       }
       remote.push(...(thread.messages || []))
+      refreshVerdicts(thread, imported)
       const entry = byThread.get(id) || thread
       const flags = flagsFor(entry)
       want.set(id, { ...flags, ids: (thread.messages || []).map((m) => m.id) })
@@ -384,7 +398,7 @@ async function syncNow() {
           //  the message IS in the folder — that is what the refusal
           //  says — so find it by name rather than recording a hole.
           const rec = {
-            tbId: null, folder: item.folder,
+            tbId: null, folder: item.folder, verdict: item.msg.verdict,
             read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
           }
           await headerFor(item.msg.id, rec)
@@ -685,10 +699,9 @@ const RELAYED = ['read', 'flagged', 'junk']
 browser.messages.onUpdated.addListener(async (message, changed) => {
   const touched = RELAYED.filter((k) => k in changed)
   if (!touched.length) return
-  const id = idFromMessageId(message.headerMessageId)
-  if (!id) return
-  const rec = (await importedMap())[id]
-  if (!rec) return                                    // not ours
+  const ours = mirrored(message, await mirrorFolders(), await importedMap())
+  if (!ours) return                                   // not ours
+  const { id, rec } = ours
   let threadId
   for (const key of touched) {
     if (!!rec[key] === !!message[key]) continue       // already what we recorded
@@ -712,10 +725,13 @@ const refuse = (why) => {
 
 //  `prev` for a reply or a forward: the auspex id of the message the
 //  composer was opened from. A fresh compose has none, and `prev: null` is
-//  what starts a thread.
+//  what starts a thread. So does a reply to a message outside the mirror,
+//  whatever Message-ID it carries.
 async function prevFor(details) {
   if (details.relatedMessageId === undefined || details.relatedMessageId === null) return null
-  return idFromMessageId(await headerOf(details.relatedMessageId, 'message-id'))
+  const h = await browser.messages.get(details.relatedMessageId).catch(() => null)
+  const ours = mirrored(h, await mirrorFolders(), await importedMap())
+  return ours ? ours.id : null
 }
 
 //  HTML → text, and the ceiling is right here. Thunderbird's own composer
@@ -756,6 +772,14 @@ async function handleSend(tab, details) {
     return refuse('Signed out of the ship. Reconnect in the Auspex options; '
       + 'your message is still in the compose window.')
   }
+  //  AN AUSPEX IDENTITY THAT IS NOT THIS SHIP'S, such as one an earlier
+  //  connect to another ship left behind. The ship signs as itself
+  //  whatever From says, so the message would go out under a name the
+  //  composer did not show.
+  if (identity.email.toLowerCase() !== shipToAddress(state.ship).toLowerCase()) {
+    return refuse(`${identity.email} is not the connected ship. `
+      + `Send as ${shipToAddress(state.ship)}.`)
+  }
 
   //  RECIPIENTS. Every one must be a ship, and a recipient this extension
   //  cannot carry is a refusal naming it — never a silent drop from a
@@ -783,13 +807,18 @@ async function handleSend(tab, details) {
     ? (details.plainTextBody || '')
     : htmlToText(details.body || '')
 
-  //  NO REPLY TO A FORGERY. The mirror imports the best-verdict copy of an
-  //  id, so a forged one here means EVERY copy the ship holds is forged,
-  //  and the writer will not chain a message onto that: it answers 200 and
-  //  sends nothing. Refused here, while the message is still on screen,
-  //  rather than lost there.
+  //  NO REPLY TO A FORGERY. The verdict is the record's, which is the
+  //  ship's best copy of that id as of the last fetch of its thread, so a
+  //  forged one means no copy the ship held then was genuine. The writer
+  //  will not chain a message onto that, and the send route answers 200
+  //  before the writer refuses, so the message would vanish with nothing
+  //  said. Refused here, while it is still on screen, rather than lost
+  //  there. A record written before 0.1.4 has no verdict, and the header
+  //  it was imported with stands in.
   const prev = await prevFor(details)
-  if (prev && await headerOf(details.relatedMessageId, 'x-auspex-verdict') === 'forged') {
+  const prevVerdict = prev && ((await importedMap())[prev].verdict
+    ?? await headerOf(details.relatedMessageId, 'x-auspex-verdict'))
+  if (prevVerdict === 'forged') {
     return refuse('The message you are replying to or forwarding is forged: no copy '
       + 'of it carries a valid signature, so the ship will not send anything chained '
       + 'to it. Start a new message instead; yours is still here.')
@@ -858,8 +887,13 @@ const VERDICT_UI = {
   forged: { label: 'FORGED', title: 'Auspex: FORGED — the signature does not match' },
 }
 
+//  ONLY ON THE MIRROR'S OWN MESSAGES. The header is a claim any email can
+//  make, so a message outside the mirror folders gets no verdict at all.
+//  The record's verdict is the ship's current one. The header stands in
+//  for a record written before 0.1.4.
 browser.messageDisplay.onMessageDisplayed.addListener(async (tab, message) => {
-  const verdict = await headerOf(message.id, 'x-auspex-verdict')
+  const ours = mirrored(message, await mirrorFolders(), await importedMap())
+  const verdict = ours && (ours.rec.verdict ?? await headerOf(message.id, 'x-auspex-verdict'))
   const ui = VERDICT_UI[verdict]
   const set = browser.messageDisplayAction
   if (!ui) {
