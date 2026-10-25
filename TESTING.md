@@ -36,7 +36,7 @@ should start from: `$F snap auspex compiled`. For a throwaway point,
 ## Offline tests (no ship)
 
 ```sh
-scripts/offline-tests.sh     # auspex-web, 52 tests, ~22 s
+scripts/offline-tests.sh     # auspex-web, 53 tests, ~22 s
 python3 scripts/hoon-test-kit/offline-test.py tests/lib/auspex-web.hoon test-de-settings   # one arm
 ```
 
@@ -51,11 +51,11 @@ lacks it, so they stop at `-find.cric`. The ship run is the verdict.
 ## Ship tests
 
 ```sh
-scripts/hoon-test-kit/hoon-test.sh ~/fleet/piers/nep               # all four suites, 213 tests, ~27 s
+scripts/hoon-test-kit/hoon-test.sh ~/fleet/piers/nep               # all four suites, 215 tests, ~27 s
 scripts/hoon-test-kit/hoon-test.sh ~/fleet/piers/nep auspex-chain  # one suite
 ```
 
-chain 128, web 52, vectors 15, fibers 18. The kit finds vere in
+chain 128, web 53, vectors 15, fibers 19. The kit finds vere in
 `~/software`, so `VERE` need not be set. On a fresh set (golden, or a
 rebuilt pier) make the test desk once: `|new-desk %auspex-test` and
 `|mount %auspex-test` in the dojo, then

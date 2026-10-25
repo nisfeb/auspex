@@ -407,4 +407,45 @@
     %+  expect-eq  !>(`(unit settings-req:web)`~)
     !>((de-settings:web (jo '{"auto-size":0,"allow":["zod"],"block":[],"budget":1}')))
   ==
+::
+::  ── the cross-site gate ─────────────────────────────────────────────
+::
+::  +cross-site: the Thunderbird add-on's Origin first, then Fetch
+::  Metadata when present, then Origin against Host. Neither header is
+::  a non-browser client. Lattice's cases, then auspex's own.
+++  test-cross-site
+  =/  y  |=([s=(unit @t) o=(unit @t) h=(unit @t)] (cross-site:web s o h))
+  =/  tb=(unit @t)  `'moz-extension://8f1c2d3e-4b5a-6789-abcd-ef0123456789'
+  ;:  weld
+    ::  the owner's own page, a typed navigation, a granted extension
+    (expect-eq !>(|) !>((y `'same-origin' `'https://sampel.arvo.network' `'sampel.arvo.network')))
+    (expect-eq !>(|) !>((y `'none' ~ `'sampel.arvo.network')))
+    (expect-eq !>(|) !>((y `'none' `'chrome-extension://abc' `'sampel.arvo.network')))
+    (expect-eq !>(|) !>((y `'Same-Origin' ~ ~)))
+    ::  another site, or another origin on the same site
+    (expect-eq !>(&) !>((y `'cross-site' `'https://evil.example' `'sampel.arvo.network')))
+    (expect-eq !>(&) !>((y `'same-site' `'https://other.arvo.network' `'sampel.arvo.network')))
+    ::  plain http to a LAN host: no Fetch Metadata, so Origin decides
+    (expect-eq !>(|) !>((y ~ `'http://192.168.1.5:8080' `'192.168.1.5:8080')))
+    (expect-eq !>(|) !>((y ~ `'HTTP://Ship.Local:8080' `'ship.local:8080')))
+    (expect-eq !>(&) !>((y ~ `'http://evil.example' `'192.168.1.5:8080')))
+    (expect-eq !>(&) !>((y ~ `'http://192.168.1.5:9999' `'192.168.1.5:8080')))
+    (expect-eq !>(&) !>((y ~ `'null' `'192.168.1.5:8080')))
+    (expect-eq !>(&) !>((y ~ `'http://192.168.1.5:8080' ~)))
+    ::  a non-browser client sends neither
+    (expect-eq !>(|) !>((y ~ ~ `'sampel.arvo.network')))
+    (expect-eq !>(|) !>((y ~ ~ ~)))
+    ::  the Thunderbird add-on on a plain-http LAN ship sends no Fetch
+    ::  Metadata, and on https or loopback it sends same-origin
+    (expect-eq !>(|) !>((y ~ tb `'192.168.1.5:8080')))
+    (expect-eq !>(|) !>((y `'same-origin' tb `'sampel.arvo.network')))
+    ::  and the carve-out comes first, whatever Fetch Metadata says
+    (expect-eq !>(|) !>((y `'cross-site' tb `'sampel.arvo.network')))
+    ::  talon: no Origin and no Fetch Metadata
+    (expect-eq !>(|) !>((y ~ ~ `'192.168.1.5:8080')))
+    ::  a cross-site write, a foreign Origin on plain http, Origin null
+    (expect-eq !>(&) !>((y `'cross-site' ~ `'192.168.1.5:8080')))
+    (expect-eq !>(&) !>((y ~ `'https://evil.example' `'192.168.1.5:8080')))
+    (expect-eq !>(&) !>((y ~ `'null' `'sampel.arvo.network')))
+  ==
 --

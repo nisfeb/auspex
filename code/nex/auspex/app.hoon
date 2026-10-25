@@ -3286,6 +3286,19 @@
   ::  over /sys/bowl just to compare cost lattice ~0.2s on every request.
   ?.  authenticated.req
     (send-err eyre-id 403 'forbidden')
+  ::  THE CROSS-SITE GATE. The owner's cookie has no SameSite, so another
+  ::  site can make the owner's browser send it on a POST that sends
+  ::  mail, deletes a thread or saves a rule (security audit run-1).
+  ::  Refuse any write another site sent (+cross-site:uw). GET and HEAD
+  ::  stay open, since no read route writes.
+  ?:  ?&  !?=(?(%'GET' %'HEAD') meth)
+          %:  cross-site:uw
+            (get-header:http 'sec-fetch-site' header-list.request.req)
+            (get-header:http 'origin' header-list.request.req)
+            (get-header:http 'host' header-list.request.req)
+          ==
+      ==
+    (send-err eyre-id 403 'cross-site request refused')
   ::  the shell and its one script, laid down as grubs in +on-load.
   ?:  &(?=(~ suffix) =(%'GET' meth))
     (serve-ui eyre-id %'index.html')

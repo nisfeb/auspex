@@ -53,6 +53,23 @@
     (expect-eq !>(503) !>(code:(status:ft t)))
   ==
 ::
+::  a write another site sent, with the owner's cookie, is refused at
+::  the cross-site gate: 403, and nothing reaches the writer
+++  test-a-cross-site-write-is-refused
+  =/  t
+    %^  run:ft  a-world:ft  req-fiber
+    !>  :-  ~zod
+        ^-  inbound-request:eyre
+        :*  &  |  [%ipv4 .127.0.0.1]  %'POST'  '/apps/auspex/api/archive'
+            ~[['sec-fetch-site' 'cross-site'] ['origin' 'https://evil.example']]
+            `(as-octs:mimes:html '{"thread-id":"0v1a","archived":true}')
+        ==
+  ;:  weld
+    (expect-eq !>(%done) !>(end.t))
+    (expect-eq !>([403 '{"error":"cross-site request refused"}']) !>((status:ft t)))
+    (expect-eq !>(`(list action:uc)`~) !>((writes t)))
+  ==
+::
 ::  a malformed body is refused at the route: nothing reaches the writer
 ++  test-a-bad-archive-body-never-reaches-the-writer
   =/  t  (call & %'POST' '/apps/auspex/api/archive' '{"thread-id":"nope"}')
