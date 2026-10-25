@@ -1048,6 +1048,11 @@
   ::  participants: the signatures are the authority, not the courier.
   =/  kind  (poke-kind:uc p.sage)
   ?:  ?=(%chain kind)
+    ::  counted before the clam, because the clam is the walk a shared
+    ::  subtree multiplies. Not in the marc, where a refusal fails and
+    ::  restarts the writer. See +max-cells.
+    ?.  (cells-within:uc q.q.sage max-cells:uc)
+      (reject root 'chain too large')
     =/  res  (mule |.(~|(%auspex-bad-chain ;;(chain:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed chain')
     (deliver root p.res)
@@ -1066,9 +1071,9 @@
   ::  source check is what makes that harmless. The hash is re-checked
   ::  in +take-blob regardless.
   ?:  ?=(%blob-in kind)
-    =/  res  (mule |.(~|(%auspex-bad-blob-in ;;(blob-in:uc q.q.sage))))
-    ?:  ?=(%| -.res)  (reject root 'malformed blob-in')
-    (take-blob root p.res)
+    =/  res  (blob-in-from-noun:uc q.q.sage)
+    ?~  res  (reject root 'malformed blob-in')
+    (take-blob root u.res)
   ::  a probe fiber's answer. Local-only for the same reason a fetch
   ::  fiber's is, and by the same check: the blot has a path prefix,
   ::  which the agent-facing surface and a dojo poke cannot name, but a
@@ -1095,7 +1100,7 @@
     %send           (do-send root to.a subject.a body.a prev.a refs.a)
     %read           (do-mark root ids.a tid.a %read &)
     %delete-thread  (do-delete root thread-id.a)
-    %fetch-blob     (do-fetch-blob root hash.a from.a)
+    %fetch-blob     (do-fetch-blob root hash.a from.a ~)
   ::  %forget-peer drops one discovery record so the next send re-probes.
   ::  %.n like every other local-state action: no message appeared, none
   ::  changed, and the tab that asked for it is the only one waiting.
@@ -1200,11 +1205,16 @@
     (reject root 'bad attachment')
   ;<  loaded=(map thread-id:uc (map path stored-msg:uc))  bind:m  (read-threads root)
   ::  resolve prev to its containing thread. A msg-id is a hash over the
-  ::  message's full contents, so it names exactly one message and
-  ::  therefore exactly one chain.
+  ::  message's full contents, so it names exactly one message, but not
+  ::  one thread. Any ship that knows the message can file a re-signed
+  ::  copy of it under a root of its own. +thread-holding prefers the
+  ::  thread rooted where prev's ancestry ends, which only the genuine
+  ::  thread can be.
   ::
   ::  ponytail: a walk of every thread per reply, the one writer walk left
   ::  on the send path; a [msg-id -> thread-id] index grub retires it.
+  ::  Such an index must name the thread an id's ancestry roots in, not
+  ::  whichever thread last stored a copy, or the plant wins again.
   =/  tid=(unit thread-id:uc)  ?~(prev ~ (thread-holding:uc loaded u.prev))
   ?:  &(?=(^ prev) ?=(~ tid))
     (reject root 'unknown prev')
@@ -1246,12 +1256,14 @@
   ::  (all three are +sent-refusal's, in this order)
   =/  big=(unit @t)  (sent-refusal:uc new)
   ?^  big  (reject root u.big)
-  ::  the thread is already resolved: `tid` came from `prev`, which names
-  ::  exactly one message, and a compose is by definition a new root.
+  ::  the thread is already resolved: `tid` came from `prev` through
+  ::  +thread-holding, and a compose is by definition a new root.
   ::  Re-deriving it with +thread-key here would be slower AND wrong -
   ::  it returns the first map-traversal match, so a coincidental [id sig]
   ::  overlap with another thread would file this send into that thread.
-  ::  Nothing here is attacker-supplied, so no identity fixing is needed.
+  ::  That pick is open to attack. A remote ship may plant a copy of
+  ::  `prev` under a root of its own, and +thread-holding is what picks
+  ::  the genuine thread over it.
   =/  rid=thread-id:uc  ?^(tid u.tid (id:uc u))
   ;<  ~  bind:m  (ensure-thread root rid)
   ::  where this message sits in the tree: its own ancestry, root first.
@@ -1529,6 +1541,10 @@
 ::    on disk with every verdict already set, and all a rule can reach
 ::    is a label and a flag.
 ::
+::    `vs` is those verdicts, every copy in `c` included, because a rule
+::    naming a sender fires only on a copy that sender signed
+::    (+rule-hits). A claim of from=~bus is not mail from ~bus.
+::
 ::    UN-ARCHIVE ON NEW MAIL. Without it, archiving a thread would make
 ::    every later message in it vanish silently, which is mail loss
 ::    wearing the costume of a feature. Only actual new content
@@ -1542,11 +1558,16 @@
 ::    rules are then applied over, not something applied after them.
 ::
 ++  file-arrival
-  |=  [root=@ud t=thread-id:uc c=chain:uc wrote=?]
+  |=  $:  root=@ud
+          t=thread-id:uc
+          c=chain:uc
+          vs=(map [msg-id:uc @ux] verdict:uc)
+          wrote=?
+      ==
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ;<  rs=(list rule:uc)  bind:m  (read-rules root)
-  =/  got  (apply-rules:uc rs c)
+  =/  got  (apply-rules:uc rs c vs)
   ;<  mt=meta:uc  bind:m  (read-meta root t)
   ::  the label bound refuses the ADDITION, never the delivery: a rule
   ::  that would push a thread past the cap simply does not add. Nacking
@@ -1613,6 +1634,8 @@
   ::  answer, and +prune sheds there rather than rejecting.
   ::  every cap below is +incoming-refusal's, in this order:
   ::  length, bodies, subjects, recipients, then these.
+  ::  every signed atom within its type's width, since a mold clams an
+  ::  atom of any size and the copy is stored whole. See +fits-fields.
   ::  a delivered chain carries attachment METADATA and never bytes, so
   ::  this bounds what a hostile peer can make us store per message and
   ::  what it can later make us try to fetch. Rejected, not truncated:
@@ -1669,8 +1692,10 @@
   ::  fold this poke's verdicts into the stored ones BEFORE pruning:
   ::  +prune needs a verdict for every message in `new`, including ones
   ::  stored by an earlier poke that this one did not carry.
+  ::  and the copies already held win a tie inside one verdict, so junk
+  ::  with larger sigs cannot shed a keyless signer's genuine copy.
   =/  vs2  (freeze:uc held vs)
-  =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
+  =/  pruned=chain:uc  (prune:uc new vs2 ~(key by held) max-copies:uc)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
   ;<  fresh=?  bind:m  (mark-direct root rid)
@@ -1689,7 +1714,7 @@
   ::  because by this point the chain is already on disk with its
   ::  verdicts and a $rule has no field that reaches it. See
   ::  +file-arrival.
-  ;<  ~  bind:m  (file-arrival root rid c wrote)
+  ;<  ~  bind:m  (file-arrival root rid c vs2 wrote)
   ;<  ~  bind:m  (note root 'deliver' & (scot %uv rid))
   ::  THE OWNER'S DOWNLOAD RULES, over the copies this delivery checked
   ::  (`todo`): a copy settled earlier was offered its downloads when it
@@ -2283,8 +2308,12 @@
 ::    `who` is a hint about where to look and nothing more - any ship
 ::    holding the bytes may serve them, and the hash proves them.
 ::
+::    `size` is the signed size when the download rules chose the file
+::    by it (+queue-fetches), and ~ when the owner asked. The bytes must
+::    then be exactly that long. See +blob-refusal.
+::
 ++  do-fetch-blob
-  |=  [root=@ud h=@uv who=ship]
+  |=  [root=@ud h=@uv who=ship size=(unit @ud)]
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  have=(unit octs)  bind:m  (read-blob root h)
@@ -2297,7 +2326,7 @@
   ::  spawning a second fiber to race the first.
   =/  id=@ta  (scot %uv (sham [h who]))
   ;<  ~  bind:m
-    (put-file (rf root /fetch id) [/auspex %fetchreq] [%0 h who])
+    (put-file (rf root /fetch id) [/auspex %fetchreq] `fetch-req:uc`[%1 h who size])
   ::  %.n, AND +take-blob ANSWERS %.n TOO: neither queueing the fetch
   ::  nor the bytes arriving moves /beacon/rev, so nothing on this path
   ::  ever bumps it. A queued request is not something any reader
@@ -2315,11 +2344,11 @@
 ::  recursion by arm name, for the ;< reason stated at +mark-read-loop.
 ::
 ++  queue-fetches
-  |=  [root=@ud xs=(list [h=@uv who=ship])]
+  |=  [root=@ud xs=(list [h=@uv who=ship size=@ud])]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
   ?~  xs  (pure:m ~)
-  ;<  *  bind:m  (do-fetch-blob root h.i.xs who.i.xs)
+  ;<  *  bind:m  (do-fetch-blob root h.i.xs who.i.xs `size.i.xs)
   (queue-fetches root t.xs)
 ::
 ::  +run-fetch: the ephemeral fetch fiber. Runs OFF the writer.
@@ -2335,14 +2364,24 @@
 ::    the fiber, and there is no reason to leave that hostage to a later
 ::    move of the path.
 ::
+::    The state is read as a noun and through the ladder, never with
+::    get-state-as on the type. That clams with no mule, so a request
+::    laid by an older build would crash this fiber, and +rise-wait would
+::    park it waiting for a poke nobody sends. One that reads as no
+::    request at all is answered as a miss, so the writer culls it.
+::
 ++  run-fetch
   |=  [root=@ud id=@ta]
   =/  m  (fiber:fiber:nexus ,~)
   ^-  form:m
-  ;<  rq=fetch-req:uc  bind:m  (get-state-as:io ,fetch-req:uc)
-  ;<  got=(unit octs)  bind:m  (fetch-keen root from.rq hash.rq)
+  ;<  n=*  bind:m  (get-state-as:io ,*)
+  =/  rq=(unit fetch-req:uc)  (fetch-req-from-noun:uc n)
+  ?~  rq
+    %+  poke:io  (rf root / %'main.sig')
+    [[/auspex %blob-in] `blob-in:uc`[%1 id 0v0 ~ ~]]
+  ;<  got=(unit octs)  bind:m  (fetch-keen root from.u.rq hash.u.rq)
   %+  poke:io  (rf root / %'main.sig')
-  [[/auspex %blob-in] [%0 id hash.rq got]]
+  [[/auspex %blob-in] `blob-in:uc`[%1 id hash.u.rq size.u.rq got]]
 ::
 ::  +take-blob: the writer's half of a fetch. Local only.
 ::
@@ -2361,10 +2400,12 @@
   =/  m  (fiber:fiber:nexus ,?)
   ^-  form:m
   ;<  ~  bind:m  (cull-if-there (rf root /fetch id.b))
-  =/  bad=(unit @t)  (blob-refusal:uc res.b hash.b)
+  ::  The bytes have already landed whole by now. A keen answer reaches
+  ::  this ship at whatever size its publisher chose, and nothing here
+  ::  can measure it first. So these checks bound what is STORED, never
+  ::  what a publisher can send. Bounding that needs ames and vere.
+  =/  bad=(unit @t)  (blob-refusal:uc res.b hash.b size.b)
   ?^  bad  (reject root u.bad)
-  ::  (the size bounds what a hostile publisher can hand back before it
-  ::  is measured; see +blob-refusal)
   ?>  ?=(^ res.b)
   ;<  room=?  bind:m  (make-room root p.u.res.b)
   ?.  room
@@ -2920,7 +2961,16 @@
     (pure:m ~)
   ::  what a refused poke fails with; the restart that follows is not a crash
   =/  note=tang  ~[leaf+"{msg}: waiting after a crash; the poke was refused"]
-  =/  crash=?  !=(note u.prod)
+  ::  A poke whose mark the kernel could not validate is not a crash
+  ::  either. Grubbery fails the fiber in +hydrate, before any code here
+  ::  runs, and has already nacked and dropped that poke by the time it
+  ::  restarts us, so nothing is replayed. /main.sig takes pokes from any
+  ::  ship, and counting these would let a stranger hold the writer in
+  ::  its 60-minute wait for one malformed noun an hour. Should the
+  ::  kernel rename the tank, this falls back to the backoff.
+  =/  dropped=?  =(~[leaf+"hydrate failed"] (scag 1 u.prod))
+  =/  crash=?  &(!dropped !=(note u.prod))
+  %-  ?.(dropped same (slog leaf+"{msg}: a poke failed its mark and was dropped" ~))
   ;<  clock=(unit @da)  bind:m  soft-now
   ?~  clock
     %-  ?.(crash same (slog [leaf+"{msg}: no clock (weir?); waiting for a poke" u.prod]))

@@ -316,7 +316,7 @@
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
   =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
-  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs 4)))
+  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs ~ 4)))
 ::
 ::  a %verified copy is never shed, however many forged copies crowd it and
 ::  whatever order they arrive in. Both orders, same reason as above.
@@ -326,8 +326,8 @@
   =/  cs2  ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)]
   =/  vs   (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
   ;:  weld
-    (expect-eq !>(~[a]) !>((prune:auspex cs vs 1)))
-    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs vs ~ 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs ~ 1)))
   ==
 ::
 ::  the fill bucket ranks %unverified above %forged. This is not a nicety:
@@ -356,10 +356,10 @@
   ;:  weld
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs ~ 1)
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs ~ 1)
   ==
 ::
 ::  the whole ranking in one shot: %verified, then %unverified, then
@@ -378,8 +378,8 @@
         [[i sig.a] %verified]
     ==
   ::  both input orders, for the +add:ja reversal reason given above
-  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
-  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 2)
+  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs ~ 2)
+  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs ~ 2)
   ;:  weld
     (expect-eq !>(2) !>((lent one)))
     (expect !>((lien one |=(m=msg:sur =(sig.m sig.a)))))
@@ -387,6 +387,31 @@
     (expect-eq !>(2) !>((lent two)))
     (expect !>((lien two |=(m=msg:sur =(sig.m sig.a)))))
     (expect !>((lien two |=(m=msg:sur =(sig.m 0x1)))))
+  ==
+::
+::  A COPY ALREADY HELD OUTLASTS JUNK OF ITS OWN RANK. With no key for
+::  the signer every copy is %unverified, and a courier who knows the
+::  message pokes four copies whose sigs are larger than the genuine
+::  one. Sig order would keep the junk, so the held copy wins the tie
+::  instead, in both input orders. It never beats a better verdict.
+++  test-prune-keeps-the-held-copy-of-a-keyless-signer
+  =/  a     (um ~nec 'one' ~)
+  =/  i     (id:auspex unsigned.a)
+  =/  real  a(sig 0x1)
+  =/  all=chain:sur  ~[real a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x5)]
+  =/  vs=(map [msg-id:sur @ux] verdict:sur)
+    (malt (turn all |=(m=msg:sur [[i sig.m] %unverified])))
+  =/  old  (sy ~[[i sig.real]])
+  =/  has  |=(c=chain:sur (lien c |=(m=msg:sur =(sig.m sig.real))))
+  ;:  weld
+    ::  the attack is real. With nothing held, the genuine copy goes.
+    (expect !>(!(has (prune:auspex (merge:auspex ~ all) vs ~ 4))))
+    (expect !>((has (prune:auspex (merge:auspex ~ all) vs old 4))))
+    (expect !>((has (prune:auspex (flop all) vs old 4))))
+    (expect-eq !>(4) !>((lent (prune:auspex all vs old 4))))
+    ::  a held %forged copy still loses to a new %unverified one
+    %+  expect-eq  !>(~[a(sig 0x2)])
+    !>  (prune:auspex ~[real a(sig 0x2)] (~(put by vs) [i sig.real] %forged) old 1)
   ==
 ::
 ::  a thread's identity comes from CONTENT, never from the order of the
@@ -1111,10 +1136,29 @@
 ++  test-sent-is-threads-we-authored
   =/  mine   (forge ~sampel-palnet ~ 'a' 'b' ~2026.1.1 ~)
   =/  yours  (forge ~palnet-sampel ~ 'a' 'b' ~2026.1.1 ~)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet ~palnet-sampel]) ~[mine yours]))
   ;:  weld
-    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine])))
-    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours])))
-    (expect !>(!(in-sent:auspex ~sampel-palnet ~)))
+    (expect !>((in-sent:auspex ~sampel-palnet ~[yours mine] vs)))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~[yours] vs)))
+    (expect !>(!(in-sent:auspex ~sampel-palnet ~ vs)))
+  ==
+::
+::  SENT IS WHAT WE SIGNED, NOT WHAT CLAIMS US. Any ship can poke us a
+::  copy saying from=our. A forged one and an unverified one both stay
+::  out of Sent, and the same copy is in once we hold it %verified.
+++  test-sent-needs-our-signature
+  =/  us    ~sampel-palnet
+  =/  mine  (forge us ~ 'a' 'b' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel us 'a' 'lie' ~2026.1.2)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[us]) ~[mine liar]))
+  ;:  weld
+    ::  the fixture is what it says, one verified and one forged
+    (expect-eq !>(%verified) !>((~(got by vs) [(id:auspex unsigned.mine) sig.mine])))
+    (expect-eq !>(%forged) !>((~(got by vs) [(id:auspex unsigned.liar) sig.liar])))
+    (expect !>((in-sent:auspex us ~[mine] vs)))
+    (expect !>(!(in-sent:auspex us ~[liar] vs)))
+    ::  no verdict held is %unverified, and that is not ours either
+    (expect !>(!(in-sent:auspex us ~[mine] ~)))
   ==
 ::
 ++  test-page-slices-without-losing-the-total
@@ -1221,15 +1265,16 @@
 ++  test-apply-rules-composes-additively
   =/  m  (forge ~sampel-palnet ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
   =/  c=chain:sur  ~[m]
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) c))
   =/  r1=rule:sur  [%0 0v1 `~sampel-palnet ~ (sy ~[%work]) |]
   =/  r2=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) &]
   =/  r3=rule:sur  [%0 0v3 `~palnet-sampel ~ (sy ~[%never]) &]
-  =/  got  (apply-rules:auspex ~[r1 r2 r3] c)
+  =/  got  (apply-rules:auspex ~[r1 r2 r3] c vs)
   ::  no rule fires: no labels, and NOT archived. A bare ? bunts to %.y,
   ::  so an accumulator-shaped fold here would archive everything the
   ::  moment no rule matched.
-  =/  quiet  (apply-rules:auspex ~[r3] c)
-  =/  none   (apply-rules:auspex ~ c)
+  =/  quiet  (apply-rules:auspex ~[r3] c vs)
+  =/  none   (apply-rules:auspex ~ c vs)
   ;:  weld
     ::  the two matching rules' labels union; the non-matching one adds
     ::  nothing
@@ -1240,6 +1285,27 @@
     (expect-eq !>(*(set @tas)) !>(add.quiet))
     ::  and with no rules at all
     (expect !>(!archive.none))
+  ==
+::
+::  A SENDER RULE NEEDS THE SENDER'S SIGNATURE. Anyone can claim
+::  from=~sampel-palnet, so a rule naming ~sampel-palnet fires on its
+::  verified copy and on nothing else. It skips a forgery, and the real
+::  copy too while no verdict is held for it. A subject rule is about
+::  the text and still fires on the forgery.
+++  test-a-sender-rule-needs-the-sender-signature
+  =/  who   ~sampel-palnet
+  =/  real  (forge who ~ 'Quarterly Invoice' 'b' ~2026.1.1 ~)
+  =/  liar  (fake-from ~palnet-sampel who 'Quarterly Invoice' 'b' ~2026.1.2)
+  =/  vs  (malt (verify-chain:auspex (all-keys ~[who]) ~[real liar]))
+  =/  by-who=rule:sur   [%0 0v1 `who ~ (sy ~[%work]) &]
+  =/  by-subj=rule:sur  [%0 0v2 ~ `'invoice' (sy ~[%money]) |]
+  ;:  weld
+    ::  the fixture is what it says, and the liar really reads %forged
+    (expect-eq !>(%forged) !>((~(got by vs) [(id:auspex unsigned.liar) sig.liar])))
+    (expect-eq !>([(sy ~[%work]) &]) !>((apply-rules:auspex ~[by-who] ~[real] vs)))
+    (expect-eq !>([*(set @tas) |]) !>((apply-rules:auspex ~[by-who] ~[liar] vs)))
+    (expect-eq !>([*(set @tas) |]) !>((apply-rules:auspex ~[by-who] ~[real] ~)))
+    (expect-eq !>([(sy ~[%money]) |]) !>((apply-rules:auspex ~[by-subj] ~[liar] vs)))
   ==
 ::
 
@@ -1426,6 +1492,9 @@
     (expect !>((proto-ok:auspex [%auspex ok64 (turn ok64 |=(* %a)) our-caps:auspex])))
     (expect !>(!(proto-ok:auspex [%auspex ~[1] ~[%a %b] our-caps:auspex])))
     (expect !>(!(proto-ok:auspex [%auspex ~ ~ our-caps:auspex])))
+    ::  and each version fits 4 bytes, since a refusal renders them all
+    (expect !>((proto-ok:auspex [%auspex ~[(dec (bex 32))] ~[%a] our-caps:auspex])))
+    (expect !>(!(proto-ok:auspex [%auspex ~[(bex 32)] ~[%a] our-caps:auspex])))
   ==
 ::
 ::  the two version refusals, as the user reads them. Ship name first,
@@ -1556,7 +1625,7 @@
   !>((unsettled:auspex held ~[a b c d]))
 ::
 ::  +auto-fetch: the allow list is what lets bytes in; a stranger only
-::  under auto-size, which is 0 until the owner sets it; never a
+::  under auto-size, which is 0 and off until the owner sets it; never a
 ::  blocked ship, never an unverified message, never past 3/4 budget.
 ++  test-auto-fetch-rules
   =/  s=settings:sur
@@ -1567,6 +1636,10 @@
     (expect-eq !>(|) !>((auto-fetch:auspex s ~zod %unverified 1 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s ~zod %forged 1 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s ~nec %verified 1 0)))
+    ::  auto-size 0 is off, so a stranger's file claiming 0 bytes stays
+    ::  out, while an allowed ship's still comes in
+    (expect-eq !>(|) !>((auto-fetch:auspex s ~nec %verified 0 0)))
+    (expect-eq !>(&) !>((auto-fetch:auspex s ~zod %verified 0 0)))
     (expect-eq !>(&) !>((auto-fetch:auspex s(auto-size 10) ~nec %verified 10 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size 10) ~nec %verified 11 0)))
     (expect-eq !>(|) !>((auto-fetch:auspex s(auto-size big) ~bus %verified 1 0)))
@@ -1615,9 +1688,10 @@
   =/  s=settings:sur  [%0 0 (sy ~[~zod ~bus]) ~ 40]
   ;:  weld
     ::  ~bus is allowed but its message did not verify
-    (expect-eq !>(~[[0v1 ~zod] [0v2 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 0)))
+    ::  and each pick carries the signed size, which the bytes must match
+    (expect-eq !>(~[[0v1 ~zod 10] [0v2 ~zod 10]]) !>((auto-picks:auspex s ~[a b] vs 0)))
     ::  3/4 of 40 is 30: 15 held leaves room for one of the two
-    (expect-eq !>(~[[0v1 ~zod]]) !>((auto-picks:auspex s ~[a b] vs 15)))
+    (expect-eq !>(~[[0v1 ~zod 10]]) !>((auto-picks:auspex s ~[a b] vs 15)))
   ==
 ::
 ::  ── what the nexus renders ──────────────────────────────────────────
@@ -1668,6 +1742,18 @@
       (expect-eq !>(`json`~) !>((jget k 'prev')))
       (expect-eq !>(`json`[%b |]) !>((jget k 'read')))
     ==
+  ==
+::
+::  a stored copy whose signed `sent` +time cannot write still renders,
+::  clamped to the epoch or to the year 9999, and an ordinary one is
+::  untouched
+++  test-msg-json-clamps-a-sent-it-cannot-write
+  =/  m  (um ~zod 'b' ~)
+  =/  sent  |=(d=@da (jget (msg-json:auspex ~ ~ m(sent.unsigned d)) 'sent'))
+  ;:  weld
+    (expect-eq !>(`json`[%n ~.0]) !>((sent `@da`1)))
+    (expect-eq !>((time:enjs:format ~9999.12.31)) !>((sent `@da`(bex 200))))
+    (expect-eq !>((time:enjs:format ~2026.1.1)) !>((sent ~2026.1.1)))
   ==
 ::
 ::  a thread renders its messages in canonical order whatever the map
@@ -1735,7 +1821,10 @@
   =/  them  ~palnet-sampel
   =/  ours   (forge us (sy ~[them]) 'mine' 'b' ~2026.1.1 ~)
   =/  reply  (forge them (sy ~[us]) 'theirs' 'c' ~2026.1.2 ~)
-  =/  mk  |=([c=chain:sur mt=meta:sur] `row:sur`[(malt (turn c |=(m=msg:sur (st m %verified)))) c ~ 0 mt])
+  =/  mk
+    |=  [c=chain:sur mt=meta:sur]
+    =/  ss  (malt (turn c |=(m=msg:sur (st m %verified))))
+    `row:sur`[ss c (verdicts-of:auspex ss) 0 mt]
   =/  sent   (mk ~[ours] *meta:sur)
   =/  got    (mk ~[reply] *meta:sur)
   =/  arch   (mk ~[reply] m0(archived &))
@@ -1915,6 +2004,9 @@
     (expect-eq !>(`(unit @t)``'body too long') !>((incoming-refusal:auspex ~[ok(body.unsigned (crip (reap +(max-body:auspex) 'a')))])))
     (expect-eq !>(`(unit @t)``'subject too long') !>((incoming-refusal:auspex ~[ok(subj.unsigned (crip (reap +(max-subj:auspex) 'a')))])))
     (expect-eq !>(`(unit @t)``'too many recipients') !>((incoming-refusal:auspex ~[ok(to.unsigned (sy (turn (gulf 1 +(max-to:auspex)) |=(i=@ `@p`i))))])))
+    ::  a life too wide to render cheaply, before the key lookup renders it
+    (expect-eq !>(`(unit @t)``'field out of range') !>((incoming-refusal:auspex ~[ok(life.unsigned (bex 32))])))
+    (expect-eq !>(`(unit @t)``'field out of range') !>((incoming-refusal:auspex ~[att(life.unsigned (bex 32))])))
     (expect-eq !>(`(unit @t)``'too many attachments') !>((incoming-refusal:auspex ~[att])))
     (expect-eq !>(`(unit @t)``'bad body mime') !>((incoming-refusal:auspex ~[mime])))
     (expect-eq !>(`(unit @t)``'chain too deep') !>((incoming-refusal:auspex (deep +(max-depth:auspex)))))
@@ -1924,6 +2016,59 @@
     ::  a chain breaking two caps is refused for the first in the order
     %+  expect-eq  !>(`(unit @t)``'body too long')
     !>  (incoming-refusal:auspex ~[ok(body.unsigned (crip (reap +(max-body:auspex) 'a')), subj.unsigned (crip (reap +(max-subj:auspex) 'a')))])
+  ==
+::
+::  every signed atom is held to its type's width, each bound admits its
+::  own edge, and `sent` may not fall before the epoch
+++  test-incoming-refusal-caps-widths
+  =/  ok  (um ~zod 'b' ~)
+  =/  wide  `(unit @t)``'field out of range'
+  =/  att=attachment:sur  ['a' 1 'text/plain' 0v1]
+  =/  in  |=(x=msg:sur (incoming-refusal:auspex ~[x]))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((in ok(sig (dec (bex 512))))))
+    (expect-eq !>(wide) !>((in ok(sig (bex 512)))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(life.unsigned (dec (bex 32))))))
+    (expect-eq !>(wide) !>((in ok(life.unsigned (bex 32)))))
+    (expect-eq !>(wide) !>((in ok(from.unsigned `@p`(bex 128)))))
+    (expect-eq !>(wide) !>((in ok(to.unsigned (sy ~[~nec `@p`(bex 128)])))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(prev.unsigned `(dec (bex 128))))))
+    (expect-eq !>(wide) !>((in ok(prev.unsigned `(bex 128)))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(sent.unsigned ~1970.1.1))))
+    (expect-eq !>(wide) !>((in ok(sent.unsigned `@da`1))))
+    (expect-eq !>(wide) !>((in ok(sent.unsigned `@da`(bex 128)))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(attachments.unsigned ~[att]))))
+    (expect-eq !>(wide) !>((in ok(attachments.unsigned ~[att(hash `@uv`(bex 128))]))))
+    (expect-eq !>(wide) !>((in ok(attachments.unsigned ~[att(size (bex 64))]))))
+  ==
+::
+::  the cell budget refuses no chain the caps admit, and is exact at its
+::  edge. The largest legal chain fits, with every message at max-to
+::  recipients and max-attach attachments, and one cell past the budget
+::  does not.
+++  test-the-cell-budget-admits-the-largest-legal-chain
+  =/  to=(set ship)  (sy (turn (gulf 1 max-to:auspex) |=(i=@ `@p`i)))
+  =/  as=(list attachment:sur)  (reap max-attach:auspex ['a' 1 'text/plain' 0v1])
+  =/  top=msg:sur  [[~zod 1 to 's' '0' '' ~2026.1.1 ~ as] 0x0]
+  =/  r=msg-id:sur  (id:auspex unsigned.top)
+  =/  c=chain:sur
+    :-  top
+    %+  turn  (gulf 1 (dec max-chain:auspex))
+    |=(i=@ud top(body.unsigned (scot %ud i), prev.unsigned `r))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((incoming-refusal:auspex c)))
+    (expect !>((cells-within:auspex c max-cells:auspex)))
+    (expect !>((cells-within:auspex (reap max-cells:auspex 0) max-cells:auspex)))
+    (expect !>(!(cells-within:auspex (reap +(max-cells:auspex) 0) max-cells:auspex)))
+    ::  and a noun of 30 shared cells that a clam would walk as 2^30 is
+    ::  refused at the budget, not walked
+    =/  dag=*
+      =|  d=@ud
+      |-  ^-  *
+      ?:  =(d 30)  ~
+      =/  s  $(d +(d))
+      [s s]
+    (expect !>(!(cells-within:auspex dag max-cells:auspex)))
   ==
 ::
 ::  merged with the thread: distinct ids, depth, and the thread cap, which
@@ -1977,6 +2122,39 @@
     (expect !>(!(honest-copy:auspex (malt ~[(st a %forged)]) `ia)))
     (expect !>((honest-copy:auspex (malt ~[(st a %forged) (st a(sig 0x1) %unverified)]) `ia)))
     (expect !>(!(honest-copy:auspex ss-a `0v99)))
+  ==
+::
+::  A REPLY IGNORES A COPY REPLANTED UNDER ANOTHER ROOT. ~bus knows
+::  ~zod's reply m, so it re-signs m under a root of its own, and the
+::  copy is stored as that thread's orphan. The plant's thread sorts
+::  first in map order, which used to decide the reply's thread. It
+::  loses to the thread whose root m's ancestry reaches, whether the
+::  planted copy reads forged or unverified.
+++  test-a-reply-ignores-a-copy-replanted-under-another-root
+  =/  r   (um ~nec 'root' ~)
+  =/  t1  (id:auspex unsigned.r)
+  =/  m   (um ~zod 'reply' `t1)
+  =/  i   (id:auspex unsigned.m)
+  ::  a body whose root's id sorts ahead of t1, as the guard below pins
+  =/  p   (um ~bus 'planted' ~)
+  =/  tp  (id:auspex unsigned.p)
+  =/  ss1  (malt ~[(st r %verified) (st m %verified)])
+  =/  with
+    |=  v=verdict:sur
+    ^-  (map thread-id:sur (map path stored-msg:sur))
+    (malt ~[[t1 ss1] [tp (malt ~[(st p %verified) (st m(sig 0x1) v)])]])
+  =/  forged      (with %forged)
+  =/  unverified  (with %unverified)
+  ;:  weld
+    ::  not vacuous, since the plant really is the first hit in map order
+    (expect-eq !>(tp) !>(p:(snag 0 ~(tap by forged))))
+    (expect-eq !>(tp) !>(p:(snag 0 ~(tap by unverified))))
+    (expect-eq !>(`(unit thread-id:sur)``t1) !>((thread-holding:auspex forged i)))
+    (expect-eq !>(`(unit thread-id:sur)``t1) !>((thread-holding:auspex unverified i)))
+    ::  so a reply may answer m. In the plant's thread every copy of m
+    ::  is forged, and the reply would be refused there.
+    (expect !>((honest-copy:auspex ss1 `i)))
+    (expect !>(!(honest-copy:auspex (~(got by forged) tp) `i)))
   ==
 ::
 ::  new mail un-archives unless a rule archives it; mail that wrote
@@ -2052,25 +2230,47 @@
   ==
 ::
 ::  fetched bytes are stored only if they arrived, fit, carry no more
-::  than their size says, and hash to the address they were asked for
+::  than their size says, match the signed size a rule fetched them on,
+::  and hash to the address they were asked for
 ++  test-blob-refusal
   =/  ok=octs  [5 'hello']
   =/  h  (blob-hash:auspex ok)
   =/  big=octs  [+(max-blob:auspex) 0]
   ;:  weld
-    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h)))
-    (expect-eq !>(`(unit @t)``'blob fetch missed') !>((blob-refusal:auspex ~ h)))
-    (expect-eq !>(`(unit @t)``'blob too large') !>((blob-refusal:auspex `big (blob-hash:auspex big))))
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h ~)))
+    (expect-eq !>(`(unit @t)``'blob fetch missed') !>((blob-refusal:auspex ~ h ~)))
+    (expect-eq !>(`(unit @t)``'blob too large') !>((blob-refusal:auspex `big (blob-hash:auspex big) ~)))
     ::  exactly max-blob is not too large
     =/  cap=octs  [max-blob:auspex 0]
-    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `cap (blob-hash:auspex cap))))
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `cap (blob-hash:auspex cap) ~)))
     ::  a size short of the bytes is malformed; a size past them is only
     ::  trailing zeroes, and fine
     =/  short=octs  [4 'hello']
-    (expect-eq !>(`(unit @t)``'blob malformed') !>((blob-refusal:auspex `short (blob-hash:auspex short))))
+    (expect-eq !>(`(unit @t)``'blob malformed') !>((blob-refusal:auspex `short (blob-hash:auspex short) ~)))
     =/  long=octs  [6 'hello']
-    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `long (blob-hash:auspex long))))
-    (expect-eq !>(`(unit @t)``'blob hash mismatch') !>((blob-refusal:auspex `ok 0v1)))
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `long (blob-hash:auspex long) ~)))
+    (expect-eq !>(`(unit @t)``'blob hash mismatch') !>((blob-refusal:auspex `ok 0v1 ~)))
+    ::  a fetch the download rules started on a signed size must bring
+    ::  exactly that many bytes, and the size is checked before the hash
+    (expect-eq !>(`(unit @t)`~) !>((blob-refusal:auspex `ok h `5)))
+    (expect-eq !>(`(unit @t)``'blob size mismatch') !>((blob-refusal:auspex `ok h `0)))
+    (expect-eq !>(`(unit @t)``'blob size mismatch') !>((blob-refusal:auspex `ok 0v1 `0)))
+  ==
+::
+::  a fetch request and a fetch answer from before the signed size read
+::  as ones with no size, so an upgrade strands neither
+++  test-the-fetch-ladders-read-version-0
+  ;:  weld
+    %+  expect-eq  !>(`(unit fetch-req:sur)``[%1 0v1 ~zod ~])
+    !>((fetch-req-from-noun:auspex [%0 0v1 ~zod]))
+    %+  expect-eq  !>(`(unit fetch-req:sur)``[%1 0v1 ~zod `5])
+    !>((fetch-req-from-noun:auspex [%1 0v1 ~zod `5]))
+    (expect-eq !>(`(unit fetch-req:sur)`~) !>((fetch-req-from-noun:auspex [%2 0v1])))
+    %+  expect-eq  !>(`(unit blob-in:sur)``[%1 ~.a 0v1 ~ `[5 'hello']])
+    !>((blob-in-from-noun:auspex [%0 ~.a 0v1 `[5 'hello']]))
+    %+  expect-eq  !>(`(unit blob-in:sur)``[%1 ~.a 0v1 `5 ~])
+    !>((blob-in-from-noun:auspex [%1 ~.a 0v1 `5 ~]))
+    (expect-eq !>(`(unit blob-in:sur)`~) !>((blob-in-from-noun:auspex 0)))
   ==
 ::
 ::  a label change: nothing, a new set, or a refusal past the cap, which

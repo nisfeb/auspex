@@ -326,14 +326,41 @@
 ::    about where to look and confers nothing: the hash is what proves
 ::    the bytes.
 ::
-+$  fetch-req  [%0 hash=@uv from=ship]
+::    `size` is the signed size, for a fetch the download rules started
+::    on the strength of it, and ~ for one the owner asked for. The
+::    rules let a stranger's file in by its size, so the bytes that land
+::    must be that size (+blob-refusal). Version 1. A %0 request has no
+::    size, and it can outlive a reload, so +fetch-req-from-noun reads it
+::    as a request with size ~.
+::
++$  fetch-req  [%1 hash=@uv from=ship size=(unit @ud)]
++$  fetch-req-0  [%0 hash=@uv from=ship]
+::
+++  fetch-req-from-noun
+  |=  n=*
+  ^-  (unit fetch-req)
+  =/  r1  (mole |.(;;(fetch-req n)))
+  ?^  r1  r1
+  =/  r0  (mole |.(;;(fetch-req-0 n)))
+  ?~(r0 ~ `[%1 hash.u.r0 from.u.r0 ~])
 ::
 ::  $blob-in: a fetch fiber's answer, poked back at the writer.
 ::
 ::    ~ for a miss, so the writer culls the request grub either way and
 ::    a failed fetch leaves nothing behind. A wire format, never stored.
+::    It carries the request's `size` back. A %0 answer from a fiber
+::    that keened before an upgrade still reads, with size ~.
 ::
-+$  blob-in  [%0 id=@ta hash=@uv res=(unit octs)]
++$  blob-in  [%1 id=@ta hash=@uv size=(unit @ud) res=(unit octs)]
++$  blob-in-0  [%0 id=@ta hash=@uv res=(unit octs)]
+::
+++  blob-in-from-noun
+  |=  n=*
+  ^-  (unit blob-in)
+  =/  b1  (mole |.(;;(blob-in n)))
+  ?^  b1  b1
+  =/  b0  (mole |.(;;(blob-in-0 n)))
+  ?~(b0 ~ `[%1 id.u.b0 hash.u.b0 ~ res.u.b0])
 ::
 ::  the tree's persisted shapes. Every one of these is read back through
 ::  ;; against a NOUN-marc vase, newest shape first, so a later version
@@ -634,6 +661,26 @@
 ::
 ++  max-signers  128          ::  distinct [ship life] pairs per chain
 ::
+::  +max-cells: the most cells a delivered noun may hold, counted before
+::  it is clammed.
+::
+::    The clam is the first thing that walks a delivered chain, and it
+::    walks the noun as a tree. A jammed noun shares repeated subtrees,
+::    so a few hundred bytes on the wire can cue into a tree of millions
+::    of nodes, every one walked by the clam and again by the counts
+::    after it, on the ship's single serialisation point for mail. Every
+::    cap above counts parts of a chain already clammed, so none of them
+::    can stop this. The count is +cells-within, which stops one cell
+::    past the budget however large the tree is.
+::
+::    512 cells a message. The largest chain every other cap admits
+::    holds 275 a message (100 recipients at 2 cells a node, 16
+::    attachments at 4, and 11 for the message itself), so this refuses
+::    no legal chain, and -test pins that. It is not a cap a peer
+::    publishes, because no honest sender comes near it.
+::
+++  max-cells    (mul max-chain 512)
+::
 ::  the attachment limits.
 ::
 ::    max-blob is what ONE remote-scry answer carries safely, because a
@@ -857,8 +904,10 @@
 ::    Only a %verified message's, because the allow list names ships and
 ::    an unverified `from` is anyone's claim. Keyed on the SIGNED author,
 ::    never on whoever delivered the chain. A blocked ship never; an
-::    allowed one up to max-blob; anyone else up to `auto-size`, which is
-::    0 unless the owner set it.
+::    allowed one up to max-blob; anyone else up to `auto-size`, and not
+::    at all while `auto-size` is 0, which it is unless the owner set it.
+::    The size is the sender's claim, so "up to 0" would still have let
+::    any stranger in with a file that claimed to weigh nothing.
 ::
 ::    `held` is what the store already weighs. Automatic downloads stop
 ::    at three quarters of the budget, so they cannot fill the store and
@@ -873,18 +922,20 @@
   ^-  ?
   ?&  ?=(%verified v)
       !(~(has in block.s) author)
-      (lte size ?:((~(has in allow.s) author) max-blob auto-size.s))
+      ?:  (~(has in allow.s) author)  (lte size max-blob)
+      &(!=(0 auto-size.s) (lte size auto-size.s))
       (lte (add held size) (div (mul budget.s 3) 4))
   ==
 ::
 ::  +auto-picks: which attachments in `c` download on their own, and
 ::  from whom - each one's signed author. `held` is the store's weight
 ::  now, and every pick adds its size before the next is weighed, so
-::  one delivery cannot pass the automatic share between them.
+::  one delivery cannot pass the automatic share between them. Each pick
+::  carries its signed size, which the bytes must then match.
 ::
 ++  auto-picks
   |=  [s=settings c=chain vs=(map [msg-id @ux] verdict) held=@ud]
-  ^-  (list [h=@uv who=ship])
+  ^-  (list [h=@uv who=ship size=@ud])
   =/  cands=(list [h=@uv who=ship v=verdict size=@ud])
     %-  zing
     %+  turn  c
@@ -892,15 +943,15 @@
     =/  v=verdict  (~(gut by vs) [(id unsigned.m) sig.m] %unverified)
     %+  turn  attachments.unsigned.m
     |=(a=attachment [hash.a from.unsigned.m v size.a])
-  =|  out=(list [h=@uv who=ship])
-  |-  ^-  (list [h=@uv who=ship])
+  =|  out=(list [h=@uv who=ship size=@ud])
+  |-  ^-  (list [h=@uv who=ship size=@ud])
   ?~  cands  (flop out)
   ?.  (auto-fetch s who.i.cands v.i.cands size.i.cands held)
     $(cands t.cands)
   %=  $
     cands  t.cands
     held   (add held size.i.cands)
-    out    [[h.i.cands who.i.cands] out]
+    out    [[h.i.cands who.i.cands size.i.cands] out]
   ==
 ::
 ::  +settings-ok: may these settings be stored?
@@ -1122,11 +1173,24 @@
 ::    re-ships the whole accumulated chain, that corrupted chain is then
 ::    what gets forwarded onward.
 ::
-::    Pure: `vs` and `max-copies` arrive as arguments so this is testable
-::    without an agent.
+::    WITHIN A RANK, A COPY ALREADY HELD COMES FIRST. The rank alone
+::    does not save that moon's message. Its copies are all %unverified,
+::    so they used to compete on sig order, and the sig is an atom any
+::    courier picks. Four copies with larger sigs shed the genuine one.
+::    Nothing about a signature is out of an attacker's reach, but
+::    incumbency is. `old` is the [id sig] of every copy the thread held
+::    before this poke, and it orders copies inside a rank. It never
+::    lifts a copy above a better verdict.
+::
+::    Pure: `vs`, `old` and `max-copies` arrive as arguments so this is
+::    testable without an agent.
 ::
 ++  prune
-  |=  [c=chain vs=(map [msg-id @ux] verdict) max-copies=@ud]
+  |=  $:  c=chain
+          vs=(map [msg-id @ux] verdict)
+          old=(set [msg-id @ux])
+          max-copies=@ud
+      ==
   ^-  chain
   =/  groups=(jar msg-id msg)
     %+  roll  c
@@ -1139,10 +1203,14 @@
     ^-  chain
     ?:  (lte (lent ms) max-copies)  ms
     =/  vd    |=(m=msg (~(gut by vs) [i sig.m] %unverified))
-    =/  good  (skim ms |=(m=msg =(%verified (vd m))))
-    =/  fill
-      %+  weld  (skim ms |=(m=msg =(%unverified (vd m))))
-                (skim ms |=(m=msg =(%forged (vd m))))
+    =/  held  |=(m=msg (~(has in old) [i sig.m]))
+    ::  one rank, the copies already held first
+    =/  rank
+      |=  v=verdict
+      =/  r  (skim ms |=(m=msg =(v (vd m))))
+      (weld (skim r held) (skip r held))
+    =/  good  (rank %verified)
+    =/  fill  (weld (rank %unverified) (rank %forged))
     =/  keep  (scag max-copies good)
     (weld keep (scag (sub max-copies (lent keep)) fill))
   ::  re-sort: grouping by id destroyed +merge's ordering
@@ -1437,6 +1505,23 @@
   %+  skip  c
   |=(m=msg (settled (~(gut by held) [(id unsigned.m) sig.m] %unverified)))
 ::
+::  +cells-within: does the noun hold at most `b` cells?
+::
+::    Counted as a tree, the way a clam walks it, so a shared subtree
+::    counts once for every place it appears. Iterative, and it stops at
+::    the first cell past `b`, so the work is bounded by the budget and
+::    never by the noun. See +max-cells.
+::
+++  cells-within
+  |=  [n=* b=@ud]
+  ^-  ?
+  =/  todo=(list *)  ~[n]
+  |-  ^-  ?
+  ?~  todo  &
+  ?@  i.todo  $(todo t.todo)
+  ?:  =(0 b)  |
+  $(b (dec b), todo [-.i.todo +.i.todo t.todo])
+::
 ::  the input caps, as predicates. The agent wraps each in its own tall ~|
 ::  and ?>, since the label is what tells a nacked poke apart from any
 ::  other crash; keeping the arithmetic here keeps it testable.
@@ -1452,6 +1537,41 @@
 ::
 ++  fits-recipients
   |=([c=chain m=@ud] (levy c |=(x=msg (lte ~(wyt in to.unsigned.x) m))))
+::
+::  +fits-fields: every signed atom within its type's natural width.
+::
+::    A mold clams an atom of any width, so a delivered chain could carry
+::    a megabyte where a ship, a hash or a signature belongs. Nothing
+::    else read those widths, and a copy is stored whole whatever its
+::    verdict. A copy whose key this ship lacks is never checked, so its
+::    sig is not even looked at. A wide `life` also costs a quadratic
+::    render on the key lookup. So each is held to what its type means:
+::    a signature to 64 bytes, a life to 32 bits, a ship, an id and a
+::    content hash to 128, a size to 64, and a `sent` to a date from
+::    ~1970.1.1 on that fits 128 bits. The epoch floor is there because
+::    the JSON renderer cannot write an earlier time, and a stored copy
+::    that cannot render leaves its whole thread unreadable.
+::
+::    These are not published caps, since no honest sender comes near
+::    them. Checked after +fits-recipients, so the walk of `to` is
+::    bounded.
+::
+++  fits-fields
+  |=  c=chain
+  ^-  ?
+  %+  levy  c
+  |=  x=msg
+  =*  u  unsigned.x
+  ?&  (lte (met 3 sig.x) 64)
+      (lte (met 7 from.u) 1)
+      (lte (met 5 life.u) 1)
+      (gte sent.u ~1970.1.1)
+      (lte (met 7 sent.u) 1)
+      ?~(prev.u & (lte (met 7 u.prev.u) 1))
+      (~(all in to.u) |=(s=ship (lte (met 7 s) 1)))
+      %+  levy  attachments.u
+      |=(a=attachment &((lte (met 6 size.a) 1) (lte (met 7 hash.a) 1)))
+  ==
 ::
 ::  +fits-signers: how many distinct keys verifying this chain would cost.
 ::
@@ -1667,16 +1787,36 @@
       !=(from.unsigned.m our)
   ==
 ::
+::  +signed-by: is this copy really by `who`?
+::
+::    `from` is a claim, and any ship can make it. A copy is by `who`
+::    only when it names `who` AND this ship holds it %verified. A
+::    forged copy is evidence against the claim, and an unverified one
+::    is a claim nobody has checked. Not called `by`, which would shadow
+::    the map door.
+::
+++  signed-by
+  |=  [vs=(map [msg-id @ux] verdict) who=ship m=msg]
+  ^-  ?
+  ?&  =(who from.unsigned.m)
+      =(%verified (~(gut by vs) [(id unsigned.m) sig.m] %unverified))
+  ==
+::
 ::  +in-sent: did we write any message in this thread?
 ::
 ::    A walk, not a stored set. Authorship is a signed field, so the
 ::    question is answerable from the chain itself and a second record
 ::    of it could only ever disagree with the first.
 ::
+::    Signed, not claimed. Any ship can poke us a copy that says
+::    from=our, so only a copy we hold %verified counts (+signed-by).
+::    Every send stores its copy %verified, so our own mail is
+::    unaffected.
+::
 ++  in-sent
-  |=  [our=ship c=chain]
+  |=  [our=ship c=chain vs=(map [msg-id @ux] verdict)]
   ^-  ?
-  (lien c |=(m=msg =(our from.unsigned.m)))
+  (lien c |=(m=msg (signed-by vs our m)))
 ::
 ::  +page: one page of a list, and nothing else.
 ::
@@ -1760,10 +1900,22 @@
 ::    message that prompted the delivery, and a rule about a sender is a
 ::    statement about the conversation they are in.
 ::
+::    A SENDER CONDITION NEEDS THAT SENDER'S SIGNATURE. A rule naming
+::    ~bus is the owner's statement about mail ~bus wrote, and anyone can
+::    claim from=~bus. So the copy must be %verified as ~bus's
+::    (+signed-by), and a rule naming a moon or comet waits until its
+::    mail verifies. The gate is here and not in +rule-matches, which
+::    has no verdicts to read. A subject condition is about the text
+::    and needs no signature.
+::
 ++  rule-hits
-  |=  [r=rule c=chain]
+  |=  [r=rule c=chain vs=(map [msg-id @ux] verdict)]
   ^-  ?
-  (lien c |=(m=msg (rule-matches r unsigned.m)))
+  %+  lien  c
+  |=  m=msg
+  ?&  (rule-matches r unsigned.m)
+      ?~(from.r & (signed-by vs u.from.r m))
+  ==
 ::
 ::  +apply-rules: what the matching rules ask for, together.
 ::
@@ -1779,9 +1931,9 @@
 ::    trap `archived` in $meta already carries a $~ for.
 ::
 ++  apply-rules
-  |=  [rs=(list rule) c=chain]
+  |=  [rs=(list rule) c=chain vs=(map [msg-id @ux] verdict)]
   ^-  [add=(set @tas) archive=?]
-  =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c)))
+  =/  hits=(list rule)  (skim rs |=(r=rule (rule-hits r c vs)))
   :-  (~(gas in *(set @tas)) (zing (turn hits |=(r=rule ~(tap in add.r)))))
   (lien hits |=(r=rule archive.r))
 
@@ -2026,6 +2178,11 @@
 ::    has had sixty-four incompatible versions has a different problem -
 ::    and far below where the walk costs anything.
 ::
+::    Each version is held to 4 bytes too. A refusal renders the peer's
+::    versions in decimal (+no-version-error), and the cost of that
+::    grows with the square of an atom's width, so one huge version was
+::    a render the stranger sized. No ladder needs a version past 2^32.
+::
 ++  proto-ok
   |=  p=proto
   ^-  ?
@@ -2033,6 +2190,7 @@
       (lte (lent (scag 65 `(list @ud)`versions.p)) 64)
       (lte (lent (scag 65 `(list @tas)`marks.p)) 64)
       =((lent versions.p) (lent marks.p))
+      (levy `(list @ud)`versions.p |=(v=@ud (lte (met 3 v) 4)))
   ==
 ::
 ::  +common-version: the HIGHEST version both ships speak, ~ for none.
@@ -2529,7 +2687,7 @@
   =/  c=chain  c.u.r
   ?&  ?+  view  |
         %inbox     (in-inbox our c archived.mt direct.mt)
-        %sent      (in-sent our c)
+        %sent      (in-sent our c vs.u.r)
         %archived  archived.mt
         %all       &
         %label     ?&((label-ok `@tas`lab) (~(has in labels.mt) `@tas`lab))
@@ -2625,7 +2783,7 @@
     ::  obeyed. The client renders every body as plain text and says so
     ::  when the message asked for something else.
       ['body-mime' [%s body-mime.unsigned.m]]
-      ['sent' (time:enjs:format sent.unsigned.m)]
+      ['sent' (sent-json sent.unsigned.m)]
       ['prev' ?~(prev.unsigned.m ~ [%s (scot %uv u.prev.unsigned.m)])]
     ::  ATTACHMENTS. They live INSIDE `unsigned`, so what is rendered
     ::  here is covered by the same signature the verdict below was
@@ -2660,6 +2818,19 @@
       ['verdict' [%s (~(gut by vs) [i sig.m] %unverified)]]
       ['read' [%b (~(has in rd) i)]]
   ==
+::
+::  +sent-json: a signed `sent`, clamped into what +time can write.
+::
+::    +time crashes on a date before ~1970.1.1, and one such copy made
+::    its whole thread fail to render. +fits-fields now refuses that at
+::    intake, but a copy stored before it cannot be repaired, because
+::    `sent` is signed. So the render clamps instead. The upper bound
+::    keeps a huge date from costing a huge decimal.
+::
+++  sent-json
+  |=  d=@da
+  ^-  json
+  (time:enjs:format (max ~1970.1.1 (min d ~9999.12.31)))
 ::
 ::
 ++  thread-json
@@ -2891,6 +3062,7 @@
   ?.  (fits-bodies c max-body)         `'body too long'
   ?.  (fits-subjects c max-subj)       `'subject too long'
   ?.  (fits-recipients c max-to)       `'too many recipients'
+  ?.  (fits-fields c)                  `'field out of range'
   ?.  (fits-attachments c max-attach)  `'too many attachments'
   ?.  (fits-body-mimes c max-mime)     `'bad body mime'
   ?.  (fits-depth c max-depth)         `'chain too deep'
@@ -2927,6 +3099,14 @@
   ~
 ::
 ::  +thread-holding: the thread that holds a copy of this message
+::
+::    One id can sit in more than one thread. +thread-key files on
+::    [id sig], so a ship that knows a message can re-sign it under a
+::    root of its own and have the copy stored as that thread's orphan.
+::    Map order would then let it pick which thread a reply joins. So
+::    prefer the thread whose id is the root reached by walking `prev`
+::    up from `i`. Ids are content hashes, so only the genuine thread
+::    can be that one. When none is, the first hit answers as before.
 ++  thread-holding
   |=  [loaded=(map thread-id (map path stored-msg)) i=msg-id]
   ^-  (unit thread-id)
@@ -2935,6 +3115,12 @@
     |=  [t=thread-id ss=(map path stored-msg)]
     %+  lien  ~(val by ss)
     |=(s=stored-msg =((id unsigned.msg.s) i))
+  =/  home
+    %+  skim  hits
+    |=  [t=thread-id ss=(map path stored-msg)]
+    =/  ps  (prev-map (turn ~(val by ss) |=(s=stored-msg msg.s)))
+    =(t (snag 0 (ancestors ps i)))
+  ?^  home  `p.i.home
   ?~(hits ~ `p.i.hits)
 ::
 ::  +honest-copy: may a reply answer `prev`? Only if some copy of it is
@@ -3020,14 +3206,16 @@
 ::  A miss, a claimed size past max-blob, a claimed size SHORT of the
 ::  bytes that arrived (the atom carries more than its octs says, so the
 ::  address the sender computed is not the one they would re-measure
-::  to), or bytes that do not hash to the address they were fetched
-::  under. In that order.
+::  to), a length other than the signed size the fetch was started on,
+::  or bytes that do not hash to the address they were fetched under. In
+::  that order. `size` is ~ for a fetch the owner asked for by hand.
 ++  blob-refusal
-  |=  [res=(unit octs) hash=@uv]
+  |=  [res=(unit octs) hash=@uv size=(unit @ud)]
   ^-  (unit @t)
   ?~  res                             `'blob fetch missed'
   ?.  (lte p.u.res max-blob)           `'blob too large'
   ?.  (gte p.u.res (met 3 q.u.res))    `'blob malformed'
+  ?.  |(?=(~ size) =(u.size p.u.res))  `'blob size mismatch'
   ?.  (blob-ok u.res hash)             `'blob hash mismatch'
   ~
 ::

@@ -482,7 +482,9 @@ every other ship**.
 This is why `%unverified` outranks `%forged` in `+prune`
 ([§4.5](#45-prune)): an unranked fill would let junk copies evict the one
 genuine copy of a moon's message, leaving a user holding only forgeries of a
-message that was never forged.
+message that was never forged. The rank alone is not enough, because every copy
+of a moon's message reads `%unverified` and junk shares its rank. So within a
+rank `+prune` keeps the copies a receiver already held ahead of new ones.
 
 Signatures are already in the chain the day either fix lands. Comets are
 self-signing addresses, so a comet's signature is verifiable with no lookup at
@@ -697,7 +699,11 @@ two ships merging the same messages produce the same list.
 
 ```hoon
 ++  prune
-  |=  [c=chain vs=(map [msg-id @ux] verdict) max-copies=@ud]
+  |=  $:  c=chain
+          vs=(map [msg-id @ux] verdict)
+          old=(set [msg-id @ux])
+          max-copies=@ud
+      ==
   ^-  chain
 ```
 
@@ -719,6 +725,13 @@ never by rejecting.
 - The `%unverified` rank is not a nicety: every moon and comet message is
   `%unverified` in version 1, so an unranked fill lets `max-copies` junk copies
   evict the one genuine copy of a moon's message.
+- **Within one rank, a copy already held comes first.** `old` is the `[id sig]`
+  of every copy the thread held before this delivery. Copies of one id share a
+  rank whenever the receiver holds no key for their signer, and a signature is
+  an atom any courier chooses, so ordering a rank by `sig` would let junk with
+  larger signatures shed the genuine copy. A receiver MUST NOT shed a held copy
+  while a new copy of the same rank remains. This orders copies inside a rank
+  and MUST NOT lift a copy above a better verdict.
 - A verdict missing from the map defaults to `%unverified`
   (`(~(gut by vs) [i sig.m] %unverified)`).
 
@@ -753,6 +766,8 @@ trustworthy, and trimming a signed field would forge.
 | `max-body` | 100.000 | `+fits-bodies` | bytes per body |
 | `max-subj` | 1.000 | `+fits-subjects` | bytes per subject |
 | `max-to` | 100 | `+fits-recipients` | recipients per message |
+| `max-cells` | 512.000 | receiver's own check, `+cells-within` | cells in one delivered noun, counted before it is clammed |
+| field widths | 64 bytes of `sig`, 32 bits of `life`, 128 bits of a ship, an id or a `hash`, 64 bits of `size`, and a `sent` from ~1970.1.1 within 128 bits | `+fits-fields` | the width of every signed atom |
 | `max-mime` | 128 | `+fits-body-mimes` (→ `+text-ok`) | bytes of `body-mime`, and of an attachment `mime` |
 | `max-attach` | 16 | `+fits-attachments` (→ `+attach-ok`) | attachments per message |
 | `max-blob` | 16.777.216 | `+attach-ok` | claimed bytes of one attachment |
@@ -795,6 +810,21 @@ bytes only ever enter through a **local** decision — an upload, a fetch the
 owner asked for, or a download rule the owner set — never because a delivered
 chain named them, since a chain carries metadata alone.
 
+**Field widths** are each type's own width, not numbers a peer publishes. A mold
+clams an atom of any width, and a copy is stored whole whatever its verdict, so
+without them one `sig` or `hash` could carry megabytes. The `sent` floor is
+there because a JSON renderer cannot write a time before the Unix epoch, and a
+stored copy that cannot render leaves its whole thread unreadable. A forwarded
+chain that carries one such copy is refused whole, like any other cap.
+
+**`max-cells` (512.000)** is 512 cells for each of `max-chain` messages, also
+not published. A jammed noun shares repeated subtrees, so a few hundred bytes on
+the wire can cue into a tree of millions of nodes, and the clam walks it as a
+tree before any cap above can count anything. A receiver MUST count the cells
+before it clams, and the count MUST stop at the budget. The largest chain every
+other cap admits holds 275 cells a message, so the budget refuses no legal
+chain.
+
 ### 4.7 Orphans and cycles
 
 An **orphan** is a message whose `prev` names an id not present in the chain.
@@ -821,15 +851,17 @@ load-bearing and an implementation MUST follow it: **cap, then verify, then
 resolve identity, then merge, then prune, then store, then the beacon.**
 Nothing is written before every signature in the incoming chain has a verdict.
 
-1. **Decode.** Clam the poked noun into `$chain` inside a `mule`. A malformed
-   payload MUST be refused as a clean branch, not as a crash — see
+1. **Decode.** Refuse a noun of more than `max-cells` cells ('chain too
+   large'), counted with `+cells-within` before anything else walks it. Then
+   clam the poked noun into `$chain` inside a `mule`. A malformed payload MUST
+   be refused as a clean branch, not as a crash — see
    [§6.4](#64-ack-and-nack). An empty chain is a silent no-op.
 
 2. **Cap checks, in this order**, each a whole-chain refusal:
    `+fits-length` (`max-chain`), `+fits-bodies` (`max-body`), `+fits-subjects`
-   (`max-subj`), `+fits-recipients` (`max-to`), `+fits-attachments`
-   (`max-attach`), `+fits-body-mimes` (`max-mime`), `+fits-depth`
-   (`max-depth`), `+fits-signers` (`max-signers`).
+   (`max-subj`), `+fits-recipients` (`max-to`), `+fits-fields` (the field
+   widths), `+fits-attachments` (`max-attach`), `+fits-body-mimes`
+   (`max-mime`), `+fits-depth` (`max-depth`), `+fits-signers` (`max-signers`).
 
    `+fits-signers` is checked **last among the caps and before any key lookup**,
    deliberately: the two steps below are exactly the cost it bounds.
@@ -861,7 +893,8 @@ Nothing is written before every signature in the incoming chain has a verdict.
 8. **Freeze verdicts, then prune.** `+freeze` folds this poke's verdicts into
    the stored ones **before** pruning, because `+prune` needs a verdict for
    every message in the merged chain, including ones stored by an earlier poke
-   that this one did not carry. Then `+prune` at `max-copies`.
+   that this one did not carry. Then `+prune` at `max-copies`, with the
+   `[id sig]` of the copies the thread already held as `old`.
 
 9. **Store.** Write the pruned chain, one grub per `[id sig]`, each carrying its
    own verdict. A redelivery that writes nothing MUST be reported as no change.
@@ -1038,17 +1071,26 @@ fetches without being asked SHOULD do so only for a message whose verdict is
 the chain: an unverified `from` is anyone's claim, and the bytes a fetch
 receives are logged before they can be measured, so a sender's claimed `size`
 bounds only an honest sender. The reference receiver fetches on request, and on
-its own only under the owner's rules: ships the owner allowed, up to `max-blob`;
-other ships up to a size the owner sets, 0 by default; blocked ships never.
+its own only under the owner's rules. Ships the owner allowed are fetched up to
+`max-blob`, and other ships up to a size the owner sets. That size is 0 by
+default, and 0 turns other ships off, since a claim of 0 bytes is as easy to
+sign as any other. Blocked ships are never fetched. A fetch a rule started
+carries the attachment's signed size, and the reference refuses bytes of any
+other length. A fetch the owner asked for carries no size.
 
 **On arrival, the bytes MUST be re-hashed.** The reference receiver, in order:
 
 ```
-?~  res.b                              → discard: the fetch missed
-?.  (lte p.u.res.b max-blob:uc)        → discard: 'blob too large'
-?.  (gte p.u.res.b (met 3 q.u.res.b))  → discard: 'blob malformed'
-?.  (blob-ok:uc u.res.b hash.b)        → discard: 'blob hash mismatch'
+?~  res.b                                  → discard: the fetch missed
+?.  (lte p.u.res.b max-blob:uc)            → discard: 'blob too large'
+?.  (gte p.u.res.b (met 3 q.u.res.b))      → discard: 'blob malformed'
+?.  |(?=(~ size.b) =(u.size.b p.u.res.b))  → discard: 'blob size mismatch'
+?.  (blob-ok:uc u.res.b hash.b)            → discard: 'blob hash mismatch'
 ```
+
+These bound what is **stored**, not what arrives. A remote-scry answer has
+already landed whole, at whatever size its publisher chose, before any of them
+runs.
 
 **A blob whose contents do not hash to the address it was fetched under MUST be
 discarded**, without comment and without being held against the sender. The ship
@@ -1215,7 +1257,10 @@ ten-tuple of atoms **in the order written above**. A version-1 nexus publishes
   lists are walked whole: this noun is published by a stranger into a namespace
   anyone may write to, so an unbounded length walk is work an attacker chooses
   the size of. A protocol that has had sixty-four incompatible versions has a
-  different problem than this bound.
+  different problem than this bound. Each version MUST also fit 4 bytes, and a
+  reader MUST refuse a publication with a wider one. A refusal renders the
+  peer's versions in decimal, and that render costs the square of an atom's
+  width.
 
 The marc is a noun passthrough (`mar/auspex/proto.hoon`). A typed marc would
 re-validate the stored grub against the live type on every read, so adding a
@@ -1466,6 +1511,13 @@ Observed behaviour of the reference receiver, and the constraint behind it:
   implementation whose transport treats a payload-validation failure as a
   process failure MUST NOT type its wire mark.
 
+  Delivery is granted by road, not by mark, so a peer can still poke the writer
+  with some other mark that fails validation. That restart is not a crash. The
+  kernel has already nacked and dropped the poke, and its error opens with
+  `hydrate failed`. The reference prints one console line and goes on, with no
+  crash wait. Counting it as a crash would let any ship hold the writer in its
+  longest wait for one poke an hour.
+
 - **The writer MUST NOT crash.** Every rejection is a branch that returns
   cleanly, never an assertion. The one arm that can crash on hostile input,
   `+thread-key`, is called under `mule`.
@@ -1515,7 +1567,11 @@ Specifically:
   mark-read, and there MUST NOT be one: a filter that could suppress a message
   would let an attacker who learns your rules hide the evidence of their own
   forgery. Archiving is not suppression — an archived thread is one view away,
-  still counted, still searchable, and new mail un-archives it.
+  still counted, still searchable, and new mail un-archives it. **A sender
+  condition needs that sender's signature.** A rule naming a ship MUST fire only
+  on a copy the receiver holds `%verified` as that ship's, never on a forged or
+  unverified claim of `from`, so a rule naming a moon or comet waits until its
+  mail verifies. A subject condition is about the text and needs no signature.
 - **A mailing list name never travels.** The name is a local key; what a
   recipient sees in `to` is ships, always, exactly as if they had been typed one
   at a time.
@@ -1643,7 +1699,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  120 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  128 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
@@ -1653,7 +1709,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **120 tests**, the discovery ones among them
+be diffed; **128 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1683,6 +1739,7 @@ be diffed; **120 tests**, the discovery ones among them
 | `+prune` never sheds a `%verified` copy, in either input order. | `test-prune-never-sheds-a-verified` |
 | The fill bucket ranks `%unverified` above `%forged`, in either input order. | `test-prune-prefers-unverified-over-forged` |
 | The whole ranking: `%verified`, then `%unverified`, then `%forged`. | `test-prune-ranks-verified-then-unverified-then-forged` |
+| Within a rank a copy already held outlasts new ones, so junk with larger sigs cannot shed a keyless signer's genuine copy, and a held copy never beats a better verdict. | `test-prune-keeps-the-held-copy-of-a-keyless-signer` |
 | Thread identity comes from content, never from the order of the supplied list. | `test-thread-key-from-content-not-list-order` |
 | Thread identity never derives from `sent`; a backdated reply still resolves to its root. | `test-thread-key-ignores-sent` |
 | An established thread's id is immutable; a new `prev=~` message cannot migrate it. | `test-thread-key-established-thread-is-immutable` |
@@ -1700,8 +1757,8 @@ be diffed; **120 tests**, the discovery ones among them
 | `name` and `mime` refuse control bytes at the boundary. | `test-text-ok-refuses-control-bytes` |
 | The send route checks a ref's count, `name` and `mime` before reading any blob. | `test-refs-ok-checks-all-but-size` |
 | Eviction takes unreferenced blobs, oldest first; a referenced blob is never evicted. | `test-unreferenced-is-oldest-first` |
-| Automatic download needs a `%verified` message from an unblocked author: an allowed one up to `max-blob`, anyone else up to `auto-size`, and never past 3/4 of the budget. | `test-auto-fetch-rules` |
-| Automatic download decides per attachment by the signed author, counting the running weight, so two files that each fit do not both fit past the share. | `test-auto-picks` |
+| Automatic download needs a `%verified` message from an unblocked author: an allowed one up to `max-blob`, anyone else up to `auto-size` and not at all while it is 0, and never past 3/4 of the budget. | `test-auto-fetch-rules` |
+| Automatic download decides per attachment by the signed author, counting the running weight, so two files that each fit do not both fit past the share. Each pick carries its signed size. | `test-auto-picks` |
 | Settings: the budget holds at least one largest file and at most `max-budget`, each list holds at most `max-listed`, and no ship is on both. | `test-settings-ok-bounds` |
 | `+shed-for` refuses rather than half-evicting when the store cannot be made to fit. | `test-shed-for-refuses-rather-than-half-evicting` |
 | Swapping an attachment breaks the signature. | `test-swapped-attachment-is-forged` |
@@ -1734,6 +1791,7 @@ be diffed; **120 tests**, the discovery ones among them
 | A new thread's meta is neither archived nor direct. | `test-a-new-thread-is-neither-archived-nor-direct` |
 | A thread's time is its newest message's `sent`, whatever the order. | `test-last-sent-is-the-newest` |
 | A message renders exactly the API's fields: `id from to subject body body-mime sent prev attachments verdict read`; no verdict held is `unverified`. | `test-msg-json-is-the-api-shape` |
+| A stored `sent` that `+time` cannot write renders clamped to the epoch or the year 9999. | `test-msg-json-clamps-a-sent-it-cannot-write` |
 | A thread renders its messages in canonical order, with its local state beside them. | `test-thread-json-orders-messages-and-reports-local-state` |
 | A listing row is drawn from the newest honest message and flags a forgery; a search row is drawn from what matched. | `test-entry-json-draws-from-the-newest-honest-copy` |
 | The listing drops stale index entries and empty threads, and shows a thread of unreadable copies as such. | `test-inbox-json-drops-stale-and-shows-unreadable` |
@@ -1746,22 +1804,27 @@ be diffed; **120 tests**, the discovery ones among them
 | A read mark's ids are grouped by the thread that holds them. | `test-group-ids-by-thread` |
 | The label list is every thread's labels, once, sorted. | `test-labels-are-the-sorted-union` |
 | A fiber's crash record reads back as written, in milliseconds; a record of the wrong shape is no record. | `test-the-crash-record-reads-back-as-written` |
-| A delivered chain is refused for the first cap it breaks, in a fixed order: length, bodies, subjects, recipients, attachments, body mime, depth, signers. | `test-incoming-refusal-names-the-first-cap-broken` |
+| A delivered chain is refused for the first cap it breaks, in a fixed order: length, bodies, subjects, recipients, field widths, attachments, body mime, depth, signers. | `test-incoming-refusal-names-the-first-cap-broken` |
+| Every signed atom is held to its type's width, each bound admits its own edge, and a `sent` before ~1970.1.1 is refused. | `test-incoming-refusal-caps-widths` |
+| The cell budget admits the largest chain the other caps admit, is exact at its edge, and refuses a shared tree without walking it. | `test-the-cell-budget-admits-the-largest-legal-chain` |
 | Merged with its thread, a chain is refused past max-chain distinct ids or max-depth, and a new thread past max-threads; a thread already held is never refused for the thread cap. | `test-admit-refusal` |
 | A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
 | The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |
 | A reply belongs to the thread holding what it answers, and may answer it only if some copy is not forged. | `test-a-reply-finds-its-thread-and-an-honest-copy` |
+| When several threads hold what a reply answers, the reply joins the one whose id is the root that message's ancestry reaches, never one a copy was planted into, whatever the map order. | `test-a-reply-ignores-a-copy-replanted-under-another-root` |
 | New mail un-archives its thread unless a rule archives it; mail that wrote nothing only adds a rule's archive; rule labels join up to max-labels, or none do. | `test-filing` |
 | Storing a thread writes only new or changed slots and culls only what is no longer wanted, outermost directories first. | `test-slot-plan` |
 | The writer takes a chain from anyone, and an action, blob or probe result only from this ship. | `test-the-writer-sorts-pokes-and-sources` |
 | /proto is published when unbound or changed; discovery keeps the best valid answer; a fresh peer record is trusted without asking again. | `test-discovery-decisions` |
-| Fetched bytes are stored only if they arrived, fit max-blob, carry no more than their declared size, and hash to their address. | `test-blob-refusal` |
+| Fetched bytes are stored only if they arrived, fit max-blob, carry no more than their declared size, match the signed size a rule fetched them on, and hash to their address. | `test-blob-refusal` |
+| A fetch request or answer from before the signed size reads as one with no size. | `test-the-fetch-ladders-read-version-0` |
 | A label change is a no-op, a new set, or refused past max-labels, and a thread past the cap may still lose one. | `test-relabel` |
 | A mailing list never holds our own ship nor more than max-to members, and only a new list is refused at max-lists. | `test-list-rules` |
 | Marking adds to the read or fold set; unmarking takes away. | `test-marks` |
 | Storing a thread counts as a change when it writes or culls anything, and a redelivery that does neither is no change. | `test-plan-writes` |
 | Discovery reads a peer's /proto up to and including its last case. | `test-discovery-reads-every-case-it-promises` |
-| Sent is the threads we authored, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
+| Sent is the threads holding a copy we signed, walked from the chain rather than stored. | `test-sent-is-threads-we-authored` |
+| A copy claiming to be ours counts for Sent only when held `%verified`, and a forged or unverified claim stays out. | `test-sent-needs-our-signature` |
 | Pagination slices without losing the total. | `test-page-slices-without-losing-the-total` |
 | A draft is not a stored message and the decoder refuses one outright. | `test-a-draft-is-not-a-stored-message` |
 | A draft is checked against the same send caps, at save time. | `test-draft-ok-applies-the-send-caps` |
@@ -1769,6 +1832,7 @@ be diffed; **120 tests**, the discovery ones among them
 | An empty subject is not a condition. | `test-an-empty-subject-is-not-a-condition` |
 | A rule ANDs across the conditions it actually sets. | `test-rule-matches-and-across-its-conditions` |
 | Rules compose additively: labels union, archive ORs, nothing is removed. | `test-apply-rules-composes-additively` |
+| A sender condition fires only on a copy held `%verified` as that sender's, and a subject condition needs no signature. | `test-a-sender-rule-needs-the-sender-signature` |
 | A filter cannot suppress a forged message. | structural: `+apply-rules` answers labels and an archive flag and nothing that reaches the chain (`test-apply-rules-composes-additively`) |
 | A sender picks the **highest** common version, not the first. | `test-common-version-picks-the-highest` |
 | Nothing in common answers `~`, and `~` is a refusal rather than a fallback. | `test-common-version-answers-none` |
@@ -1781,7 +1845,7 @@ be diffed; **120 tests**, the discovery ones among them
 | The proto spur and its keen path mirror each other, empty segment included. | `test-proto-paths-mirror-each-other` |
 | The pending queue appends, never dedupes, and drains oldest first; the remainder keeps its order. | `test-the-pending-queue-drains-in-order` |
 | A record that refuses expires in an hour, not a day; a remembered silence is not a refusal. | `test-a-refusing-record-expires-sooner` |
-| `+proto-ok` bounds its walk before measuring, and refuses lists that disagree in length. | `test-proto-ok-bounds-the-walk` |
+| `+proto-ok` bounds its walk before measuring, refuses lists that disagree in length, and refuses a version wider than 4 bytes. | `test-proto-ok-bounds-the-walk` |
 
 ---
 

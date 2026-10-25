@@ -40,7 +40,7 @@
         ::  and it arrives pre-signed inside a chain any ship may
         ::  deliver. Empty means text/plain.
         ['body-mime' [%s body-mime.u]]
-        ['sent' (time:enjs:format sent.u)]
+        ['sent' (sent-json:uc sent.u)]
         ['prev' ?~(prev.u ~ [%s (scot %uv u.prev.u)])]
         ::  attachments are INSIDE `unsigned`, so what is rendered here is
         ::  covered by the signature above it. A reader comparing the two
