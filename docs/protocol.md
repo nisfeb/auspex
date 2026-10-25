@@ -753,6 +753,7 @@ trustworthy, and trimming a signed field would forge.
 | `max-body` | 100.000 | `+fits-bodies` | bytes per body |
 | `max-subj` | 1.000 | `+fits-subjects` | bytes per subject |
 | `max-to` | 100 | `+fits-recipients` | recipients per message |
+| field widths | 64 bytes of `sig`, 32 bits of `life`, 128 bits of a ship, an id or a `hash`, 64 bits of `size`, and a `sent` from ~1970.1.1 within 128 bits | `+fits-fields` | the width of every signed atom |
 | `max-mime` | 128 | `+fits-body-mimes` (→ `+text-ok`) | bytes of `body-mime`, and of an attachment `mime` |
 | `max-attach` | 16 | `+fits-attachments` (→ `+attach-ok`) | attachments per message |
 | `max-blob` | 16.777.216 | `+attach-ok` | claimed bytes of one attachment |
@@ -795,6 +796,13 @@ bytes only ever enter through a **local** decision — an upload, a fetch the
 owner asked for, or a download rule the owner set — never because a delivered
 chain named them, since a chain carries metadata alone.
 
+**Field widths** are each type's own width, not numbers a peer publishes. A mold
+clams an atom of any width, and a copy is stored whole whatever its verdict, so
+without them one `sig` or `hash` could carry megabytes. The `sent` floor is
+there because a JSON renderer cannot write a time before the Unix epoch, and a
+stored copy that cannot render leaves its whole thread unreadable. A forwarded
+chain that carries one such copy is refused whole, like any other cap.
+
 ### 4.7 Orphans and cycles
 
 An **orphan** is a message whose `prev` names an id not present in the chain.
@@ -827,9 +835,9 @@ Nothing is written before every signature in the incoming chain has a verdict.
 
 2. **Cap checks, in this order**, each a whole-chain refusal:
    `+fits-length` (`max-chain`), `+fits-bodies` (`max-body`), `+fits-subjects`
-   (`max-subj`), `+fits-recipients` (`max-to`), `+fits-attachments`
-   (`max-attach`), `+fits-body-mimes` (`max-mime`), `+fits-depth`
-   (`max-depth`), `+fits-signers` (`max-signers`).
+   (`max-subj`), `+fits-recipients` (`max-to`), `+fits-fields` (the field
+   widths), `+fits-attachments` (`max-attach`), `+fits-body-mimes`
+   (`max-mime`), `+fits-depth` (`max-depth`), `+fits-signers` (`max-signers`).
 
    `+fits-signers` is checked **last among the caps and before any key lookup**,
    deliberately: the two steps below are exactly the cost it bounds.
@@ -1650,7 +1658,7 @@ desk in seconds ([hoon-testing.md](hoon-testing.md)); by hand, `-test` them
 alongside the main suite:
 
 ```
--test /=grubbery=/tests/lib/auspex-chain ~     ::  120 tests
+-test /=grubbery=/tests/lib/auspex-chain ~     ::  122 tests
 -test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
 -test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
@@ -1660,7 +1668,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **120 tests**, the discovery ones among them
+be diffed; **122 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1741,6 +1749,7 @@ be diffed; **120 tests**, the discovery ones among them
 | A new thread's meta is neither archived nor direct. | `test-a-new-thread-is-neither-archived-nor-direct` |
 | A thread's time is its newest message's `sent`, whatever the order. | `test-last-sent-is-the-newest` |
 | A message renders exactly the API's fields: `id from to subject body body-mime sent prev attachments verdict read`; no verdict held is `unverified`. | `test-msg-json-is-the-api-shape` |
+| A stored `sent` that `+time` cannot write renders clamped to the epoch or the year 9999. | `test-msg-json-clamps-a-sent-it-cannot-write` |
 | A thread renders its messages in canonical order, with its local state beside them. | `test-thread-json-orders-messages-and-reports-local-state` |
 | A listing row is drawn from the newest honest message and flags a forgery; a search row is drawn from what matched. | `test-entry-json-draws-from-the-newest-honest-copy` |
 | The listing drops stale index entries and empty threads, and shows a thread of unreadable copies as such. | `test-inbox-json-drops-stale-and-shows-unreadable` |
@@ -1753,7 +1762,8 @@ be diffed; **120 tests**, the discovery ones among them
 | A read mark's ids are grouped by the thread that holds them. | `test-group-ids-by-thread` |
 | The label list is every thread's labels, once, sorted. | `test-labels-are-the-sorted-union` |
 | A fiber's crash record reads back as written, in milliseconds; a record of the wrong shape is no record. | `test-the-crash-record-reads-back-as-written` |
-| A delivered chain is refused for the first cap it breaks, in a fixed order: length, bodies, subjects, recipients, attachments, body mime, depth, signers. | `test-incoming-refusal-names-the-first-cap-broken` |
+| A delivered chain is refused for the first cap it breaks, in a fixed order: length, bodies, subjects, recipients, field widths, attachments, body mime, depth, signers. | `test-incoming-refusal-names-the-first-cap-broken` |
+| Every signed atom is held to its type's width, each bound admits its own edge, and a `sent` before ~1970.1.1 is refused. | `test-incoming-refusal-caps-widths` |
 | Merged with its thread, a chain is refused past max-chain distinct ids or max-depth, and a new thread past max-threads; a thread already held is never refused for the thread cap. | `test-admit-refusal` |
 | A send is refused past the body, subject and recipient caps before anything is read. | `test-compose-refusal` |
 | The chain a send would carry is refused past the length, depth and signer caps. | `test-sent-refusal` |

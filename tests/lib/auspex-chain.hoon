@@ -1670,6 +1670,18 @@
     ==
   ==
 ::
+::  a stored copy whose signed `sent` +time cannot write still renders,
+::  clamped to the epoch or to the year 9999, and an ordinary one is
+::  untouched
+++  test-msg-json-clamps-a-sent-it-cannot-write
+  =/  m  (um ~zod 'b' ~)
+  =/  sent  |=(d=@da (jget (msg-json:auspex ~ ~ m(sent.unsigned d)) 'sent'))
+  ;:  weld
+    (expect-eq !>(`json`[%n ~.0]) !>((sent `@da`1)))
+    (expect-eq !>((time:enjs:format ~9999.12.31)) !>((sent `@da`(bex 200))))
+    (expect-eq !>((time:enjs:format ~2026.1.1)) !>((sent ~2026.1.1)))
+  ==
+::
 ::  a thread renders its messages in canonical order whatever the map
 ::  gave, and its local state beside them
 ++  test-thread-json-orders-messages-and-reports-local-state
@@ -1915,6 +1927,9 @@
     (expect-eq !>(`(unit @t)``'body too long') !>((incoming-refusal:auspex ~[ok(body.unsigned (crip (reap +(max-body:auspex) 'a')))])))
     (expect-eq !>(`(unit @t)``'subject too long') !>((incoming-refusal:auspex ~[ok(subj.unsigned (crip (reap +(max-subj:auspex) 'a')))])))
     (expect-eq !>(`(unit @t)``'too many recipients') !>((incoming-refusal:auspex ~[ok(to.unsigned (sy (turn (gulf 1 +(max-to:auspex)) |=(i=@ `@p`i))))])))
+    ::  a life too wide to render cheaply, before the key lookup renders it
+    (expect-eq !>(`(unit @t)``'field out of range') !>((incoming-refusal:auspex ~[ok(life.unsigned (bex 32))])))
+    (expect-eq !>(`(unit @t)``'field out of range') !>((incoming-refusal:auspex ~[att(life.unsigned (bex 32))])))
     (expect-eq !>(`(unit @t)``'too many attachments') !>((incoming-refusal:auspex ~[att])))
     (expect-eq !>(`(unit @t)``'bad body mime') !>((incoming-refusal:auspex ~[mime])))
     (expect-eq !>(`(unit @t)``'chain too deep') !>((incoming-refusal:auspex (deep +(max-depth:auspex)))))
@@ -1924,6 +1939,30 @@
     ::  a chain breaking two caps is refused for the first in the order
     %+  expect-eq  !>(`(unit @t)``'body too long')
     !>  (incoming-refusal:auspex ~[ok(body.unsigned (crip (reap +(max-body:auspex) 'a')), subj.unsigned (crip (reap +(max-subj:auspex) 'a')))])
+  ==
+::
+::  every signed atom is held to its type's width, each bound admits its
+::  own edge, and `sent` may not fall before the epoch
+++  test-incoming-refusal-caps-widths
+  =/  ok  (um ~zod 'b' ~)
+  =/  wide  `(unit @t)``'field out of range'
+  =/  att=attachment:sur  ['a' 1 'text/plain' 0v1]
+  =/  in  |=(x=msg:sur (incoming-refusal:auspex ~[x]))
+  ;:  weld
+    (expect-eq !>(`(unit @t)`~) !>((in ok(sig (dec (bex 512))))))
+    (expect-eq !>(wide) !>((in ok(sig (bex 512)))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(life.unsigned (dec (bex 32))))))
+    (expect-eq !>(wide) !>((in ok(life.unsigned (bex 32)))))
+    (expect-eq !>(wide) !>((in ok(from.unsigned `@p`(bex 128)))))
+    (expect-eq !>(wide) !>((in ok(to.unsigned (sy ~[~nec `@p`(bex 128)])))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(prev.unsigned `(dec (bex 128))))))
+    (expect-eq !>(wide) !>((in ok(prev.unsigned `(bex 128)))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(sent.unsigned ~1970.1.1))))
+    (expect-eq !>(wide) !>((in ok(sent.unsigned `@da`1))))
+    (expect-eq !>(wide) !>((in ok(sent.unsigned `@da`(bex 128)))))
+    (expect-eq !>(`(unit @t)`~) !>((in ok(attachments.unsigned ~[att]))))
+    (expect-eq !>(wide) !>((in ok(attachments.unsigned ~[att(hash `@uv`(bex 128))]))))
+    (expect-eq !>(wide) !>((in ok(attachments.unsigned ~[att(size (bex 64))]))))
   ==
 ::
 ::  merged with the thread: distinct ids, depth, and the thread cap, which

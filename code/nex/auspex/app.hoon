@@ -1613,6 +1613,8 @@
   ::  answer, and +prune sheds there rather than rejecting.
   ::  every cap below is +incoming-refusal's, in this order:
   ::  length, bodies, subjects, recipients, then these.
+  ::  every signed atom within its type's width, since a mold clams an
+  ::  atom of any size and the copy is stored whole. See +fits-fields.
   ::  a delivered chain carries attachment METADATA and never bytes, so
   ::  this bounds what a hostile peer can make us store per message and
   ::  what it can later make us try to fetch. Rejected, not truncated:

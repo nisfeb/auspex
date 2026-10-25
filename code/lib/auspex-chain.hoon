@@ -1453,6 +1453,41 @@
 ++  fits-recipients
   |=([c=chain m=@ud] (levy c |=(x=msg (lte ~(wyt in to.unsigned.x) m))))
 ::
+::  +fits-fields: every signed atom within its type's natural width.
+::
+::    A mold clams an atom of any width, so a delivered chain could carry
+::    a megabyte where a ship, a hash or a signature belongs. Nothing
+::    else read those widths, and a copy is stored whole whatever its
+::    verdict. A copy whose key this ship lacks is never checked, so its
+::    sig is not even looked at. A wide `life` also costs a quadratic
+::    render on the key lookup. So each is held to what its type means:
+::    a signature to 64 bytes, a life to 32 bits, a ship, an id and a
+::    content hash to 128, a size to 64, and a `sent` to a date from
+::    ~1970.1.1 on that fits 128 bits. The epoch floor is there because
+::    the JSON renderer cannot write an earlier time, and a stored copy
+::    that cannot render leaves its whole thread unreadable.
+::
+::    These are not published caps, since no honest sender comes near
+::    them. Checked after +fits-recipients, so the walk of `to` is
+::    bounded.
+::
+++  fits-fields
+  |=  c=chain
+  ^-  ?
+  %+  levy  c
+  |=  x=msg
+  =*  u  unsigned.x
+  ?&  (lte (met 3 sig.x) 64)
+      (lte (met 7 from.u) 1)
+      (lte (met 5 life.u) 1)
+      (gte sent.u ~1970.1.1)
+      (lte (met 7 sent.u) 1)
+      ?~(prev.u & (lte (met 7 u.prev.u) 1))
+      (~(all in to.u) |=(s=ship (lte (met 7 s) 1)))
+      %+  levy  attachments.u
+      |=(a=attachment &((lte (met 6 size.a) 1) (lte (met 7 hash.a) 1)))
+  ==
+::
 ::  +fits-signers: how many distinct keys verifying this chain would cost.
 ::
 ::    Not a per-message predicate like its neighbours - it counts the
@@ -2625,7 +2660,7 @@
     ::  obeyed. The client renders every body as plain text and says so
     ::  when the message asked for something else.
       ['body-mime' [%s body-mime.unsigned.m]]
-      ['sent' (time:enjs:format sent.unsigned.m)]
+      ['sent' (sent-json sent.unsigned.m)]
       ['prev' ?~(prev.unsigned.m ~ [%s (scot %uv u.prev.unsigned.m)])]
     ::  ATTACHMENTS. They live INSIDE `unsigned`, so what is rendered
     ::  here is covered by the same signature the verdict below was
@@ -2660,6 +2695,19 @@
       ['verdict' [%s (~(gut by vs) [i sig.m] %unverified)]]
       ['read' [%b (~(has in rd) i)]]
   ==
+::
+::  +sent-json: a signed `sent`, clamped into what +time can write.
+::
+::    +time crashes on a date before ~1970.1.1, and one such copy made
+::    its whole thread fail to render. +fits-fields now refuses that at
+::    intake, but a copy stored before it cannot be repaired, because
+::    `sent` is signed. So the render clamps instead. The upper bound
+::    keeps a huge date from costing a huge decimal.
+::
+++  sent-json
+  |=  d=@da
+  ^-  json
+  (time:enjs:format (max ~1970.1.1 (min d ~9999.12.31)))
 ::
 ::
 ++  thread-json
@@ -2891,6 +2939,7 @@
   ?.  (fits-bodies c max-body)         `'body too long'
   ?.  (fits-subjects c max-subj)       `'subject too long'
   ?.  (fits-recipients c max-to)       `'too many recipients'
+  ?.  (fits-fields c)                  `'field out of range'
   ?.  (fits-attachments c max-attach)  `'too many attachments'
   ?.  (fits-body-mimes c max-mime)     `'bad body mime'
   ?.  (fits-depth c max-depth)         `'chain too deep'
