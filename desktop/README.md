@@ -30,6 +30,11 @@ Enter your ship's URL and `+code` once. The app posts them to the ship's own
 stored. The ship's `@p` comes out of the session cookie's own name, so no
 extra request is made to learn it.
 
+A URL typed without a scheme gets `https://`, or `http://` when the host is
+this machine (`localhost`, `127.x.x.x`, `[::1]`). A typed `http://` is kept,
+for a ship on your own network, and the connection page warns that the
+`+code` and session then cross the network unencrypted.
+
 The connection page reports the live state — connected (and to which ship),
 signed out, or unreachable — from a real authenticated request to
 `/apps/auspex/api/whoami`, not from whether a URL is configured. It offers the
@@ -39,10 +44,16 @@ returns to it from the client; `close` or Escape goes back.
 
 The workspace webview talks to the ship through a **localhost bridge**. Every
 request is relayed by the app with the session attached Rust-side, so the
-webview itself holds no cookies and webkit cookie policies (which vary by build
+webview itself holds no session and webkit cookie policies (which vary by build
 and silently drop cookies on cross-site flows and service-worker fetches) can
 never unauthenticate a view. That matters more here than it does in lattice:
 the auspex client is a PWA and its service worker mediates every fetch.
+
+The one cookie the webview does hold is the bridge's own: a random token made
+at launch and handed to the workspace window as an HttpOnly cookie on the
+bridge origin. The bridge answers anything without it with a 403 and never
+relays it, so a page in a browser, or another local program, cannot reach the
+ship through the bridge with your session.
 
 The bridge listens on a fixed port — **26600**, or the next free one in a
 16-wide range. Deliberate and load-bearing, not cosmetic: the port is part of
@@ -71,9 +82,11 @@ successful connect otherwise.
 2. On each change it re-reads `/apps/auspex/api/inbox?view=inbox&limit=20`.
    Rows that are `unread` and were **not** unread at the last look are new.
 3. One notification per new thread: title `~from · subject`, body the snippet.
-   A thread holding a forged copy is titled `FORGED · ~from · subject` —
-   first, before the sender it contradicts, because a notification is read
-   left to right and often not to the end.
+   The sender's own verdict comes first when it is not a clean one,
+   `FORGED · ~from · subject` or `unverified · ~from · subject`, because a
+   notification is read left to right and often not to the end. When the
+   thread also holds a forged copy that is not the one named, the title
+   ends `· + forged`, as the web client's inbox row does.
 4. A snapshot is taken before the stream opens, so launching never replays the
    backlog. Read-marks do not bump the beacon (deliberate on the nexus), so
    reading mail in the app cannot produce a notification, and a thread that

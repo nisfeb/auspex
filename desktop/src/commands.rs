@@ -27,6 +27,15 @@ pub async fn connect(app: AppHandle, url: String, code: String) -> Result<String
     if url.is_empty() {
         return Err("enter your ship's URL".into());
     }
+    // A new connect clears browsing data, so a stale service worker and
+    // cache from an earlier session (or another ship) cannot linger. It is
+    // done here, a whole login round-trip ahead of the workspace, because
+    // the clear returns before it has finished (wry 0.55.1, both WebKit
+    // ports). One still running when the workspace opens would wipe the
+    // bridge token cookie the bootstrap had just set.
+    if let Some(w) = app.get_webview_window("workspace") {
+        dlog(&format!("clear browsing data: {:?}", w.clear_all_browsing_data()));
+    }
     dlog(&format!("connect: logging in at {url}"));
     let (cookie, ship) = crate::proxy::login(&url, code.trim())?;
     // The cookie path is published at setup, but connect can be driven by the
@@ -43,7 +52,7 @@ pub async fn connect(app: AppHandle, url: String, code: String) -> Result<String
         cfg.url = u;
         cfg.ship = s;
     })?;
-    open_workspace(&app, true)?;
+    open_workspace(&app)?;
     // First connect on a fresh install: there was nothing to watch at launch,
     // so this is where the notifier starts. Idempotent — a reconnect to
     // another ship does not start a second one; the running thread re-reads
@@ -55,7 +64,7 @@ pub async fn connect(app: AppHandle, url: String, code: String) -> Result<String
 /// manager page's "close" button (and Escape), back to the ship UI.
 #[tauri::command]
 pub fn go_home(app: AppHandle) -> Result<(), String> {
-    open_workspace(&app, false)
+    open_workspace(&app)
 }
 
 /// Show the connection page IN the workspace window (single-window app: the
@@ -72,42 +81,11 @@ pub fn show_manager(app: &AppHandle) -> Result<(), String> {
     // so connect, connection_status and set_theme would all be refused with
     // "not allowed by acl" and
     // the connect page would be a dead form. A window BORN on manager.html is
-    // the one state that provably works on every platform, and the window is
-    // born there anyway, so: destroy it, wait for the label to free (destroy
-    // is asynchronous), and make a fresh one. The user is leaving the ship
-    // page either way.
+    // the one state that provably works on every platform, so it is rebuilt
+    // there. The user is leaving the ship page either way.
     if !created && !on_shell_page(&w) {
-        // destroying the ONLY window asks the app to exit; main.rs vetoes
-        // that while this flag is up
         dlog("manager: the window is on the ship page, rebuilding it");
-        REBUILDING.store(true, Ordering::SeqCst);
-        if let Err(e) = w.destroy() {
-            REBUILDING.store(false, Ordering::SeqCst);
-            return Err(e.to_string());
-        }
-        let h = app.clone();
-        std::thread::spawn(move || {
-            for _ in 0..100 {
-                if h.get_webview_window("workspace").is_none() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            let h2 = h.clone();
-            h.run_on_main_thread(move || {
-                let made = new_workspace(&h2);
-                REBUILDING.store(false, Ordering::SeqCst);
-                dlog(&format!("manager: rebuilt the window: {}", made.is_ok()));
-                match made {
-                    Ok(w) => {
-                        w.set_focus().ok();
-                    }
-                    Err(e) => dlog(&format!("manager: rebuilding the window failed: {e}")),
-                }
-            })
-            .ok();
-        });
-        return Ok(());
+        return rebuild(app, w, WebviewUrl::App("manager.html".into()));
     }
     if !created {
         let url: tauri::Url = "tauri://localhost/manager.html"
@@ -132,10 +110,47 @@ pub fn set_theme(app: AppHandle, dark: bool) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Up while show_manager is between destroying the workspace window and making
+/// Up while `rebuild` is between destroying the workspace window and making
 /// its replacement. The window is the app's only one, so its destruction reads
 /// as "last window closed, exit"; main.rs checks this and vetoes that exit.
 pub static REBUILDING: AtomicBool = AtomicBool::new(false);
+
+/// Destroy the workspace window and make a fresh one born on `url`. The
+/// window crosses between the shell's pages and the ship's only this way,
+/// never by a navigation (see show_manager and open_workspace).
+fn rebuild(app: &AppHandle, w: tauri::WebviewWindow, url: WebviewUrl) -> Result<(), String> {
+    // destroying the ONLY window asks the app to exit; main.rs vetoes
+    // that while this flag is up
+    REBUILDING.store(true, Ordering::SeqCst);
+    if let Err(e) = w.destroy() {
+        REBUILDING.store(false, Ordering::SeqCst);
+        return Err(e.to_string());
+    }
+    let h = app.clone();
+    std::thread::spawn(move || {
+        // destroy is asynchronous, so wait for the label to free
+        for _ in 0..100 {
+            if h.get_webview_window("workspace").is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let h2 = h.clone();
+        h.run_on_main_thread(move || {
+            let made = new_workspace(&h2, url);
+            REBUILDING.store(false, Ordering::SeqCst);
+            dlog(&format!("rebuilt the window: {}", made.is_ok()));
+            match made {
+                Ok(w) => {
+                    w.set_focus().ok();
+                }
+                Err(e) => dlog(&format!("rebuilding the window failed: {e}")),
+            }
+        })
+        .ok();
+    });
+    Ok(())
+}
 
 /// Is the window showing one of the shell's own pages (the manager) rather
 /// than the ship-served app?
@@ -148,14 +163,15 @@ fn is_shell_url(u: &tauri::Url) -> bool {
     u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost")
 }
 
-/// The single window is always BORN on manager.html. The app-page protocol
-/// handler only attaches to webviews created on an app URL, and a window born
-/// on the bridge origin cannot navigate back to the shell's pages ("Could not
-/// connect to tauri.localhost").
+/// The window, made on manager.html if there is none. The single window is
+/// BORN on the page it shows: here the manager, in open_workspace the
+/// bridge. The app-page protocol handler only attaches to webviews created on
+/// an app URL, and a window born on the bridge origin cannot navigate back to
+/// the shell's pages ("Could not connect to tauri.localhost").
 fn ensure_workspace(app: &AppHandle) -> Result<(tauri::WebviewWindow, bool), String> {
     match app.get_webview_window("workspace") {
         Some(w) => Ok((w, false)),
-        None => Ok((new_workspace(app)?, true)),
+        None => Ok((new_workspace(app, WebviewUrl::App("manager.html".into()))?, true)),
     }
 }
 
@@ -168,6 +184,8 @@ pub struct ConnStatus {
     /// set when we could not reach the ship at all (as opposed to being
     /// reachable but unauthenticated). The two need different advice
     pub error: Option<String>,
+    /// the saved URL is plain http to another machine, so the page warns
+    pub cleartext: bool,
 }
 
 /// What the connection page shows. A configured URL is NOT the same as being
@@ -178,8 +196,9 @@ pub struct ConnStatus {
 pub async fn connection_status(app: AppHandle) -> ConnStatus {
     let cfg = config::load(&app);
     if cfg.url.is_empty() {
-        return ConnStatus { url: String::new(), ship: None, connected: false, error: None };
+        return ConnStatus { url: String::new(), ship: None, connected: false, error: None, cleartext: false };
     }
+    let cleartext = config::cleartext_remote(&cfg.url);
     match crate::proxy::probe(&cfg.url) {
         Ok(Some(ship)) => {
             // whoami named the ship; fall back to the stored @p only if the
@@ -187,15 +206,15 @@ pub async fn connection_status(app: AppHandle) -> ConnStatus {
             let ship = if ship.is_empty() { cfg.ship.clone() } else { ship };
             dlog(&format!("status: connected to {ship}"));
             let ship = (!ship.is_empty()).then_some(ship);
-            ConnStatus { url: cfg.url, ship, connected: true, error: None }
+            ConnStatus { url: cfg.url, ship, connected: true, error: None, cleartext }
         }
         Ok(None) => {
             dlog("status: reachable but not authenticated");
-            ConnStatus { url: cfg.url, ship: None, connected: false, error: None }
+            ConnStatus { url: cfg.url, ship: None, connected: false, error: None, cleartext }
         }
         Err(e) => {
             dlog(&format!("status: unreachable: {e}"));
-            ConnStatus { url: cfg.url, ship: None, connected: false, error: Some(e) }
+            ConnStatus { url: cfg.url, ship: None, connected: false, error: Some(e), cleartext }
         }
     }
 }
@@ -263,34 +282,44 @@ pub fn open_external(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Open (or reuse) the workspace on the localhost bridge. The webview only
+/// Open the workspace on the localhost bridge. The webview only
 /// ever talks to 127.0.0.1. The bridge relays to the ship with the session
 /// attached Rust-side, so no webkit cookie behaviour (site pinning,
 /// third-party policy, SW-mediated fetch) can unauthenticate a view — which
 /// matters more here than in lattice, because the auspex client is a PWA and
-/// its service worker mediates every fetch it makes.
+/// its service worker mediates every fetch it makes. The one cookie the
+/// webview holds is the bridge's own token, which tells the bridge this
+/// window from any other local client.
 ///
-/// `fresh` (a new connect) also clears browsing data so a stale service worker
-/// and cache from an earlier session — or another ship — cannot linger.
-pub fn open_workspace(app: &AppHandle, fresh: bool) -> Result<(), String> {
+/// The window is REBUILT on the bridge, never navigated there from the
+/// manager. Tauri judges every invoke local or remote from the origin the
+/// webview reports, and on macOS that origin can lag a navigation (see
+/// show_manager). Lagging this way, it would judge the first ship-served
+/// document local and grant it the manager's commands. A window born on the
+/// bridge has no shell page behind it to lag from.
+pub fn open_workspace(app: &AppHandle) -> Result<(), String> {
     let cfg = config::load(app);
     if cfg.url.is_empty() {
         return Err("connect to a ship first".into());
     }
     let local = crate::proxy::ensure(app.state::<crate::proxy::Bridge>().inner(), &cfg.url)?;
-    let home: tauri::Url = format!("{local}/apps/auspex/")
+    let home = "/apps/auspex/";
+    dlog(&format!("navigate: {local}{home}"));
+    // through the bridge's bootstrap first: it hands this window the
+    // launch's token as an HttpOnly cookie, without which the bridge relays
+    // nothing, then redirects to the client
+    let boot: tauri::Url = crate::proxy::bootstrap_url(&local, home)
         .parse()
         .map_err(|e| format!("{e}"))?;
-    // the bridge means the webview needs no cookies, so the window may be
-    // born on the local manager page and freely navigate to the ship
-    let (w, _) = ensure_workspace(app)?;
-    if fresh {
-        dlog(&format!("clear browsing data: {:?}", w.clear_all_browsing_data()));
+    match app.get_webview_window("workspace") {
+        // launch with a stored config: nothing to rebuild yet
+        None => {
+            new_workspace(app, WebviewUrl::External(boot))?.set_focus().ok();
+            Ok(())
+        }
+        // connect and close, from the manager
+        Some(w) => rebuild(app, w, WebviewUrl::External(boot)),
     }
-    dlog(&format!("navigate: {home}"));
-    w.navigate(home).map_err(|e| e.to_string())?;
-    w.set_focus().ok();
-    Ok(())
 }
 
 /// What to do with a top-level navigation the workspace attempted.
@@ -347,9 +376,9 @@ fn nav_decision(
     Nav::External
 }
 
-fn new_workspace(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+fn new_workspace(app: &AppHandle, url: WebviewUrl) -> Result<tauri::WebviewWindow, String> {
     let handle = app.clone();
-    let w = WebviewWindowBuilder::new(app, "workspace", WebviewUrl::App("manager.html".into()))
+    let w = WebviewWindowBuilder::new(app, "workspace", url)
         .title("auspex")
         .inner_size(1200.0, 800.0)
         // tauri's own drag-drop interception would swallow the HTML5 drop
@@ -429,6 +458,27 @@ mod tests {
         assert!(!openable("https://example.com\nrm -rf /"));
         assert!(!openable("https://example.com\r\nx"));
         assert!(!openable("mailto:a@b\u{0}c"));
+    }
+
+    #[test]
+    fn the_manager_writes_only_its_own_markup() {
+        // Every innerHTML in the connection page is a plain string literal.
+        // Anything the ship said goes in with append or textContent, as text
+        // (security audit run-1: the whoami name was written as HTML).
+        let html = include_str!("../ui/manager.html");
+        let sinks: Vec<&str> = html.lines().filter(|l| l.contains("innerHTML")).collect();
+        assert!(!sinks.is_empty(), "the page has no innerHTML at all, so this test reads nothing");
+        for line in sinks {
+            let lit = line
+                .split_once("innerHTML")
+                .and_then(|(_, r)| r.trim_start().strip_prefix('='))
+                .and_then(|r| r.trim().strip_prefix('\''))
+                .and_then(|r| r.strip_suffix("';"));
+            assert!(lit.is_some_and(|l| !l.contains('\'')), "not a plain literal: {line}");
+        }
+        // the shell's CSP blocks style attributes, so one would silently
+        // do nothing
+        assert!(!html.contains(" style="), "use a class: the CSP blocks style attributes");
     }
 
     fn url(s: &str) -> tauri::Url {

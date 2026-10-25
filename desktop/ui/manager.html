@@ -36,6 +36,8 @@
   .conn { border: 1px solid var(--border); border-radius: 8px; padding: 12px;
     background: var(--surface); }
   .conn .row { align-items: center; gap: 10px; }
+  /* here and not in a style attribute: the page's CSP blocks those */
+  .conn .actions { margin-top: .7rem; }
   .mono { font: 12px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
   /* state at a glance: amber connected, orange reachable-but-logged-out, red
      unreachable. Colour is never the only signal. The text says it too. */
@@ -72,7 +74,10 @@
         <div id="conn-url" class="muted mono"></div>
       </div>
     </div>
-    <div class="row" style="margin-top:.7rem">
+    <p id="cleartext" class="err" hidden>This ship is on plain http, so your
+    +code and session cross the network unencrypted. Use https:// unless the
+    ship is on a network you trust.</p>
+    <div class="row actions">
       <button id="relog" hidden>reconnect</button>
       <button id="switch">change ship</button>
     </div>
@@ -120,10 +125,13 @@
     const s = await invoke('connection_status');
     $('url').value = s.url || $('url').value;
     $('conn-url').textContent = s.url || '';
+    $('cleartext').hidden = !s.cleartext;
     const dot = $('dot'), ship = $('conn-ship');
     if (s.connected) {
       dot.className = 'dot on';
-      ship.innerHTML = '<b>connected</b> as ' + (s.ship || 'your ship');
+      // the name came from the ship, so it goes in as text, never as markup
+      ship.innerHTML = '<b>connected</b> as ';
+      ship.append(s.ship || 'your ship');
       $('relog').hidden = true; $('switch').hidden = false;
       showForm(false, false);
     } else if (s.error) {
