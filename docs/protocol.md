@@ -560,9 +560,13 @@ to verify that message.
 
 ```hoon
 ++  thread-key
-  |=  [threads=(map thread-id thread) c=chain]
+  |=  [threads=(map thread-id (list @ta)) c=chain]
   ^-  thread-id
 ```
+
+`threads` is each held thread's copy names. The reference stores every copy
+under its `+slot`, `(scot %uv (sham [id sig]))`, so a name is an `[id sig]`
+and finding the thread reads no stored copy.
 
 Thread identity is derived by `+thread-key` and by nothing else. The rules:
 

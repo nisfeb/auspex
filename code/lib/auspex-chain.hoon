@@ -1259,22 +1259,24 @@
 ::    state, so thread identity - the property an attacker most wants to
 ::    move - is testable without an agent.
 ::
-::    Not fixing, recorded rather than dropped: the `hits` scan below is
-::    O(total stored messages) with a `sham` per message, on the only
-::    externally reachable poke. Bounded by max-threads/max-chain, but
-::    large. Upgrade path: a (map [msg-id @ux] thread-id) index in state.
-::    This is a performance concern, not an authenticity one.
+::    `threads` is each held thread's copy NAMES, not its copies. Every
+::    stored copy's grub name is its +slot, (sham [id sig]), and has been
+::    since the first layout, the flat one included. So a name match is
+::    an [id sig] match, and finding the thread clams and hashes nothing
+::    stored. Only the incoming chain is hashed. The scan is still one
+::    set lookup per stored copy, on the only externally reachable poke.
+::    The larger upgrade is a (map [msg-id @ux] thread-id) index in
+::    state, which this does not need.
 ::
 ++  thread-key
-  |=  [threads=(map thread-id thread) c=chain]
+  |=  [threads=(map thread-id (list @ta)) c=chain]
   ^-  thread-id
   =/  keys
-    (~(gas in *(set [msg-id @ux])) (turn c |=(m=msg [(id unsigned.m) sig.m])))
+    (~(gas in *(set @ta)) (turn c |=(m=msg (slot (id unsigned.m) sig.m))))
   =/  hits
     %+  skim  ~(tap by threads)
-    |=  [t=thread-id th=thread]
-    %+  lien  chain.th
-    |=(o=msg (~(has in keys) [(id unsigned.o) sig.o]))
+    |=  [t=thread-id ns=(list @ta)]
+    (lien ns |=(n=@ta (~(has in keys) n)))
   ::  not fixing: a chain touching two existing threads conflates them here,
   ::  and p.i.hits picks whichever comes first in map-traversal order. This
   ::  predates +thread-key (the same pattern already existed in +send's own
@@ -2564,20 +2566,6 @@
   %-  ~(gas by *(map [msg-id @ux] verdict))
   %+  turn  ~(val by ss)
   |=(s=stored-msg [[(id unsigned.msg.s) sig.msg.s] verdict.s])
-::
-::
-::  +key-threads: every thread as the bare, UNSORTED copies +thread-key
-::  compares. It asks one question - is this [id sig] held - so the sort
-::  and dedupe of +chain-of, and participants and last-sent, were paid
-::  on every delivery for fields nothing read.
-::
-++  key-threads
-  |=  loaded=(map thread-id (map path stored-msg))
-  ^-  (map thread-id thread)
-  %-  ~(run by loaded)
-  |=  ss=(map path stored-msg)
-  ^-  thread
-  [(turn ~(val by ss) |=(s=stored-msg msg.s)) ~ *@da]
 ::
 ::
 ::  +group-ids: which thread holds each of these message ids.

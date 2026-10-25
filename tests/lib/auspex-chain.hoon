@@ -446,14 +446,15 @@
 ::  once a thread exists, its id is immutable. A poke that carries one
 ::  message we already hold plus a brand-new prev=~ message - the shape
 ::  that would otherwise migrate an established conversation onto an
-::  attacker-chosen id - files into the thread we already have.
+::  attacker-chosen id - files into the thread we already have. A held
+::  thread is the names of its copies, each one's +slot.
 ++  test-thread-key-established-thread-is-immutable
   =/  a  (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  evil
     (forge ~palnet-sampel (sy ~[~sampel-palnet]) 'hi' 'new root' ~2020.1.1 ~)
   =/  tid  (id:auspex unsigned.a)
-  =/  stored=(map thread-id:sur thread:sur)
-    (malt ~[[tid `thread:sur`[~[a] (participants:auspex ~[a]) ~2026.1.1]]])
+  =/  stored=(map thread-id:sur (list @ta))
+    (malt ~[[tid ~[(slot:auspex tid sig.a)]]])
   ;:  weld
     (expect-eq !>(tid) !>((thread-key:auspex stored ~[evil a])))
     (expect-eq !>(tid) !>((thread-key:auspex stored ~[a evil])))
