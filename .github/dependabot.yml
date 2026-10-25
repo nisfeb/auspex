@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Every `uses:` is pinned to a commit SHA with a `# vX` comment; this keeps
+  # the pins moving (dependabot bumps the SHA and the comment together).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # the web client's npm packages, locked in ui/package-lock.json. A bump
+  # changes the committed bundle, so its PR fails "no drift in the served
+  # artifact" until someone runs `npm run build` in ui/ and commits it.
+  # thunderbird/ has no dependencies, so it has nothing to watch.
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
