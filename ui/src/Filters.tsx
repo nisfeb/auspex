@@ -69,7 +69,9 @@ export default function Filters({
         been checked and after it has been stored. A rule can add labels and send a
         thread straight to Archived. It cannot delete anything, cannot mark anything
         read, and cannot hide a message whose signature failed — a forged message is
-        evidence, and no rule you write can make it disappear.
+        evidence, and no rule you write can make it disappear. A From condition
+        matches only mail that ship verifiably signed, not mail that merely claims
+        to come from it.
       </p>
 
       <ul className="mb-4 max-w-prose space-y-1">

@@ -64,6 +64,9 @@ export default function MessageCard({
   // Parsed once per body: the thread re-renders every card on each
   // keystroke in its reply box, and a body can be 100,000 characters.
   const blocks = useMemo(() => quoteBlocks(m.body), [m.body])
+  // The folded line, for the same reason. Unmemoized it was parsed on
+  // every render of a folded card.
+  const preview = useMemo(() => ownWords(m.body) || m.body, [m.body])
 
   const open = () => {
     setName('')
@@ -153,7 +156,7 @@ export default function MessageCard({
         onClick={() => onFold?.(false)}
         className="block w-full truncate text-left text-ink-dim"
       >
-        {ownWords(m.body) || m.body}
+        {preview}
       </button>
     </>)
   }

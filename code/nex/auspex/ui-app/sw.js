@@ -5,12 +5,12 @@
 // precache manifest keyed on hashed filenames, which this build does not
 // have (it emits four files, by name, forever).
 //
-// `cebfa27b092a` is stamped by vite.config.ts at copy time. It is
+// `be86748924e4` is stamped by vite.config.ts at copy time. It is
 // the ONLY thing that invalidates the shell: the two grubs are replaced
 // wholesale on a redeploy and keep their names, so nothing in a URL ever
 // changes and a content-addressed cache key is not available.
 
-const VERSION = 'cebfa27b092a'
+const VERSION = 'be86748924e4'
 const SHELL = `auspex-shell-${VERSION}`
 // NOT versioned, unlike the shell. Mail is not part of the build: a
 // deploy that changes one line of CSS has nothing to say about the
@@ -117,10 +117,17 @@ self.addEventListener('fetch', (e) => {
       // under a new key, and activate says 'updated'. Refreshing here
       // re-downloaded the whole shell (~280 KB) on every load, only to
       // write it into a cache the next activate deletes.
-      const hit = await caches.match(key)
+      //
+      // OUR OWN CACHE, NOT `caches.match`. Cache Storage belongs to the
+      // origin, and every app on the ship shares that, so an origin-wide
+      // match answers with whatever another page stored under this URL.
+      // Activate still sweeps only our own names, because the other
+      // caches are those apps' to keep.
+      const shell = await caches.open(SHELL)
+      const hit = await shell.match(key)
       if (hit) return hit
       const res = await fetch(req)
-      if (res.ok) (await caches.open(SHELL)).put(key, res.clone())
+      if (res.ok) shell.put(key, res.clone())
       return res
     })())
     return
@@ -134,10 +141,19 @@ self.addEventListener('fetch', (e) => {
         // about the session, not about the mailbox, and caching it
         // would mean an expired login permanently shadowing the last
         // good listing.
+        //
+        // And the end of a session ends the offline copy. A 401 or 403
+        // means this browser may no longer read the mailbox, so nothing
+        // cached from it is served offline either. A 404 for a thread
+        // means it was deleted, so its copy goes too.
         if (res.ok) (await caches.open(DATA)).put(req, res.clone())
+        else if (res.status === 401 || res.status === 403) await caches.delete(DATA)
+        else if (res.status === 404 && p.startsWith(`${BASE}/api/thread/`)) {
+          await (await caches.open(DATA)).delete(req)
+        }
         return res
       } catch (err) {
-        const hit = await caches.match(req)
+        const hit = await (await caches.open(DATA)).match(req)
         if (!hit) throw err
         // MARKED, so nothing downstream can mistake this for live mail.
         // THE APP READS THIS HEADER: `onCachedMail` in api.ts watches it

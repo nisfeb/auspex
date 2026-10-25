@@ -216,7 +216,9 @@ export function AttachmentRow({ a, from }: { a: Attachment; from: string }) {
             onClick={() => { void pull() }}
             title="This ship does not hold these bytes yet. Attachments are never
               pushed: the message carries the file's content hash and the bytes are
-              pulled on request from whoever has them. The hash proves them."
+              pulled on request from whoever has them. The hash proves them. The ship
+              that answers decides how many bytes arrive, whatever size the message
+              states."
             className="btn btn-outline ml-auto"
           >
             Fetch
