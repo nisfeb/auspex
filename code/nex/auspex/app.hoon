@@ -1,8 +1,9 @@
 ::  nex/auspex/app: the grubbery-native %auspex nexus.
 ::
 ::  auspex is a nexus, not a gall agent. The tree it owns:
-::    /main.sig                    the WRITER. Takes %auspex-action (local
-::                                 only) and %auspex-chain (any ship) pokes
+::    /main.sig                    the WRITER. Takes %auspex-action (from
+::                                 our own fibers, and a %send from another
+::                                 app) and %auspex-chain (any ship) pokes
 ::                                 and serialises every mutation. Nothing
 ::                                 else in this nexus writes.
 ::    /mail/thread/<tid>/msg/<id>/<id>/.../<slot>
@@ -430,7 +431,7 @@
         ::  of parking the fiber. The approval reload re-runs the bind with
         ::  grants in hand, which is why consent alone brings the UI up.
         ;<  ~  bind:m  (bind-http-self:io [~ /apps/auspex])
-        (http-dispatch:io %auspex)
+        http-loop
       ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
           [[%ui %requests ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/requests: failed")
@@ -947,9 +948,8 @@
 ::    group survive untouched. A direct write to how.weir does none of that.
 ::
 ::    The grant is a ROAD, not a mark: a peer that can reach /main.sig can
-::    address any marc at it, %auspex-action included. +apply's source
-::    check is what makes that harmless, and it is the same check the
-::    agent's `?>  =(our.bowl src.bowl)` was.
+::    address any marc at it, %auspex-action included. +apply's
+::    provenance check (+may-act) is what makes that harmless.
 ::
 ::  +grant-public: put our writer in the public usergroup so another ship
 ::  may poke it. desk.hoon reaches for +get-here-abs at this exact spot
@@ -1058,29 +1058,32 @@
     (deliver root p.res)
   ::  an unknown blot. Ignore it rather than crash - see the header.
   ?:  ?=(%other kind)  (pure:m |)
-  ;<  our=@p  bind:m  bowl-our
+  ::  THE ONE PROVENANCE CHECK, before any clam and before any arm below.
   ::  +get-poke-src reads the SHIP off the transport, never the payload.
-  ::  ~ is a fiber inside this nexus; our own ship arrives named, because
-  ::  the agent-facing surface makes every caller a /sys/ames/ships/<who>.
-  =/  src=(unit @p)  (get-poke-src:io from)
-  ?.  (may-act:uc our src)
+  ::  Our own ship arrives named too, because the agent-facing surface
+  ::  makes every caller a /sys/ames/ships/<who>. p.from is 0 only for a
+  ::  fiber inside this nexus. Another app may only send (+may-act).
+  ::  The head is read before the clam, and that is sound because the
+  ::  $action clam picks its case by that head and keeps that head.
+  ::  So the head checked here is the action +act runs. Make roads under
+  ::  this tree are the residual. A grub another app made there sits
+  ::  inside the nexus, and the kernel cannot yet name a grub's maker.
+  =/  send=?  &(?=(%action kind) ?=([%send *] q.q.sage))
+  ?.  (may-act:uc p.from (get-poke-src:io from) send)
     (reject root 'foreign action refused')
-  ::  a fetch fiber's answer. Local-only for the same reason an action
-  ::  is: the blot has a path prefix, which the agent-facing surface and
-  ::  a dojo poke cannot name, but a peer poking over ames can - so the
-  ::  source check is what makes that harmless. The hash is re-checked
-  ::  in +take-blob regardless.
+  ::  a fetch fiber's answer, taken from our own fibers only. The blot
+  ::  has a path prefix, which the agent-facing surface and a dojo poke
+  ::  cannot name, but a peer poking over ames or another app can, so
+  ::  the check above is what makes that harmless. The hash is
+  ::  re-checked in +take-blob regardless.
   ?:  ?=(%blob-in kind)
     =/  res  (blob-in-from-noun:uc q.q.sage)
     ?~  res  (reject root 'malformed blob-in')
     (take-blob root u.res)
-  ::  a probe fiber's answer. Local-only for the same reason a fetch
-  ::  fiber's is, and by the same check: the blot has a path prefix,
-  ::  which the agent-facing surface and a dojo poke cannot name, but a
-  ::  peer poking over ames can - and a peer that could write our
-  ::  discovery cache could tell us it speaks a version it does not, or
-  ::  caps larger than it enforces, and either one turns a send into a
-  ::  message that vanishes.
+  ::  a probe fiber's answer, from our own fibers only by the same check.
+  ::  A peer or another app that could write our discovery cache could
+  ::  tell us it speaks a version it does not, or caps larger than it
+  ::  enforces, and either one turns a send into a message that vanishes.
   ?:  ?=(%probe kind)
     =/  res  (mule |.(~|(%auspex-bad-probe ;;(probe-req:uc q.q.sage))))
     ?:  ?=(%| -.res)  (reject root 'malformed probe result')
@@ -1129,9 +1132,8 @@
     %save-list      (do-save-list root name.a members.a)
     %delete-list    (do-delete-list root name.a)
     %save-settings  (do-save-settings root settings.a)
-  ::  the key road. Raised by the probe, and forceable from the dojo -
-  ::  see +do-set-caps for why that seam is the honest way to reach the
-  ::  degraded paths at all. %.n like every other local-state action.
+  ::  the key road, raised by the key probe. %.n like every other
+  ::  local-state action.
     %set-caps       (do-set-caps root keys.a)
   ==
 ::
@@ -1189,7 +1191,8 @@
   ::
   ::    +do-web-send refuses the same send at the route with the same
   ::    words, so the composer stays open - but a route check is not a
-  ::    substitute for this one: a dojo poke arrives without passing it.
+  ::    substitute for this one. Another app's send arrives without
+  ::    passing it.
   ;<  may=?  bind:m  (may-scry root)
   ?.  may
     (reject root 'this ship cannot sign mail: Auspex has not been granted the key road')
@@ -1490,9 +1493,9 @@
 ::    wants and this stores exactly that.
 ::
 ::    THE NAME IS RE-CHECKED HERE, not only at the route. It becomes a
-::    path segment, this arm is reachable from a dojo poke as well as
-::    from the HTTP surface, and a name that is not a knot would be a
-::    write to a road nobody meant. Belt to the route's braces.
+::    path segment, the writer does not trust its caller to have
+::    checked it, and a name that is not a knot would be a write to a
+::    road nobody meant. Belt to the route's braces.
 ::
 ::    OUR OWN SHIP IS REFUSED AS A MEMBER, again at both ends. A list
 ::    naming you sends you your own mail on every send that expands it,
@@ -2794,11 +2797,9 @@
 ::
 ::  +do-set-caps: raise or lower /caps, on the writer.
 ::
-::    Two callers: the key probe, which raises it by proof, and a dojo
-::    poke, which is the TEST SEAM - auspex lives in /apps, the trusted
-::    tier, which has no weir, so no veto can be made to happen on a
-::    development ship and forcing the flag is the only way to walk the
-::    degraded paths. See %set-caps in $action:uc.
+::    One caller: the key probe, which raises it by proof. The dojo
+::    poke that once forced it as a test seam is refused now. See
+::    %set-caps in $action:uc.
 ::
 ::    A RAISE RUNS THE RISE WORK THE DENIED WRITER SKIPPED. +on-load
 ::    lays /caps denied on every load, so the writer's own rise finds
@@ -3184,11 +3185,47 @@
 ::  client that consumes it is the reviewed one and a port that quietly
 ::  changed the contract would be a rewrite wearing a port's name.
 ::
-::  +srv: the HTTP response door. Every response travels up to
-::  /ui/main.sig through it, so the dispatcher can cull the fiber of a
-::  connection the browser already dropped.
+::  +srv: the HTTP response door. A response goes straight to eyre's
+::  server-state grub, never through /ui/main.sig, and the door's road
+::  is a sample http-res:io still takes and does not use. A dropped
+::  connection reaches /ui/main.sig from the kernel as a cancel, and
+::  +http-loop culls that request's fiber.
 ::
 ++  srv  ~(. http-res:io [%| 1 %& ~ %'main.sig'])
+::
+::  +http-loop: /ui/main.sig's request loop. It is the kernel's
+::  http-dispatch:io less what any grub could abuse.
+::
+::    The kernel pokes a handler with no sender of its own, so a request
+::    or a cancel from eyre arrives with the default `from`. Any grub
+::    granted a poke road here arrives with its own, and http-dispatch
+::    took its pokes all the same. One could plant a request grub with
+::    its own `src` and its own authenticated flag, and so pass the
+::    owner gate. One could relay an %eyre-action to eyre as this app.
+::    So this loop takes only the default `from`, reads each payload
+::    under mule, and has no %eyre-action relay. Responses never needed
+::    it (see +srv).
+::
+++  http-loop
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  |-
+  ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
+  ?.  =(*from:fiber:nexus from)  $
+  ?+    name.p.sage  $
+      %handle-http-request
+    =/  got  (mule |.(!<([eyre-id=@ta src=@p req=inbound-request:eyre] q.sage)))
+    ?:  ?=(%| -.got)  $
+    =/  [eyre-id=@ta src=@p req=inbound-request:eyre]  p.got
+    ;<  ~  bind:m  (make:io [%| 0 %& /requests eyre-id] |+[[[/ %http-request] [src req]] ~])
+    $
+  ::
+      %handle-http-cancel
+    =/  got  (mule |.(!<(@ta q.sage)))
+    ?:  ?=(%| -.got)  $
+    ;<  ~  bind:m  (cull:io [%| 0 %& /requests p.got])
+    $
+  ==
 ::
 ::  +bump-beacon: move the beacon so open readers refetch.
 ::
@@ -3249,6 +3286,19 @@
   ::  over /sys/bowl just to compare cost lattice ~0.2s on every request.
   ?.  authenticated.req
     (send-err eyre-id 403 'forbidden')
+  ::  THE CROSS-SITE GATE. The owner's cookie has no SameSite, so another
+  ::  site can make the owner's browser send it on a POST that sends
+  ::  mail, deletes a thread or saves a rule (security audit run-1).
+  ::  Refuse any write another site sent (+cross-site:uw). GET and HEAD
+  ::  stay open, since no read route writes.
+  ?:  ?&  !?=(?(%'GET' %'HEAD') meth)
+          %:  cross-site:uw
+            (get-header:http 'sec-fetch-site' header-list.request.req)
+            (get-header:http 'origin' header-list.request.req)
+            (get-header:http 'host' header-list.request.req)
+          ==
+      ==
+    (send-err eyre-id 403 'cross-site request refused')
   ::  the shell and its one script, laid down as grubs in +on-load.
   ?:  &(?=(~ suffix) =(%'GET' meth))
     (serve-ui eyre-id %'index.html')
@@ -4244,9 +4294,8 @@
 ::    the writer. `name` becomes a path segment, so a name that is not a
 ::    knot is a write to a road nobody meant; `our` is refused as a
 ::    member so a list cannot send you your own mail. Both are checked
-::    again at the writer, which is reachable from a dojo poke that never
-::    passes through this arm - a boundary check is not a substitute for
-::    one at the point of use, and this route is not the only door.
+::    again at the writer, which does not trust this arm to have run. A
+::    boundary check is not a substitute for one at the point of use.
 ::
 ::    The reason a bad name is a 400 rather than a silent normalisation:
 ::    a user typed the name, and a list that quietly became something

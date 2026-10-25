@@ -136,9 +136,8 @@
 ::    unrecoverable: a thread pinned at the distinct-id cap, or a store
 ::    filled to max-threads, has no remedy but deleting the tree.
 ::    Deletion makes those limitations recoverable without committing to
-::    a quota redesign. It is local-only - the writer fiber gates every
-::    action on the poke's source being us - so no peer can delete a
-::    thread out from under us.
+::    a quota redesign. Only our own fibers may ask for it (+may-act), so
+::    no peer and no other app can delete a thread out from under us.
 ::
 +$  action
   $%  ::  %send: compose, reply and forward. The bytes of every attachment
@@ -217,19 +216,16 @@
       [%save-settings =settings]
     ::  %set-caps: SET WHAT THIS SHIP MAY REACH, DIRECTLY.
     ::
-    ::    Two callers, and they are not the same kind of thing.
-    ::
-    ::    The key probe pokes [%set-caps &] when its one jael scry came
+    ::    One caller. The key probe pokes [%set-caps &] when its one jael scry came
     ::    back, which is the only way /caps is ever raised in ordinary
     ::    running - see the /keys/probe fiber in the nexus.
     ::
-    ::    And it is A TEST SEAM, deliberately: auspex lives in /apps,
-    ::    the trusted tier, which has no weir, so no veto can be made to
-    ::    happen on a development ship. Forcing the flag from the dojo
-    ::    is the only way to walk the degraded paths at all, and an
-    ::    honest seam beats a fake veto. It is owner-gated like every
-    ::    other action (+apply's src check), so no peer can lower this
-    ::    ship's caps for it.
+    ::    It was also a test seam, forced from the dojo to walk the
+    ::    degraded paths on a development ship, where /apps has no weir
+    ::    and no veto can be made to happen. That seam is closed. A dojo
+    ::    poke names our ship on the transport, and +may-act takes a
+    ::    non-send action only from our own fibers, so no peer and no
+    ::    other app can lower this ship's caps.
       [%set-caps keys=?]
   ==
 ::
@@ -3172,13 +3168,22 @@
   ?:  =([/auspex %probereq] b)   %probe
   %other
 ::
-::  +may-act: a local action, blob or probe result from this ship only.
-::  A chain may come from anyone (the signatures are the authority); an
-::  action is the owner's alone. No source at all is our own fiber.
+::  +may-act: may this poke at the writer do what it asks? A chain needs
+::  no check, since the signatures are the authority. Everything else
+::  is judged by where the poke came from, read off the transport.
+::
+::    `up` is the poke's p.from, the steps from the writer up to the
+::    sender's common ancestor, so 0 is a fiber inside this nexus. `src`
+::    is the ship the transport names, and ~ is a fiber on this ship.
+::    Our own fibers may do anything. Another app on this ship may send
+::    mail and nothing else, which is how orrery mails its brief. A poke
+::    that names a ship is refused, our own included. The dojo and
+::    %grub-cmd arrive that way, and so does every peer. `send` says the
+::    poke is a %send action.
 ++  may-act
-  |=  [our=@p src=(unit @p)]
+  |=  [up=@ud src=(unit @p) send=?]
   ^-  ?
-  ?|(?=(~ src) =(our u.src))
+  ?&(?=(~ src) |(=(0 up) send))
 ::
 ::  +proto-stale: must /proto be (re)published? Unless it is bound in
 ::  the farm and what was last published is what this build speaks.

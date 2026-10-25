@@ -1175,8 +1175,13 @@ to be a participant.
 
 The grant is a **road, not a mark**, so a peer that can reach the writer can
 also address the local-only marks at it. The source check is what makes that
-harmless: a local-only action MUST be refused unless the poke's source is our
-own ship, read **off the transport and never off the payload**.
+harmless, and it reads the source **off the transport and never off the
+payload**. A local-only action MUST be refused unless it comes from a fiber
+inside the receiver's own nexus. The one exception is another app on the same
+ship, which arrives with no ship on the transport and from outside the nexus.
+It may send mail (a `%send` action) and nothing else. A poke that names a ship
+on the transport MUST NOT act, even when that ship is the receiver's own. So a
+dojo or `%grub-cmd` poke can deliver a chain but cannot act.
 
 ### 6.2 A conformant peer runs the nexus
 
@@ -1700,9 +1705,9 @@ alongside the main suite:
 
 ```
 -test /=grubbery=/tests/lib/auspex-chain ~     ::  128 tests
--test /=grubbery=/tests/lib/auspex-web ~       ::  52 tests
+-test /=grubbery=/tests/lib/auspex-web ~       ::  53 tests
 -test /=grubbery=/tests/lib/auspex-vectors ~   ::  15 tests
--test /=grubbery=/tests/lib/auspex-fibers ~    ::  15 tests: the nexus's own fibers
+-test /=grubbery=/tests/lib/auspex-fibers ~    ::  19 tests: the nexus's own fibers
 ```
 
 ### 8.4 Rule → test
@@ -1814,7 +1819,7 @@ be diffed; **128 tests**, the discovery ones among them
 | When several threads hold what a reply answers, the reply joins the one whose id is the root that message's ancestry reaches, never one a copy was planted into, whatever the map order. | `test-a-reply-ignores-a-copy-replanted-under-another-root` |
 | New mail un-archives its thread unless a rule archives it; mail that wrote nothing only adds a rule's archive; rule labels join up to max-labels, or none do. | `test-filing` |
 | Storing a thread writes only new or changed slots and culls only what is no longer wanted, outermost directories first. | `test-slot-plan` |
-| The writer takes a chain from anyone, and an action, blob or probe result only from this ship. | `test-the-writer-sorts-pokes-and-sources` |
+| The writer takes a chain from anyone. An action, blob or probe result comes only from its own fibers, except that another app on the ship may send. A poke naming a ship, our own included, may not act. | `test-the-writer-sorts-pokes-and-sources` |
 | /proto is published when unbound or changed; discovery keeps the best valid answer; a fresh peer record is trusted without asking again. | `test-discovery-decisions` |
 | Fetched bytes are stored only if they arrived, fit max-blob, carry no more than their declared size, match the signed size a rule fetched them on, and hash to their address. | `test-blob-refusal` |
 | A fetch request or answer from before the signed size reads as one with no size. | `test-the-fetch-ladders-read-version-0` |

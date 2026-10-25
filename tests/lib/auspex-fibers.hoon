@@ -53,6 +53,23 @@
     (expect-eq !>(503) !>(code:(status:ft t)))
   ==
 ::
+::  a write another site sent, with the owner's cookie, is refused at
+::  the cross-site gate: 403, and nothing reaches the writer
+++  test-a-cross-site-write-is-refused
+  =/  t
+    %^  run:ft  a-world:ft  req-fiber
+    !>  :-  ~zod
+        ^-  inbound-request:eyre
+        :*  &  |  [%ipv4 .127.0.0.1]  %'POST'  '/apps/auspex/api/archive'
+            ~[['sec-fetch-site' 'cross-site'] ['origin' 'https://evil.example']]
+            `(as-octs:mimes:html '{"thread-id":"0v1a","archived":true}')
+        ==
+  ;:  weld
+    (expect-eq !>(%done) !>(end.t))
+    (expect-eq !>([403 '{"error":"cross-site request refused"}']) !>((status:ft t)))
+    (expect-eq !>(`(list action:uc)`~) !>((writes t)))
+  ==
+::
 ::  a malformed body is refused at the route: nothing reaches the writer
 ++  test-a-bad-archive-body-never-reaches-the-writer
   =/  t  (call & %'POST' '/apps/auspex/api/archive' '{"thread-id":"nope"}')
@@ -225,6 +242,41 @@
   ;:  weld
     (expect-eq !>(%wait) !>(end.t))
     (expect-eq !>(`(list *)`~[[/rise (add now:a-world:ft ~m1)]]) !>((timers t)))
+  ==
+::
+::  the road of every grub a run made, or culled, in order
+++  made
+  |=  t=trail:ft
+  ^-  (list road:tarball)
+  (murn darts.t |=(d=dart:nexus ?.(?=([%node * * %make *] d) ~ `road.d)))
+++  culled
+  |=  t=trail:ft
+  ^-  (list road:tarball)
+  (murn darts.t |=(d=dart:nexus ?.(?=([%node * * %cull *] d) ~ `road.d)))
+::
+::  /ui/main lays a request fiber only for a request from eyre, which
+::  the kernel pokes with the default `from`. Another grub's request or
+::  cancel does nothing, and no %eyre-action is relayed for anyone.
+++  test-ui-main-takes-requests-only-from-eyre
+  =/  t0  (run:ft a-world:ft (ui-main ~) !>(~))
+  =/  evil=from:fiber:nexus  [4 [/evil %'main.sig']]
+  =/  req=sage:tarball  [[/ %handle-http-request] !>([`@ta`%r1 ~zod *inbound-request:eyre])]
+  =/  cancel=sage:tarball  [[/ %handle-http-cancel] !>(`@ta`%r1)]
+  =/  relay=sage:tarball  [[/ %eyre-action] !>([%send %r1 %kick ~])]
+  =/  ours  (feed:ft a-world:ft t0 [%poke *from:fiber:nexus req])
+  =/  theirs  (feed:ft a-world:ft t0 [%poke evil req])
+  ;:  weld
+    (expect-eq !>(%wait) !>(end.t0))
+    (expect-eq !>(`(list road:tarball)`~) !>((made theirs)))
+    (expect-eq !>(`(list road:tarball)`~[[%| 0 %& /requests %r1]]) !>((made ours)))
+    (expect-eq !>(%wait) !>(end.theirs))
+    %+  expect-eq  !>(`(list road:tarball)`~)
+    !>  (culled (feed:ft a-world:ft t0 [%poke evil cancel]))
+    %+  expect-eq  !>(`(list road:tarball)`~[[%| 0 %& /requests %r1]])
+    !>  (culled (feed:ft a-world:ft t0 [%poke *from:fiber:nexus cancel]))
+    ::  t0 already holds the bind, the one %eyre-action it sends itself
+    %+  expect-eq  !>((pokes:ft t0 [/ %eyre-action]))
+    !>  (pokes:ft (feed:ft a-world:ft t0 [%poke *from:fiber:nexus relay]) [/ %eyre-action])
   ==
 ::
 ::  a clean start clears any wait an earlier run left, then goes on

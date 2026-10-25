@@ -1,4 +1,5 @@
-::  auspex-web: the JSON request decoders for the HTTP surface.
+::  auspex-web: the JSON request decoders for the HTTP surface, and its
+::  cross-site check.
 ::
 ::    Everything a browser POSTs at this nexus arrives here first. That is
 ::    a hostile surface even on a single-user app - the routes sit behind
@@ -504,4 +505,39 @@
   :~  hash+(se:dejs:format %uv)
       from+(se:dejs:format %p)
   ==
+::
+::  +cross-site: did another site send this request? Lattice's arm
+::  (security audit run-1), with one carve-out ahead of it.
+::
+::    The owner's eyre cookie carries no SameSite, so a page on another
+::    site can make the owner's browser send it on a top-level POST.
+::    Fetch Metadata answers directly whenever the browser sends it,
+::    which is every https origin and loopback. Only same-origin and
+::    none are ours. A browser on plain http to any other host sends no
+::    Fetch Metadata, so then an Origin naming another host:port than
+::    the one the request was sent to is another site, and so is Origin
+::    null. No Origin and no Fetch Metadata is not a browser's
+::    cross-site write. Talon and the test scripts look like that.
+::
+::    THE CARVE-OUT. The Thunderbird add-on sends every POST with Origin
+::    moz-extension://<its install's uuid>, and with no Fetch Metadata
+::    at all on plain http to a LAN ship. No web page can send that
+::    Origin, and an add-on the owner installed already holds the
+::    owner's session. So it is checked first, before Fetch Metadata.
+::
+++  cross-site
+  |=  [site=(unit @t) origin=(unit @t) host=(unit @t)]
+  ^-  ?
+  ?:  &(?=(^ origin) =("moz-extension://" (scag 16 (cass (trip u.origin)))))  |
+  ?^  site
+    =/  s=tape  (cass (trip u.site))
+    !|(=("same-origin" s) =("none" s))
+  ?~  origin  |
+  ?~  host  &
+  =/  o=tape  (cass (trip u.origin))
+  =/  a=tape
+    ?:  =("https://" (scag 8 o))  (slag 8 o)
+    ?:  =("http://" (scag 7 o))  (slag 7 o)
+    o
+  !=(a (cass (trip u.host)))
 --

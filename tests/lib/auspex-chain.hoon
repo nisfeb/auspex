@@ -2205,9 +2205,16 @@
     (expect-eq !>(%probe) !>((poke-kind:auspex [/auspex %probereq])))
     (expect-eq !>(%other) !>((poke-kind:auspex [/auspex %auspex-chain])))
     (expect-eq !>(%other) !>((poke-kind:auspex [/ %blob-in])))
-    (expect !>((may-act:auspex ~zod ~)))
-    (expect !>((may-act:auspex ~zod `~zod)))
-    (expect !>(!(may-act:auspex ~zod `~nec)))
+    ::  our own fiber may do anything
+    (expect !>((may-act:auspex 0 ~ |)))
+    (expect !>((may-act:auspex 0 ~ &)))
+    ::  another app on this ship may send and nothing else
+    (expect !>((may-act:auspex 4 ~ &)))
+    (expect !>(!(may-act:auspex 4 ~ |)))
+    ::  a poke naming a ship is refused, our own (the dojo) included
+    (expect !>(!(may-act:auspex 7 `~zod &)))
+    (expect !>(!(may-act:auspex 7 `~zod |)))
+    (expect !>(!(may-act:auspex 0 `~nec |)))
   ==
 ::
 ::  discovery: publish when unbound or changed, keep the best valid
