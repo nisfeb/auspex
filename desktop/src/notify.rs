@@ -93,6 +93,10 @@ pub struct Row {
     /// read where the app's own badge is not being looked at.
     #[serde(default)]
     pub forged: bool,
+    /// The verdict of the copy `from` and `subject` were drawn from, which is
+    /// not what `forged` describes. Empty from a ship too old to send it.
+    #[serde(default)]
+    pub verdict: String,
     #[serde(default)]
     pub unread: bool,
 }
@@ -196,11 +200,15 @@ pub fn diff(seen: &mut HashSet<String>, rows: &[Row]) -> Vec<Note> {
     out
 }
 
-/// Sender, subject, snippet — and the verdict when it is the bad one.
+/// Sender, subject, snippet, and the row's own verdict unless it verified.
 ///
-/// `FORGED` goes FIRST, before the sender it contradicts. A notification is
-/// read left to right in half a second and often not read to the end, so a
-/// warning after the name it warns about is a warning that arrives too late.
+/// `FORGED` or `unverified` goes FIRST, before the sender it qualifies. A
+/// notification is read left to right in half a second and often not read
+/// to the end, so a warning after the name it warns about arrives too late.
+/// It is the verdict of the copy that named this sender (security audit
+/// run-1). The thread-wide `forged` flag can come from a different copy,
+/// which may claim another sender entirely, so it is the web client's
+/// ` + forged` after the subject rather than an accusation of this one.
 ///
 /// Every field here is SIGNED BUT HOSTILE: the sender chose it. Several
 /// notification daemons (GNOME Shell, KDE, anything libnotify-shaped) parse
@@ -210,11 +218,13 @@ pub fn diff(seen: &mut HashSet<String>, rows: &[Row]) -> Vec<Note> {
 /// wire, and a 4KB notification is a screen-sized one.
 fn note_for(r: &Row) -> Note {
     let subject = if r.subject.is_empty() { "(no subject)" } else { &r.subject };
-    let title = if r.forged {
-        format!("FORGED · {} · {}", safe(&r.from, 60), safe(subject, 120))
-    } else {
-        format!("{} · {}", safe(&r.from, 60), safe(subject, 120))
+    let mark = match r.verdict.as_str() {
+        "forged" => "FORGED · ",
+        "unverified" => "unverified · ",
+        _ => "",
     };
+    let also = if r.forged && r.verdict != "forged" { " · + forged" } else { "" };
+    let title = format!("{mark}{} · {}{also}", safe(&r.from, 60), safe(subject, 120));
     Note { title, body: safe(&r.snippet, 200) }
 }
 
@@ -399,6 +409,7 @@ mod tests {
             from: "~feb".to_string(),
             snippet: "a snippet".to_string(),
             forged: false,
+            verdict: "verified".to_string(),
             unread,
         }
     }
@@ -558,8 +569,10 @@ mod tests {
         // warning after the name it contradicts arrives too late.
         let mut r = row("a", true);
         r.forged = true;
+        r.verdict = "forged".into();
         let n = note_for(&r);
         assert!(n.title.starts_with("FORGED · ~feb · "), "{}", n.title);
+        assert!(!n.title.contains("+ forged"), "said twice: {}", n.title);
         // a forgery's sender is escaped like everyone else's: it is the one
         // field of a forged row that nobody signed as themselves
         r.from = "<b>~feb</b>".into();
@@ -569,6 +582,41 @@ mod tests {
         let mut r = row("b", true);
         r.subject = String::new();
         assert_eq!(note_for(&r).title, "~feb · (no subject)");
+    }
+
+    /// One listing row as the ship sends it, through the real parser.
+    fn listed(verdict: &str, forged: bool) -> Row {
+        let body = format!(
+            r#"{{"threads":[{{"id":"0v1","from":"~bus","subject":"hello","snippet":"x",
+                "verdict":"{verdict}","forged":{forged},"unread":true}}]}}"#
+        );
+        serde_json::from_str::<Listing>(&body).unwrap().threads.remove(0)
+    }
+
+    #[test]
+    fn a_verified_sender_is_not_accused_of_a_forgery_beside_it() {
+        // The audit's first assertion, inverted. The row names ~bus because
+        // ~bus's copy verified. The forged copy in the same thread may claim
+        // anyone, so the thread-wide flag trails the subject, as the web
+        // client's `+ forged` does, rather than stamping FORGED on ~bus.
+        let t = note_for(&listed("verified", true)).title;
+        assert_ne!(t, "FORGED · ~bus · hello");
+        assert_eq!(t, "~bus · hello · + forged");
+        // a ship too old to send a verdict still says the thread holds one
+        assert_eq!(note_for(&listed("", true)).title, "~bus · hello · + forged");
+    }
+
+    #[test]
+    fn an_unverified_claim_does_not_look_verified() {
+        // The audit's second assertion, inverted. Anyone can claim a moon or
+        // comet name at %unverified, and the notification said nothing of it.
+        let verified = note_for(&listed("verified", false)).title;
+        let unverified = note_for(&listed("unverified", false)).title;
+        assert_ne!(verified, unverified);
+        assert_eq!(verified, "~bus · hello");
+        assert_eq!(unverified, "unverified · ~bus · hello");
+        // no verdict at all (an older ship) is no mark, not a guess
+        assert_eq!(note_for(&listed("", false)).title, "~bus · hello");
     }
 
     #[test]

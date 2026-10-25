@@ -82,9 +82,11 @@ successful connect otherwise.
 2. On each change it re-reads `/apps/auspex/api/inbox?view=inbox&limit=20`.
    Rows that are `unread` and were **not** unread at the last look are new.
 3. One notification per new thread: title `~from · subject`, body the snippet.
-   A thread holding a forged copy is titled `FORGED · ~from · subject` —
-   first, before the sender it contradicts, because a notification is read
-   left to right and often not to the end.
+   The sender's own verdict comes first when it is not a clean one,
+   `FORGED · ~from · subject` or `unverified · ~from · subject`, because a
+   notification is read left to right and often not to the end. When the
+   thread also holds a forged copy that is not the one named, the title
+   ends `· + forged`, as the web client's inbox row does.
 4. A snapshot is taken before the stream opens, so launching never replays the
    backlog. Read-marks do not bump the beacon (deliberate on the nexus), so
    reading mail in the app cannot produce a notification, and a thread that
