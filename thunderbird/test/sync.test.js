@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   dedupeCopies, referencesFor, folderFor, threadsToFetch, snapshotOf,
-  readStateOps, planThread, flagsFor, flagUpdate, flagOps,
+  readStateOps, planThread, flagsFor, flagUpdate, flagOps, mirrored,
 } from '../lib/sync.js'
 
 const msg = (id, prev, over = {}) => ({
@@ -63,6 +63,20 @@ test('the folder choice', () => {
   //  archived beats authorship, both ways
   assert.equal(folderFor(msg('a', null, { from: '~feb' }), { archived: true }, ours), 'Archived')
   assert.equal(folderFor(msg('a', null, { from: '~wex' }), { archived: true }, ours), 'Archived')
+})
+
+test('only a message in a mirror folder, naming an imported id, is ours', () => {
+  const folders = { Inbox: 'f-in', Sent: 'f-sent', Archived: 'f-arch' }
+  const imported = { '0v1.m': { folder: 'Inbox' } }
+  const at = (folderId, mid) => ({ headerMessageId: mid, folder: folderId && { id: folderId } })
+  assert.equal(mirrored(at('f-in', '0v1.m@auspex.urbit'), folders, imported).id, '0v1.m')
+  assert.equal(mirrored(at('imap-inbox', '0v1.m@auspex.urbit'), folders, imported), null) // copied id elsewhere
+  assert.equal(mirrored(at(null, '0v1.m@auspex.urbit'), folders, imported), null)         // an opened .eml
+  assert.equal(mirrored(at('f-in', '0v9.x@auspex.urbit'), folders, imported), null)       // never imported
+  assert.equal(mirrored(at('f-in', '__proto__@auspex.urbit'), folders, imported), null)   // not a record
+  assert.equal(mirrored(at('f-in', 'phish@example.com'), folders, imported), null)
+  assert.equal(mirrored(at('f-in', '0v1.m@auspex.urbit'), {}, imported), null)            // disconnected
+  assert.equal(mirrored(null, folders, imported), null)                                    // no message
 })
 
 test('only changed threads are fetched', () => {

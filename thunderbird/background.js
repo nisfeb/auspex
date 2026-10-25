@@ -14,7 +14,7 @@ import {
 import { buildMessage, idFromMessageId, notFetchedNote } from './lib/rfc822.js'
 import {
   threadsToFetch, snapshotOf, planThread, readStateOps,
-  flagsFor, flagUpdate, flagOps,
+  flagsFor, flagUpdate, flagOps, mirrored,
 } from './lib/sync.js'
 
 const PARENT = 'Auspex'
@@ -52,6 +52,10 @@ const DEFAULTS = {
 }
 
 const getState = async () => ({ ...DEFAULTS, ...(await browser.storage.local.get()) })
+
+//  The mirror's folders alone, for the per-event checks. One key, not the
+//  whole of storage per message displayed or flag clicked.
+const mirrorFolders = async () => (await browser.storage.local.get('folders')).folders || {}
 
 //  `imported`, HELD IN MEMORY and shared by the sync and the relay.
 //
@@ -267,16 +271,24 @@ async function importOne(item, folders, imported, flags, files) {
 //    restart and nothing at all afterwards. A message the mirror recorded
 //    with no id at all — the duplicate-Message-ID case below — is found
 //    the same way.
+//
+//    IN THE RECORD'S OWN FOLDER, both ways. A Message-ID is the sender's
+//    to choose, and a lookup across the profile could repoint the record
+//    at a message in some other account that names the same id.
+//    Thunderbird keeps one message per Message-ID in a folder, so inside
+//    that folder the name is unambiguous.
 async function headerFor(auspexId, rec) {
+  const want = setup && setup.folders[rec.folder]
+  const inFolder = (h) => !!(h && h.folder && h.folder.id === want)
   if (rec.tbId !== null && rec.tbId !== undefined) {
     try {
       const h = await browser.messages.get(rec.tbId)
-      if (h && idFromMessageId(h.headerMessageId) === auspexId) return h
+      if (inFolder(h) && idFromMessageId(h.headerMessageId) === auspexId) return h
     } catch { /* gone from under that id: look it up by name */ }
   }
   try {
     const found = await browser.messages.query({ headerMessageId: `${auspexId}@${DOMAIN}` })
-    const h = (found.messages || [])[0]
+    const h = (found.messages || []).find(inFolder)
     if (!h) return null
     rec.tbId = h.id
     return h
@@ -685,10 +697,9 @@ const RELAYED = ['read', 'flagged', 'junk']
 browser.messages.onUpdated.addListener(async (message, changed) => {
   const touched = RELAYED.filter((k) => k in changed)
   if (!touched.length) return
-  const id = idFromMessageId(message.headerMessageId)
-  if (!id) return
-  const rec = (await importedMap())[id]
-  if (!rec) return                                    // not ours
+  const ours = mirrored(message, await mirrorFolders(), await importedMap())
+  if (!ours) return                                   // not ours
+  const { id, rec } = ours
   let threadId
   for (const key of touched) {
     if (!!rec[key] === !!message[key]) continue       // already what we recorded
@@ -712,10 +723,13 @@ const refuse = (why) => {
 
 //  `prev` for a reply or a forward: the auspex id of the message the
 //  composer was opened from. A fresh compose has none, and `prev: null` is
-//  what starts a thread.
+//  what starts a thread. So does a reply to a message outside the mirror,
+//  whatever Message-ID it carries.
 async function prevFor(details) {
   if (details.relatedMessageId === undefined || details.relatedMessageId === null) return null
-  return idFromMessageId(await headerOf(details.relatedMessageId, 'message-id'))
+  const h = await browser.messages.get(details.relatedMessageId).catch(() => null)
+  const ours = mirrored(h, await mirrorFolders(), await importedMap())
+  return ours ? ours.id : null
 }
 
 //  HTML → text, and the ceiling is right here. Thunderbird's own composer
@@ -858,8 +872,11 @@ const VERDICT_UI = {
   forged: { label: 'FORGED', title: 'Auspex: FORGED — the signature does not match' },
 }
 
+//  ONLY ON THE MIRROR'S OWN MESSAGES. The header is a claim any email can
+//  make, so a message outside the mirror folders gets no verdict at all.
 browser.messageDisplay.onMessageDisplayed.addListener(async (tab, message) => {
-  const verdict = await headerOf(message.id, 'x-auspex-verdict')
+  const ours = mirrored(message, await mirrorFolders(), await importedMap())
+  const verdict = ours && await headerOf(message.id, 'x-auspex-verdict')
   const ui = VERDICT_UI[verdict]
   const set = browser.messageDisplayAction
   if (!ui) {

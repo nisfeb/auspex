@@ -1,3 +1,5 @@
+import { idFromMessageId } from './rfc822.js'
+
 //  THE DIFF. What to fetch, what to import, where it goes, and what to say
 //  about read state.
 //
@@ -73,6 +75,17 @@ function referencesFor(msg, byId) {
 const folderFor = (msg, entry, ourShip) => {
   if (entry && entry.archived) return 'Archived'
   return msg.from === ourShip ? 'Sent' : 'Inbox'
+}
+
+//  THE MIRROR'S OWN MESSAGE, or null. A message's headers say whatever
+//  its sender typed, and any account in the profile can hold one naming an
+//  auspex id. Its folder is where this extension put it. So both must
+//  hold: a folder of the mirror's, and an id the mirror imported.
+function mirrored(message, folders, imported) {
+  const id = idFromMessageId(message && message.headerMessageId)
+  const inMirror = !!(message && message.folder)
+    && Object.values(folders || {}).includes(message.folder.id)
+  return inMirror && id && Object.hasOwn(imported, id) ? { id, rec: imported[id] } : null
 }
 
 //  THE STAR AND THE FLAME, which are two of the ship's labels.
@@ -223,5 +236,5 @@ function planThread(thread, entry, ourShip, imported) {
 export {
   dedupeCopies, referencesFor, folderFor,
   threadsToFetch, snapshotOf, readStateOps, planThread,
-  flagsFor, flagUpdate, flagOps,
+  flagsFor, flagUpdate, flagOps, mirrored,
 }

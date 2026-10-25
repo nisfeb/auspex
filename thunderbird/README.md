@@ -209,7 +209,9 @@ direction a flag is written locally *only* when it actually differs from
 what is there. That is what stops the two sides echoing a mark back and
 forth forever — `messages.update` fires `messages.onUpdated` whether or not
 it changed anything, so a blind write would put the whole mirror through the
-relay on every change the ship reports.
+relay on every change the ship reports. Only a message in the `Auspex`
+folders that the mirror imported is relayed. Mail elsewhere in the profile
+that copies an auspex `Message-ID` changes nothing on the ship.
 
 ## Sending
 
@@ -236,7 +238,8 @@ each one it skipped and why.
 
 `prev` — which message this one answers, and so where it hangs in the tree —
 is taken from the message the composer was opened from (reply or forward). A
-fresh compose has `prev: null` and starts a thread.
+fresh compose has `prev: null` and starts a thread, and so does a reply to a
+message outside the `Auspex` folders, including one dragged out of them.
 
 **The HTML ceiling.** Auspex carries a signed plain-text body. If you compose
 in HTML, the body is reduced to text by the browser's own HTML parser (its
@@ -260,6 +263,12 @@ unverified message is not an unverified thread. It reaches you three ways —
 the `[FORGED] ` subject prefix (which is what the list pane shows, where
 there is no room for a badge), the `X-Auspex-Verdict` header, and a toolbar
 button on the open message reading `✓`, `○` or `FORGED`.
+
+The button shows a verdict only for a message the mirror imported that is
+still in one of the `Auspex` folders. Any email can carry an
+`X-Auspex-Verdict` header, so everything else, an opened `.eml` included,
+reads "not a mirrored message". So does mirrored mail after a disconnect,
+until you connect again.
 
 ## Ceilings, in one list
 
