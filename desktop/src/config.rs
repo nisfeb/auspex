@@ -77,12 +77,11 @@ pub fn load_at(p: &Path) -> Config {
     c
 }
 
+/// Written 0600 in a 0700 directory, the cookie's own private write. It names
+/// the ship this machine logs in to, which is nobody else's business.
 pub fn save_at(p: &Path, c: &Config) -> Result<(), String> {
-    if let Some(dir) = p.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
     let s = serde_json::to_string_pretty(c).map_err(|e| e.to_string())?;
-    std::fs::write(p, s).map_err(|e| e.to_string())
+    crate::proxy::store_cookie(p, &s)
 }
 
 fn dir(app: &tauri::AppHandle) -> Option<PathBuf> {

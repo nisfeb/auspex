@@ -215,10 +215,11 @@ pub fn login(base: &str, code: &str) -> Result<(String, String), String> {
         // set-cookie produces, and it would otherwise look like a successful
         // login followed by a workspace that 403s on everything.
         .ok_or("the ship accepted the login but set no session cookie")?;
+    // neither message quotes the cookie: it is the session, and the error
+    // goes on screen and into a pasted log
     let cookie = cookie_from_set_cookie(raw)
-        .ok_or_else(|| format!("the login returned a cookie we do not understand: {raw}"))?;
-    let ship = ship_from_cookie(&cookie)
-        .ok_or_else(|| format!("the session cookie names no ship: {cookie}"))?;
+        .ok_or("the login returned a cookie we do not understand")?;
+    let ship = ship_from_cookie(&cookie).ok_or("the session cookie names no ship")?;
     Ok((cookie, ship))
 }
 
