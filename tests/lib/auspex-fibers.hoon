@@ -227,6 +227,41 @@
     (expect-eq !>(`(list *)`~[[/rise (add now:a-world:ft ~m1)]]) !>((timers t)))
   ==
 ::
+::  the road of every grub a run made, or culled, in order
+++  made
+  |=  t=trail:ft
+  ^-  (list road:tarball)
+  (murn darts.t |=(d=dart:nexus ?.(?=([%node * * %make *] d) ~ `road.d)))
+++  culled
+  |=  t=trail:ft
+  ^-  (list road:tarball)
+  (murn darts.t |=(d=dart:nexus ?.(?=([%node * * %cull *] d) ~ `road.d)))
+::
+::  /ui/main lays a request fiber only for a request from eyre, which
+::  the kernel pokes with the default `from`. Another grub's request or
+::  cancel does nothing, and no %eyre-action is relayed for anyone.
+++  test-ui-main-takes-requests-only-from-eyre
+  =/  t0  (run:ft a-world:ft (ui-main ~) !>(~))
+  =/  evil=from:fiber:nexus  [4 [/evil %'main.sig']]
+  =/  req=sage:tarball  [[/ %handle-http-request] !>([`@ta`%r1 ~zod *inbound-request:eyre])]
+  =/  cancel=sage:tarball  [[/ %handle-http-cancel] !>(`@ta`%r1)]
+  =/  relay=sage:tarball  [[/ %eyre-action] !>([%send %r1 %kick ~])]
+  =/  ours  (feed:ft a-world:ft t0 [%poke *from:fiber:nexus req])
+  =/  theirs  (feed:ft a-world:ft t0 [%poke evil req])
+  ;:  weld
+    (expect-eq !>(%wait) !>(end.t0))
+    (expect-eq !>(`(list road:tarball)`~) !>((made theirs)))
+    (expect-eq !>(`(list road:tarball)`~[[%| 0 %& /requests %r1]]) !>((made ours)))
+    (expect-eq !>(%wait) !>(end.theirs))
+    %+  expect-eq  !>(`(list road:tarball)`~)
+    !>  (culled (feed:ft a-world:ft t0 [%poke evil cancel]))
+    %+  expect-eq  !>(`(list road:tarball)`~[[%| 0 %& /requests %r1]])
+    !>  (culled (feed:ft a-world:ft t0 [%poke *from:fiber:nexus cancel]))
+    ::  t0 already holds the bind, the one %eyre-action it sends itself
+    %+  expect-eq  !>((pokes:ft t0 [/ %eyre-action]))
+    !>  (pokes:ft (feed:ft a-world:ft t0 [%poke *from:fiber:nexus relay]) [/ %eyre-action])
+  ==
+::
 ::  a clean start clears any wait an earlier run left, then goes on
 ++  test-a-clean-start-clears-the-old-wait
   =/  t  (run:ft a-world:ft (writer ~) !>(~))

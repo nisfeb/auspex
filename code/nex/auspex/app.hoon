@@ -431,7 +431,7 @@
         ::  of parking the fiber. The approval reload re-runs the bind with
         ::  grants in hand, which is why consent alone brings the UI up.
         ;<  ~  bind:m  (bind-http-self:io [~ /apps/auspex])
-        (http-dispatch:io %auspex)
+        http-loop
       ::  /ui/requests/*: one ephemeral fiber per in-flight HTTP request.
           [[%ui %requests ~] @]
         ;<  ~  bind:m  (rise-wait:io prod "%auspex /ui/requests: failed")
@@ -3185,11 +3185,47 @@
 ::  client that consumes it is the reviewed one and a port that quietly
 ::  changed the contract would be a rewrite wearing a port's name.
 ::
-::  +srv: the HTTP response door. Every response travels up to
-::  /ui/main.sig through it, so the dispatcher can cull the fiber of a
-::  connection the browser already dropped.
+::  +srv: the HTTP response door. A response goes straight to eyre's
+::  server-state grub, never through /ui/main.sig, and the door's road
+::  is a sample http-res:io still takes and does not use. A dropped
+::  connection reaches /ui/main.sig from the kernel as a cancel, and
+::  +http-loop culls that request's fiber.
 ::
 ++  srv  ~(. http-res:io [%| 1 %& ~ %'main.sig'])
+::
+::  +http-loop: /ui/main.sig's request loop. It is the kernel's
+::  http-dispatch:io less what any grub could abuse.
+::
+::    The kernel pokes a handler with no sender of its own, so a request
+::    or a cancel from eyre arrives with the default `from`. Any grub
+::    granted a poke road here arrives with its own, and http-dispatch
+::    took its pokes all the same. One could plant a request grub with
+::    its own `src` and its own authenticated flag, and so pass the
+::    owner gate. One could relay an %eyre-action to eyre as this app.
+::    So this loop takes only the default `from`, reads each payload
+::    under mule, and has no %eyre-action relay. Responses never needed
+::    it (see +srv).
+::
+++  http-loop
+  =/  m  (fiber:fiber:nexus ,~)
+  ^-  form:m
+  |-
+  ;<  [=from:fiber:nexus =sage:tarball]  bind:m  take-poke-from:io
+  ?.  =(*from:fiber:nexus from)  $
+  ?+    name.p.sage  $
+      %handle-http-request
+    =/  got  (mule |.(!<([eyre-id=@ta src=@p req=inbound-request:eyre] q.sage)))
+    ?:  ?=(%| -.got)  $
+    =/  [eyre-id=@ta src=@p req=inbound-request:eyre]  p.got
+    ;<  ~  bind:m  (make:io [%| 0 %& /requests eyre-id] |+[[[/ %http-request] [src req]] ~])
+    $
+  ::
+      %handle-http-cancel
+    =/  got  (mule |.(!<(@ta q.sage)))
+    ?:  ?=(%| -.got)  $
+    ;<  ~  bind:m  (cull:io [%| 0 %& /requests p.got])
+    $
+  ==
 ::
 ::  +bump-beacon: move the beacon so open readers refetch.
 ::
