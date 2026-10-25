@@ -14,7 +14,7 @@ import {
 import { buildMessage, idFromMessageId, notFetchedNote } from './lib/rfc822.js'
 import {
   threadsToFetch, snapshotOf, planThread, readStateOps,
-  flagsFor, flagUpdate, flagOps, mirrored,
+  flagsFor, flagUpdate, flagOps, mirrored, refreshVerdicts,
 } from './lib/sync.js'
 
 const PARENT = 'Auspex'
@@ -47,7 +47,7 @@ const DEFAULTS = {
   lastSync: 0,
   folders: {},              // name → MailFolderId
   snapshot: {},             // threadId → {last, count, archived, labels}
-  imported: {},             // auspex msg id → {tbId, folder, read, flagged, junk}
+  imported: {},             // auspex msg id → {tbId, folder, verdict, read, flagged, junk}
   counts: { messages: 0, threads: 0 },
 }
 
@@ -247,6 +247,7 @@ async function importOne(item, folders, imported, flags, files) {
   imported[msg.id] = {
     tbId: header.id,
     folder: item.folder,
+    verdict: msg.verdict,
     read: !!msg.read,
     flagged: flags.flagged,
     junk: flags.junk,
@@ -369,6 +370,7 @@ async function syncNow() {
         throw e
       }
       remote.push(...(thread.messages || []))
+      refreshVerdicts(thread, imported)
       const entry = byThread.get(id) || thread
       const flags = flagsFor(entry)
       want.set(id, { ...flags, ids: (thread.messages || []).map((m) => m.id) })
@@ -396,7 +398,7 @@ async function syncNow() {
           //  the message IS in the folder — that is what the refusal
           //  says — so find it by name rather than recording a hole.
           const rec = {
-            tbId: null, folder: item.folder,
+            tbId: null, folder: item.folder, verdict: item.msg.verdict,
             read: !!item.msg.read, flagged: flags.flagged, junk: flags.junk,
           }
           await headerFor(item.msg.id, rec)
@@ -797,13 +799,18 @@ async function handleSend(tab, details) {
     ? (details.plainTextBody || '')
     : htmlToText(details.body || '')
 
-  //  NO REPLY TO A FORGERY. The mirror imports the best-verdict copy of an
-  //  id, so a forged one here means EVERY copy the ship holds is forged,
-  //  and the writer will not chain a message onto that: it answers 200 and
-  //  sends nothing. Refused here, while the message is still on screen,
-  //  rather than lost there.
+  //  NO REPLY TO A FORGERY. The verdict is the record's, which is the
+  //  ship's best copy of that id as of the last fetch of its thread, so a
+  //  forged one means no copy the ship held then was genuine. The writer
+  //  will not chain a message onto that, and the send route answers 200
+  //  before the writer refuses, so the message would vanish with nothing
+  //  said. Refused here, while it is still on screen, rather than lost
+  //  there. A record written before 0.1.4 has no verdict, and the header
+  //  it was imported with stands in.
   const prev = await prevFor(details)
-  if (prev && await headerOf(details.relatedMessageId, 'x-auspex-verdict') === 'forged') {
+  const prevVerdict = prev && ((await importedMap())[prev].verdict
+    ?? await headerOf(details.relatedMessageId, 'x-auspex-verdict'))
+  if (prevVerdict === 'forged') {
     return refuse('The message you are replying to or forwarding is forged: no copy '
       + 'of it carries a valid signature, so the ship will not send anything chained '
       + 'to it. Start a new message instead; yours is still here.')
@@ -874,9 +881,11 @@ const VERDICT_UI = {
 
 //  ONLY ON THE MIRROR'S OWN MESSAGES. The header is a claim any email can
 //  make, so a message outside the mirror folders gets no verdict at all.
+//  The record's verdict is the ship's current one. The header stands in
+//  for a record written before 0.1.4.
 browser.messageDisplay.onMessageDisplayed.addListener(async (tab, message) => {
   const ours = mirrored(message, await mirrorFolders(), await importedMap())
-  const verdict = ours && await headerOf(message.id, 'x-auspex-verdict')
+  const verdict = ours && (ours.rec.verdict ?? await headerOf(message.id, 'x-auspex-verdict'))
   const ui = VERDICT_UI[verdict]
   const set = browser.messageDisplayAction
   if (!ui) {

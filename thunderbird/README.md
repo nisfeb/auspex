@@ -196,8 +196,10 @@ because they are *not* invented here — they are ordinary labels the web
 client shows and edits like any other.
 
 **Folders.** A message goes to exactly one folder, chosen once at import and
-never moved: archived thread → `Archived`, otherwise written by you → `Sent`,
-otherwise → `Inbox`. Archiving a thread in the web client later does *not*
+never moved: archived thread → `Archived`, otherwise written by you and
+verified → `Sent`, otherwise → `Inbox`. A copy that only claims you as its
+author, unverified or forged, goes to `Inbox`. Mail an earlier version filed
+in `Sent` that way stays where it is. Archiving a thread in the web client later does *not*
 move the messages already mirrored — the alternative is either moving mail
 behind your back or holding two copies of it.
 
@@ -227,9 +229,9 @@ Refused, with the reason in a notification:
   and a Bcc would silently become a visible one. Put everyone in To, or send
   twice;
 - more than 16 attachments, or one over 16 MiB (16777216 bytes; the file is named);
-- a reply to (or forward of) a message whose verdict is **forged**: every
-  copy the ship holds is forged, and the ship will not chain a message onto
-  one;
+- a reply to (or forward of) a message whose verdict is **forged**. No copy
+  of it the ship held at the last sync of its thread was genuine, and the
+  ship will not chain a message onto it;
 - being signed out.
 
 A send the ship accepts but does not carry to every recipient (a peer's
@@ -269,6 +271,12 @@ still in one of the `Auspex` folders. Any email can carry an
 `X-Auspex-Verdict` header, so everything else, an opened `.eml` included,
 reads "not a mirrored message". So does mirrored mail after a disconnect,
 until you connect again.
+
+A verdict can change after import. When a genuine copy of a message
+mirrored as forged reaches the ship later, the next sync of its thread moves
+the button and the reply check to the new verdict. The `[FORGED] ` prefix
+and the `X-Auspex-Verdict` header stay as imported, because a message is
+imported once.
 
 ## Ceilings, in one list
 

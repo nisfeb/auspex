@@ -72,9 +72,13 @@ function referencesFor(msg, byId) {
 //
 //    Archived beats authorship: a thread the owner archived is archived
 //    whoever wrote it, which is the same order the nexus's own views use.
+//
+//    AUTHORSHIP IS A VERDICT, not a claimed `from`. Every send this ship
+//    makes is stored verified, and any ship can deliver a copy that names
+//    us as its author. Only the first kind is ours to file in Sent.
 const folderFor = (msg, entry, ourShip) => {
   if (entry && entry.archived) return 'Archived'
-  return msg.from === ourShip ? 'Sent' : 'Inbox'
+  return msg.from === ourShip && msg.verdict === 'verified' ? 'Sent' : 'Inbox'
 }
 
 //  THE MIRROR'S OWN MESSAGE, or null. A message's headers say whatever
@@ -86,6 +90,19 @@ function mirrored(message, folders, imported) {
   const inMirror = !!(message && message.folder)
     && Object.values(folders || {}).includes(message.folder.id)
   return inMirror && id && Object.hasOwn(imported, id) ? { id, rec: imported[id] } : null
+}
+
+//  THE SHIP'S CURRENT VERDICT, onto records already imported. A message
+//  is imported once, so a genuine copy that reaches the ship after a
+//  forged one would otherwise never reach the mirror. This is the best
+//  copy's verdict as the ship holds it now, so it can fall as well as
+//  rise, and that is the same question the writer asks of a reply's prev.
+//  ponytail: the .eml's Subject and X-Auspex-Verdict stay as imported.
+//  Rewriting them means a re-import, which needs messagesDelete.
+function refreshVerdicts(thread, imported) {
+  for (const { msg } of dedupeCopies(thread.messages || [])) {
+    if (Object.hasOwn(imported, msg.id)) imported[msg.id].verdict = msg.verdict
+  }
 }
 
 //  THE STAR AND THE FLAME, which are two of the ship's labels.
@@ -236,5 +253,5 @@ function planThread(thread, entry, ourShip, imported) {
 export {
   dedupeCopies, referencesFor, folderFor,
   threadsToFetch, snapshotOf, readStateOps, planThread,
-  flagsFor, flagUpdate, flagOps, mirrored,
+  flagsFor, flagUpdate, flagOps, mirrored, refreshVerdicts,
 }
