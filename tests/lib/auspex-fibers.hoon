@@ -165,6 +165,20 @@
     (expect-eq !>(~) !>((pokes:ft t1 [/ %auspex-action])))
   ==
 ::
+::  a poke whose mark failed validation restarts the writer with the
+::  kernel's "hydrate failed" error. The kernel already dropped that
+::  poke, so it is not a crash. No timer is set, and the writer goes on
+::  to its start-up work.
+++  test-a-poke-that-failed-hydrate-is-not-a-crash
+  =/  bad  `prod:fiber:nexus``~[leaf+"hydrate failed" leaf+"no marc"]
+  =/  t0  (run:ft a-world:ft (writer bad) !>(~))
+  =/  t1  (answer-peek:ft a-world:ft t0 [%none ~])
+  ;:  weld
+    (expect !>(!=(%fail end.t1)))
+    (expect-eq !>(`(list *)`~) !>((timers t1)))
+    (expect !>((gth (lent darts.t1) (lent darts.t0))))
+  ==
+::
 ::  a poke while it waits is refused (its sender sees a nack), never
 ::  held and never taken as the restart signal and dropped
 ++  test-a-waiting-writer-refuses-a-poke

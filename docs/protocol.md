@@ -1466,6 +1466,13 @@ Observed behaviour of the reference receiver, and the constraint behind it:
   implementation whose transport treats a payload-validation failure as a
   process failure MUST NOT type its wire mark.
 
+  Delivery is granted by road, not by mark, so a peer can still poke the writer
+  with some other mark that fails validation. That restart is not a crash. The
+  kernel has already nacked and dropped the poke, and its error opens with
+  `hydrate failed`. The reference prints one console line and goes on, with no
+  crash wait. Counting it as a crash would let any ship hold the writer in its
+  longest wait for one poke an hour.
+
 - **The writer MUST NOT crash.** Every rejection is a branch that returns
   cleanly, never an assertion. The one arm that can crash on hostile input,
   `+thread-key`, is called under `mule`.

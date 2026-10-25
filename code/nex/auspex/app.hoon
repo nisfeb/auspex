@@ -2920,7 +2920,16 @@
     (pure:m ~)
   ::  what a refused poke fails with; the restart that follows is not a crash
   =/  note=tang  ~[leaf+"{msg}: waiting after a crash; the poke was refused"]
-  =/  crash=?  !=(note u.prod)
+  ::  A poke whose mark the kernel could not validate is not a crash
+  ::  either. Grubbery fails the fiber in +hydrate, before any code here
+  ::  runs, and has already nacked and dropped that poke by the time it
+  ::  restarts us, so nothing is replayed. /main.sig takes pokes from any
+  ::  ship, and counting these would let a stranger hold the writer in
+  ::  its 60-minute wait for one malformed noun an hour. Should the
+  ::  kernel rename the tank, this falls back to the backoff.
+  =/  dropped=?  =(~[leaf+"hydrate failed"] (scag 1 u.prod))
+  =/  crash=?  &(!dropped !=(note u.prod))
+  %-  ?.(dropped same (slog leaf+"{msg}: a poke failed its mark and was dropped" ~))
   ;<  clock=(unit @da)  bind:m  soft-now
   ?~  clock
     %-  ?.(crash same (slog [leaf+"{msg}: no clock (weir?); waiting for a poke" u.prod]))
