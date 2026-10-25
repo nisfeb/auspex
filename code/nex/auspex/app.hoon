@@ -1678,8 +1678,10 @@
   ::  fold this poke's verdicts into the stored ones BEFORE pruning:
   ::  +prune needs a verdict for every message in `new`, including ones
   ::  stored by an earlier poke that this one did not carry.
+  ::  and the copies already held win a tie inside one verdict, so junk
+  ::  with larger sigs cannot shed a keyless signer's genuine copy.
   =/  vs2  (freeze:uc held vs)
-  =/  pruned=chain:uc  (prune:uc new vs2 max-copies:uc)
+  =/  pruned=chain:uc  (prune:uc new vs2 ~(key by held) max-copies:uc)
   ;<  ~  bind:m  (ensure-thread root rid)
   ;<  wrote=?  bind:m  (sync-slots root rid ss (want-slots pruned vs2))
   ;<  fresh=?  bind:m  (mark-direct root rid)

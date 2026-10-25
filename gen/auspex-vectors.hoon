@@ -314,7 +314,7 @@
 =/  merged=chain:ac  (merge:ac ~ c-pair)
 =/  vs-pair=(map [msg-id:ac @ux] verdict:ac)
   (malt (verify-chain:ac (keys-of ~[[zod 1]]) merged))
-=/  pruned=chain:ac  (prune:ac merged vs-pair 1)
+=/  pruned=chain:ac  (prune:ac merged vs-pair ~ 1)
 ::  F. a message no key answers for. Signed genuinely by ~zod, and
 ::  `life` names 99: a verifier holding ~zod's key at life 1 has nothing
 ::  for [~zod 99], so the verdict is %unverified and NEVER %forged.

@@ -316,7 +316,7 @@
   =/  a   (forge ~sampel-palnet (sy ~[~palnet-sampel]) 'hi' 'one' ~2026.1.1 ~)
   =/  cs  ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4) a]
   =/  vs  (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
-  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs 4)))
+  %+  expect-eq  !>(4)  !>((lent (prune:auspex cs vs ~ 4)))
 ::
 ::  a %verified copy is never shed, however many forged copies crowd it and
 ::  whatever order they arrive in. Both orders, same reason as above.
@@ -326,8 +326,8 @@
   =/  cs2  ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)]
   =/  vs   (malt (verify-chain:auspex (all-keys ~[~sampel-palnet]) cs))
   ;:  weld
-    (expect-eq !>(~[a]) !>((prune:auspex cs vs 1)))
-    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs vs ~ 1)))
+    (expect-eq !>(~[a]) !>((prune:auspex cs2 vs ~ 1)))
   ==
 ::
 ::  the fill bucket ranks %unverified above %forged. This is not a nicety:
@@ -356,10 +356,10 @@
   ;:  weld
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1)] vs ~ 1)
     %+  expect-eq
       !>  ~[a(sig 0x1)]
-      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 1)
+      !>  (prune:auspex ~[a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs ~ 1)
   ==
 ::
 ::  the whole ranking in one shot: %verified, then %unverified, then
@@ -378,8 +378,8 @@
         [[i sig.a] %verified]
     ==
   ::  both input orders, for the +add:ja reversal reason given above
-  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs 2)
-  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs 2)
+  =/  one  (prune:auspex ~[a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x1) a] vs ~ 2)
+  =/  two  (prune:auspex ~[a a(sig 0x1) a(sig 0x2) a(sig 0x3) a(sig 0x4)] vs ~ 2)
   ;:  weld
     (expect-eq !>(2) !>((lent one)))
     (expect !>((lien one |=(m=msg:sur =(sig.m sig.a)))))
@@ -387,6 +387,31 @@
     (expect-eq !>(2) !>((lent two)))
     (expect !>((lien two |=(m=msg:sur =(sig.m sig.a)))))
     (expect !>((lien two |=(m=msg:sur =(sig.m 0x1)))))
+  ==
+::
+::  A COPY ALREADY HELD OUTLASTS JUNK OF ITS OWN RANK. With no key for
+::  the signer every copy is %unverified, and a courier who knows the
+::  message pokes four copies whose sigs are larger than the genuine
+::  one. Sig order would keep the junk, so the held copy wins the tie
+::  instead, in both input orders. It never beats a better verdict.
+++  test-prune-keeps-the-held-copy-of-a-keyless-signer
+  =/  a     (um ~nec 'one' ~)
+  =/  i     (id:auspex unsigned.a)
+  =/  real  a(sig 0x1)
+  =/  all=chain:sur  ~[real a(sig 0x2) a(sig 0x3) a(sig 0x4) a(sig 0x5)]
+  =/  vs=(map [msg-id:sur @ux] verdict:sur)
+    (malt (turn all |=(m=msg:sur [[i sig.m] %unverified])))
+  =/  old  (sy ~[[i sig.real]])
+  =/  has  |=(c=chain:sur (lien c |=(m=msg:sur =(sig.m sig.real))))
+  ;:  weld
+    ::  the attack is real. With nothing held, the genuine copy goes.
+    (expect !>(!(has (prune:auspex (merge:auspex ~ all) vs ~ 4))))
+    (expect !>((has (prune:auspex (merge:auspex ~ all) vs old 4))))
+    (expect !>((has (prune:auspex (flop all) vs old 4))))
+    (expect-eq !>(4) !>((lent (prune:auspex all vs old 4))))
+    ::  a held %forged copy still loses to a new %unverified one
+    %+  expect-eq  !>(~[a(sig 0x2)])
+    !>  (prune:auspex ~[real a(sig 0x2)] (~(put by vs) [i sig.real] %forged) old 1)
   ==
 ::
 ::  a thread's identity comes from CONTENT, never from the order of the

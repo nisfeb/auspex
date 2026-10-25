@@ -1122,11 +1122,24 @@
 ::    re-ships the whole accumulated chain, that corrupted chain is then
 ::    what gets forwarded onward.
 ::
-::    Pure: `vs` and `max-copies` arrive as arguments so this is testable
-::    without an agent.
+::    WITHIN A RANK, A COPY ALREADY HELD COMES FIRST. The rank alone
+::    does not save that moon's message. Its copies are all %unverified,
+::    so they used to compete on sig order, and the sig is an atom any
+::    courier picks. Four copies with larger sigs shed the genuine one.
+::    Nothing about a signature is out of an attacker's reach, but
+::    incumbency is. `old` is the [id sig] of every copy the thread held
+::    before this poke, and it orders copies inside a rank. It never
+::    lifts a copy above a better verdict.
+::
+::    Pure: `vs`, `old` and `max-copies` arrive as arguments so this is
+::    testable without an agent.
 ::
 ++  prune
-  |=  [c=chain vs=(map [msg-id @ux] verdict) max-copies=@ud]
+  |=  $:  c=chain
+          vs=(map [msg-id @ux] verdict)
+          old=(set [msg-id @ux])
+          max-copies=@ud
+      ==
   ^-  chain
   =/  groups=(jar msg-id msg)
     %+  roll  c
@@ -1139,10 +1152,14 @@
     ^-  chain
     ?:  (lte (lent ms) max-copies)  ms
     =/  vd    |=(m=msg (~(gut by vs) [i sig.m] %unverified))
-    =/  good  (skim ms |=(m=msg =(%verified (vd m))))
-    =/  fill
-      %+  weld  (skim ms |=(m=msg =(%unverified (vd m))))
-                (skim ms |=(m=msg =(%forged (vd m))))
+    =/  held  |=(m=msg (~(has in old) [i sig.m]))
+    ::  one rank, the copies already held first
+    =/  rank
+      |=  v=verdict
+      =/  r  (skim ms |=(m=msg =(v (vd m))))
+      (weld (skim r held) (skip r held))
+    =/  good  (rank %verified)
+    =/  fill  (weld (rank %unverified) (rank %forged))
     =/  keep  (scag max-copies good)
     (weld keep (scag (sub max-copies (lent keep)) fill))
   ::  re-sort: grouping by id destroyed +merge's ordering

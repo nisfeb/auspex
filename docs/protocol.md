@@ -482,7 +482,9 @@ every other ship**.
 This is why `%unverified` outranks `%forged` in `+prune`
 ([§4.5](#45-prune)): an unranked fill would let junk copies evict the one
 genuine copy of a moon's message, leaving a user holding only forgeries of a
-message that was never forged.
+message that was never forged. The rank alone is not enough, because every copy
+of a moon's message reads `%unverified` and junk shares its rank. So within a
+rank `+prune` keeps the copies a receiver already held ahead of new ones.
 
 Signatures are already in the chain the day either fix lands. Comets are
 self-signing addresses, so a comet's signature is verifiable with no lookup at
@@ -697,7 +699,11 @@ two ships merging the same messages produce the same list.
 
 ```hoon
 ++  prune
-  |=  [c=chain vs=(map [msg-id @ux] verdict) max-copies=@ud]
+  |=  $:  c=chain
+          vs=(map [msg-id @ux] verdict)
+          old=(set [msg-id @ux])
+          max-copies=@ud
+      ==
   ^-  chain
 ```
 
@@ -719,6 +725,13 @@ never by rejecting.
 - The `%unverified` rank is not a nicety: every moon and comet message is
   `%unverified` in version 1, so an unranked fill lets `max-copies` junk copies
   evict the one genuine copy of a moon's message.
+- **Within one rank, a copy already held comes first.** `old` is the `[id sig]`
+  of every copy the thread held before this delivery. Copies of one id share a
+  rank whenever the receiver holds no key for their signer, and a signature is
+  an atom any courier chooses, so ordering a rank by `sig` would let junk with
+  larger signatures shed the genuine copy. A receiver MUST NOT shed a held copy
+  while a new copy of the same rank remains. This orders copies inside a rank
+  and MUST NOT lift a copy above a better verdict.
 - A verdict missing from the map defaults to `%unverified`
   (`(~(gut by vs) [i sig.m] %unverified)`).
 
@@ -861,7 +874,8 @@ Nothing is written before every signature in the incoming chain has a verdict.
 8. **Freeze verdicts, then prune.** `+freeze` folds this poke's verdicts into
    the stored ones **before** pruning, because `+prune` needs a verdict for
    every message in the merged chain, including ones stored by an earlier poke
-   that this one did not carry. Then `+prune` at `max-copies`.
+   that this one did not carry. Then `+prune` at `max-copies`, with the
+   `[id sig]` of the copies the thread already held as `old`.
 
 9. **Store.** Write the pruned chain, one grub per `[id sig]`, each carrying its
    own verdict. A redelivery that writes nothing MUST be reported as no change.
@@ -1657,7 +1671,7 @@ alongside the main suite:
 
 Every test in `grubbery-overlay/tests/lib/auspex-chain.hoon` is a rule this
 specification states. The table below pairs them so the spec and the suite can
-be diffed; **122 tests**, the discovery ones among them
+be diffed; **123 tests**, the discovery ones among them
 ([§6.3](#63-discovery)).
 
 | rule | test |
@@ -1687,6 +1701,7 @@ be diffed; **122 tests**, the discovery ones among them
 | `+prune` never sheds a `%verified` copy, in either input order. | `test-prune-never-sheds-a-verified` |
 | The fill bucket ranks `%unverified` above `%forged`, in either input order. | `test-prune-prefers-unverified-over-forged` |
 | The whole ranking: `%verified`, then `%unverified`, then `%forged`. | `test-prune-ranks-verified-then-unverified-then-forged` |
+| Within a rank a copy already held outlasts new ones, so junk with larger sigs cannot shed a keyless signer's genuine copy, and a held copy never beats a better verdict. | `test-prune-keeps-the-held-copy-of-a-keyless-signer` |
 | Thread identity comes from content, never from the order of the supplied list. | `test-thread-key-from-content-not-list-order` |
 | Thread identity never derives from `sent`; a backdated reply still resolves to its root. | `test-thread-key-ignores-sent` |
 | An established thread's id is immutable; a new `prev=~` message cannot migrate it. | `test-thread-key-established-thread-is-immutable` |
