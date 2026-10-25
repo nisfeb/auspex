@@ -14,7 +14,7 @@ the wire on auspex's behalf.
 
 ```
 npm test          # the four pure libs
-npm run build     # → dist/auspex-thunderbird-0.1.1.zip
+npm run build     # → dist/auspex-thunderbird-0.1.4.zip
 ```
 
 Then in Thunderbird: **Add-ons and Themes → the gear → Install Add-on From
