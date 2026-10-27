@@ -387,8 +387,17 @@ unverified thread.
 
 ### 3.3 Obtaining a key
 
-The public key for `[who life]` comes from jael's **`%puby`** scry, the unitized
-public-key read:
+The key a verifier needs is **public PKI data**: the networking public key of
+`who` at `life`, as a cric `pass`, together with its crypto suite. For a galaxy,
+star or planet it is the key Azimuth holds for that point at that life. For a
+moon and a comet it is what [§3.5](#35-moons-and-comets) says. Nothing about the
+key is private to Arvo, so an implementation that does not run Arvo reads the
+same data from its own source. A mesa library that talks to Azimuth directly is
+one such source.
+
+The reference reads it from jael, and the rest of this section describes that
+read. The public key for `[who life]` comes from jael's **`%puby`** scry, the
+unitized public-key read:
 
 ```
 .^((unit [crypto-suite=@ud =pass]) %j /=puby=/(scot %p who)/(scot %ud life))
@@ -414,7 +423,11 @@ Live transcript, `~martyr-sanryg`, a real planet, 2026-09-08:
 ```
 
 crypto-suite `1` is suite `%b`, the same suite the fake-ship derivation uses, so
-`com:nu:cric:crypto` handles real and fake keys identically.
+`com:nu:cric:crypto` handles real and fake keys identically. crypto-suite `2` is
+suite `%c`, the confidential suite a Groundwire comet's key is minted in
+([§3.5](#35-moons-and-comets)). Its pass carries a Schnorr tweak, and
+`com:nu:cric:crypto` in kelvin 408's zuse verifies against the tweaked key, so
+the same `+verify-with` serves both suites with no branch of its own.
 
 **Jael answers scries only at exactly `now`.** Its scry arm opens with
 `?.  &(=(lot [%$ %da now]) =([~ ~] lyc))  ~`, so a request at any other date
@@ -472,12 +485,37 @@ that ship's Azimuth snapshot at one instant. It never travels ([§7](#7-local-st
 
 ### 3.5 Moons and comets
 
-Third parties cannot verify moons or comets under this version, and that is a
-property of Azimuth rather than a gap in the format. `%earl` hands out a moon's
-key only to that moon's parent; `%deed` handles comets only when the comet asks
-about itself. So mail from `~mister-botter-dozzod-nisfeb` verifies for `~nisfeb`
-and for nobody else, and **an entire class of sender reads `%unverified` on
-every other ship**.
+Third parties cannot verify moons under this version, and that is a property of
+Azimuth rather than a gap in the format. `%earl` hands out a moon's key only to
+that moon's parent. So mail from `~mister-botter-dozzod-nisfeb` verifies for
+`~nisfeb` and for nobody else, and **an entire class of sender reads
+`%unverified` on every other ship**.
+
+Comets come in two kinds, told apart by the crypto suite of their pass.
+
+- **A vanilla comet** (suite `%b`) is a self-signed key whose `@p` is the hash
+  of that key. Anyone can check that the key belongs to the name. Nothing makes
+  the name scarce: a script mines one in seconds, with vere or with a mesa
+  library that never runs Arvo. A stock jael never holds a comet's key, so
+  `%puby` answers `~` and every vanilla comet's mail reads `%unverified`.
+- **A Groundwire comet** (suite `%c`) is minted with its PKI domain and its
+  spawn satpoint tweaked into the key, so its name commits to the domain. It is
+  attested by a custody log on Bitcoin. A ship running the Groundwire kernel
+  verifies that log against its own view of the chain, through the domain's
+  verifier agent, and then holds the comet's point in jael like any other
+  point. There `%puby` answers, and the comet's mail verifies like a planet's
+  (gwbtc/urbit, `pkg/arvo/doc/spec/confidential-comets.md`). A stock ship runs
+  no verifier, so on a stock ship a Groundwire comet's mail reads `%unverified`
+  too.
+
+The verdict follows the key lookup and nothing else. In particular a verifier
+**MUST NOT** derive `%verified` for a comet from the comet's own pass. That a
+key hashes to its name proves the sender controls the key. It does not prove
+the name cost anything or that any chain attests it, and a suite-`%c` pass
+proves no more than a suite-`%b` one until a verifier has checked its custody
+log. A verdict a script could mint for free would make `%verified` mean nothing
+for comets and would hand every minted comet its own quota
+([§4.6](#46-the-caps)).
 
 This is why `%unverified` outranks `%forged` in `+prune`
 ([§4.5](#45-prune)): an unranked fill would let junk copies evict the one
@@ -486,10 +524,11 @@ message that was never forged. The rank alone is not enough, because every copy
 of a moon's message reads `%unverified` and junk shares its rank. So within a
 rank `+prune` keeps the copies a receiver already held ahead of new ones.
 
-Signatures are already in the chain the day either fix lands. Comets are
-self-signing addresses, so a comet's signature is verifiable with no lookup at
-all given the code to derive it; moons need their parent's attestation to travel
-inside the chain. Neither changes the format; both are strictly additive.
+Signatures are already in the chain the day a fix for moons lands: a moon needs
+its parent's attestation to travel inside the chain, which is strictly additive
+to the format. Comets need no fix here. A Groundwire comet already verifies
+wherever a verifier for its domain runs, and a vanilla comet is meant to stay
+`%unverified`.
 
 ### 3.6 Fake ships
 
@@ -1143,13 +1182,17 @@ holding the bytes.
 
 ## 6. Transport and discovery
 
-### 6.1 The transport is the grubbery nexus
+### 6.1 The transport on the wire
 
-**The transport is a poke of mark `%auspex-chain` to the recipient's Auspex
-nexus writer, through grubbery's `%grub-cmd` surface.** A conformant peer runs
-grubbery with the Auspex nexus installed. There is no second endpoint and none
-is planned: the nexus *is* the protocol's endpoint, and an implementation
-conforms by speaking to it.
+**Delivery is a gall poke of mark `%grub-cmd` to the recipient's `%grubbery`
+agent, addressed to the Auspex writer, carrying the chain under mark
+`%auspex-chain`.** Everything a peer exchanges is ordinary mesa: that poke, a
+gall subscription for its outcome, and two remote-scry reads
+([§5.4](#54-fetching-bytes), [§6.3](#63-discovery)). The names in it are
+grubbery's, because the reference receiver is a grubbery nexus, and senders
+address those names literally. There is no second endpoint and none is
+planned. [§6.2](#62-what-a-conformant-peer-serves) lists what a receiver must
+answer.
 
 A sender delivers a chain by **poking the recipient's auspex writer** with mark
 `%auspex-chain` and the chain as the payload noun.
@@ -1217,24 +1260,52 @@ It may send mail (a `%send` action) and nothing else. A poke that names a ship
 on the transport MUST NOT act, even when that ship is the receiver's own. So a
 dojo or `%grub-cmd` poke can deliver a chain but cannot act.
 
-### 6.2 A conformant peer runs the nexus
+### 6.2 What a conformant peer serves
 
-Stated plainly and without hedging: **a conformant peer runs grubbery with the
-Auspex nexus.** That is the endpoint, that is the whole transport, and there is
-no alternative one to discover, negotiate or fall back to. A ship not running
-the nexus cannot receive auspex mail.
+**A conformant receiver is whatever answers on the wire as below.** The
+reference is a grubbery nexus on an Arvo ship. A peer built on another mesa
+implementation, one that never runs Arvo, conforms exactly when it answers the
+same way. It must present itself as agent `%grubbery`, because senders and
+readers name that agent literally. A ship that answers none of this cannot
+receive auspex mail, and there is no alternative endpoint to discover,
+negotiate or fall back to.
+
+A receiver MUST:
+
+1. accept, on agent `%grubbery`, a poke of mark `%grub-cmd` whose noun is
+   `[chan [%poke /apps/'auspex.auspex_app' %'main.sig' %auspex-chain chain]]`,
+   and give the outcome as a `%grub-fact` carrying `[%ack err=(unit tang)]` on
+   the sender's subscription `/client/<chan>` ([§6.1](#61-the-transport-on-the-wire));
+2. serve its `$proto` in its remote-scry namespace at
+   `/g/x/<case>/grubbery/''/1/auspex/protocol`, page mark `%auspex-proto`
+   ([§6.3](#63-discovery));
+3. serve every attachment it offers at
+   `/g/x/1/grubbery/''/1/auspex/blob/<hash>`, page mark `%auspex-blob`
+   ([§5.4](#54-fetching-bytes));
+4. apply [§4.8](#48-the-receivers-order-of-operations) to every chain it
+   accepts.
+
+A sender needs only the poke, the subscription and the read of the recipient's
+`/protocol`.
 
 An implementation therefore conforms at two levels, and they are independent:
 
 - **The format** — [§2](#2-the-message) through [§5](#5-attachments). Anything
   that can build the nine-field noun, hash it, sign it and verify it is
   format-conformant, and the vectors in [§8](#8-conformance) are the test.
-- **The transport** — this section. A sender must be able to issue the
-  `%grub-cmd` poke above; a receiver must be a grubbery nexus that accepts
-  `%auspex-chain` at its writer.
+- **The transport** — this section and [§6.1](#61-the-transport-on-the-wire).
+  A sender must be able to issue the `%grub-cmd` poke. A receiver must answer
+  the four points above.
 
 Nothing in the format depends on grubbery: no grubbery type crosses the wire,
 and the payload is a bare `(list msg)`. The chain is the chain.
+
+**Identities, not software.** A conformant peer may run any software, but it is
+still an Urbit identity: a point, a moon or a comet with a networking key. The
+protocol has no field and no verdict for a sender outside Urbit's PKI, by
+design ([§3.5](#35-moons-and-comets)). A gateway that carries mail from another
+system signs as itself. The foreign sender is content, and recipients see the
+gateway's own verdict.
 
 ### 6.3 Discovery
 
@@ -1940,7 +2011,7 @@ is unambiguous in two places: `mar-gub/auspex-chain.hoon` sits at the top level
 of `gub/mar` (its own header says "The delivery blot has to be
 `[/ %auspex-chain]` or a foreign ship cannot address it at all"), and `+apply`
 dispatches on `?:  =([/ %auspex-chain] p.sage)`. An implementation that pokes
-`[/auspex %chain]` will not be received. See [§6.1](#61-the-transport-is-the-grubbery-nexus).
+`[/auspex %chain]` will not be received. See [§6.1](#61-the-transport-on-the-wire).
 
 **A.7 — Nothing else disagreed.** The nine fields, the digest tag, the three
 verdicts and the missing-key rule, `[id sig]` merging, `+prune`'s shed-and-rank,
